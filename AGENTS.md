@@ -1012,7 +1012,16 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   collection is deduplicated by `analysis_semantic_id` — identity over the
   computation *and* the population, so one check reachable from six frames of a
   join family is one entry while the same spec asked of different rows stays
-  several. Then one `analysis.reading` turn may **keep** an entry under a better
+  several. A second fold merges what identity keeps apart only by route: the
+  sweep fingerprints each nomination's flagged rows (hashed, never kept or
+  supplied to a model), and entries that are one computation flagging the same
+  rows from another root or join key become one entry with `also_on`, after the
+  register re-runs them and compares the rows on every shared column — so the
+  approver and the requester stay two even where every limit coincides, and a
+  single-table check on its own table never merges with the same check read
+  through another table's rows. Comparisons are identified with their columns in
+  name order, so `A ≥ B` and `B ≤ A` are one analysis. On procurement this took
+  the floor from 117 entries to 17. Then one `analysis.reading` turn may **keep** an entry under a better
   name, **add** an assertion no single measurement reaches, **decline** one with
   a written reason, or name what the data cannot answer at all — and silence is
   keeping. A nomination the turn never mentions is committed anyway, under the

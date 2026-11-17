@@ -17,9 +17,10 @@ possible. It is built in two passes:
   ``analysis_semantic_id`` — which is identity over the *computation and the
   population*, so an invoice-only check reachable from six invoice-rooted
   frames is one entry, while an approval-matrix reconciliation asked over the
-  staff master and over invoices keyed to their approver stays two. On the
-  procurement engagement that is 116 flagged nominations resolving to 44
-  distinct computations.
+  staff master and over invoices keyed to their approver stays two. A second
+  fold then merges what identity keeps apart only because of the route: the
+  same check flagging the same rows from several roots or join keys is one
+  finding (see :func:`build_floor`).
 
 * **The reading turn may keep, add, or decline — and silence is keeping.**
   This is the ``analysis.reading`` contract in one line. A nomination the turn
@@ -43,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import joins as join_diagnostics, probes
-from .analysis_identity import analysis_semantic_id
+from .analysis_identity import analysis_semantic_id, spec_scope
 from .. import loader
 from ..workspaces import Workspace, WorkspaceError, write_json_atomic
 
@@ -328,10 +329,14 @@ def build_floor(
     masters over two populations. They are folded on ``(root, column)``, and
     the survivor is the one that ruled out the most masters — the strongest
     statement of the same finding, rather than the first-sorted one.
+
+    A third collapse then merges across routes, by what was flagged (see
+    :func:`_merge_routes`).
     """
     grouped: dict[
         object, list[tuple[tuple[int, str], Mapping[str, object], str, str]]
     ] = {}
+    resolved: dict[str, tuple[Mapping[str, str], str, Mapping[str, str]]] = {}
     for frame in sorted(swept):
         try:
             origins = join_diagnostics.column_origins(workspace, frame)
@@ -339,6 +344,7 @@ def build_floor(
             route = join_diagnostics.frame_route(workspace, frame)
         except Exception:  # noqa: BLE001 - a frame that will not resolve is skipped
             continue
+        resolved[frame] = (origins, root, route)
         for item in swept[frame] or ():
             if int(item.get("flagged") or 0) <= 0:
                 continue
@@ -375,13 +381,14 @@ def build_floor(
             "analytics",
             frame,
             {"test": str(item.get("test")), "params": dict(item.get("params") or {})},
-            join_diagnostics.column_origins(workspace, frame),
+            resolved[frame][0],
             root,
-            join_diagnostics.frame_route(workspace, frame),
+            resolved[frame][2],
         )
         entries.append(
             (probes.rank(item), semantic, item, frame, root, also_on)
         )
+    entries = _merge_routes(workspace, entries, resolved)
     # The sweep's own ranking, applied across the engagement rather than within
     # one frame: what does not reconcile, then what does not hold, then what
     # repeats, then what does not look like the rest.
@@ -404,6 +411,129 @@ def build_floor(
         )
         for index, (_, semantic, item, frame, root, also_on) in enumerate(entries, 1)
     )
+
+
+def _merge_routes(
+    workspace: Workspace,
+    entries: Sequence[tuple],
+    resolved: Mapping[str, tuple[Mapping[str, str], str, Mapping[str, str]]],
+) -> list[tuple]:
+    """Fold entries that are one check flagging the same rows by another route.
+
+    Identity keeps the root and the key each joined table was reached by,
+    because a route can change which rows a check sees: a job-title
+    reconciliation over the staff master, over invoices keyed to their
+    approver, and over invoices keyed to their verifier answers 48 of 52, 110
+    of 112 and 118 of 118. But where tables match one to one, every route pairs
+    the same records, and identity alone saved one date ordering fourteen times
+    on the procurement engagement — every copy flagging the same five invoices.
+
+    So the routes are compared by their outcome. Two entries merge when they
+    are the same computation over the same base columns (identity without the
+    root and route) *and* the sweep's fingerprint says they flagged the same
+    rows. Routes that answer differently keep different fingerprints and stay
+    apart, which is the job-title case. A single-table check on its own table
+    never merges with the same check read through another table's rows. An entry without a fingerprint — a
+    probe cached before fingerprints existed, or rows that could not be named —
+    merges with nothing.
+
+    The survivor is measured on a frame rooted in a table the check reads, so
+    its population is that check's own rows rather than a parent's; then the
+    narrowest frame, then the name. Every other frame is kept in ``also_on``.
+    """
+    groups: dict[object, list[tuple]] = {}
+    for entry in entries:
+        _, semantic, item, frame, root, _ = entry
+        digest = str(item.get("flagged_digest") or "")
+        if not digest or _unreferenced(item) or frame not in resolved:
+            groups[("entry", semantic, frame)] = [entry]
+            continue
+        spec = {"test": str(item.get("test")), "params": dict(item.get("params") or {})}
+        computation = analysis_semantic_id(
+            "analytics", frame, spec, resolved[frame][0]
+        )
+        # A check of one table asked of that table's own rows is a statement
+        # about the table; asked through another table's rows it is a statement
+        # about the records that use it. One inactive vendor in the vendor
+        # master is the master doing its job, and an invoice paid to it is the
+        # finding — the fingerprints can match whenever one invoice did, and a
+        # reading turn that declines the first must not take the second with it.
+        reads = spec_scope(spec, resolved[frame][0])
+        own = reads == {root}
+        groups.setdefault(("rows", computation, digest, own), []).append(entry)
+
+    classes: list[list[tuple]] = []
+    for members in groups.values():
+        classes.extend(_confirmed(workspace, members) if len(members) > 1 else [members])
+
+    merged: list[tuple] = []
+    for members in classes:
+        if len(members) == 1:
+            merged.append(members[0])
+            continue
+
+        def preference(entry: tuple) -> tuple:
+            _, _, item, frame, root, _ = entry
+            spec = {"test": str(item.get("test")), "params": dict(item.get("params") or {})}
+            reads = spec_scope(spec, resolved[frame][0])
+            return (0 if root in reads else 1, _narrowness(workspace, frame))
+
+        members = sorted(members, key=preference)
+        rank, semantic, item, frame, root, also_on = members[0]
+        others: list[str] = list(also_on)
+        for _, _, _, other, _, other_also in members[1:]:
+            others.extend([other, *other_also])
+        merged.append(
+            (
+                rank,
+                semantic,
+                item,
+                frame,
+                root,
+                tuple(dict.fromkeys(name for name in others if name != frame)),
+            )
+        )
+    return merged
+
+
+def _confirmed(workspace: Workspace, members: Sequence[tuple]) -> list[list[tuple]]:
+    """Split a fingerprint group into the routes that truly flag the same rows.
+
+    Each member's check is run again and its flagged rows compared with a
+    class's first member on every column the two frames share, by origin name.
+    A member whose rows cannot be read again stands alone: an unconfirmed merge
+    would delete a measurement, and a missed one only repeats it.
+    """
+    classes: list[tuple[tuple | None, list[tuple]]] = []
+    for entry in members:
+        _, _, item, frame, _, _ = entry
+        rows = probes.flagged_rows(
+            workspace, frame, str(item.get("test")), dict(item.get("params") or {})
+        )
+        for held, group in classes:
+            if rows is not None and held is not None and _same_rows(held, rows):
+                group.append(entry)
+                break
+        else:
+            classes.append((rows, [entry]))
+    return [group for _, group in classes]
+
+
+def _same_rows(left: tuple, right: tuple) -> bool:
+    (left_index, left_rows), (right_index, right_rows) = left, right
+    if len(left_rows) != len(right_rows):
+        return False
+    shared = sorted(set(left_index) & set(right_index))
+    if not shared:
+        return False
+
+    def projected(index: Mapping[str, int], rows: Sequence[tuple]) -> list[str]:
+        return sorted(
+            json.dumps([row[index[label]] for label in shared], default=str)
+            for row in rows
+        )
+
+    return projected(left_index, left_rows) == projected(right_index, right_rows)
 
 
 def default_register(floor: Iterable[Nomination]) -> Register:

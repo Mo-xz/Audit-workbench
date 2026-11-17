@@ -101,6 +101,158 @@ def test_one_computation_over_one_population_is_one_entry(swept_workspace):
         assert recomputed.startswith("analysis:")
 
 
+def test_a_comparison_read_from_the_other_side_is_the_same_analysis():
+    """``A ≥ B`` and ``B ≤ A`` breach on the same rows; one identity, not two."""
+    origins = {"INVOICE_DATE": "invoice_data", "GRN_DATE": "po_data"}
+
+    def identity(column: str, op: str, other: str) -> str:
+        spec = {
+            "test": "compare_columns",
+            "params": {"column": column, "op": op, "other": other, "compare_as": "date"},
+        }
+        return analysis_semantic_id("analytics", "frame", spec, origins)
+
+    assert identity("INVOICE_DATE", "ge", "GRN_DATE") == identity(
+        "GRN_DATE", "le", "INVOICE_DATE"
+    )
+    assert identity("INVOICE_DATE", "gt", "GRN_DATE") == identity(
+        "GRN_DATE", "lt", "INVOICE_DATE"
+    )
+    # Mirroring is not loosening: the opposite ordering is a different check.
+    assert identity("INVOICE_DATE", "ge", "GRN_DATE") != identity(
+        "INVOICE_DATE", "le", "GRN_DATE"
+    )
+
+
+def _joined_workspace(name: str, tables: dict[str, pl.DataFrame], joins: list[dict]):
+    ws = workspaces.create_workspace(name)
+    for table, frame in tables.items():
+        ws.add_table(f"{table}.csv", frame.write_csv().encode())
+    for join in joins:
+        ws.add_join({"how": "left", **join})
+    return workspaces.load_workspace(ws.id)
+
+
+def _swept(ws: workspaces.Workspace) -> dict[str, list[dict]]:
+    return {name: probes.probe_frame(ws, name) for name in ws.table_names()}
+
+
+def _entries(floor, *columns: str) -> list[register.Nomination]:
+    return [item for item in floor if set(columns) <= set(item.columns)]
+
+
+def test_one_finding_reached_by_several_routes_is_one_entry():
+    """The procurement case: one-to-one tables make every route the same rows.
+
+    An invoice reaches its order by the PO number and by the receipt number,
+    and an order reaches its invoice back the other way. Identity keeps all
+    three apart — two keys, two roots — though each flags the same three late
+    receipts. The sweep's row fingerprint is what says so, even though each
+    route drops a different key column from the frame it builds.
+    """
+    rows = range(30)
+    ws = _joined_workspace(
+        "Routes",
+        {
+            "invoices": pl.DataFrame(
+                {
+                    "invoice_id": [f"INV{n:03d}" for n in rows],
+                    "po_link": [f"PO{n:03d}" for n in rows],
+                    "grn_link": [f"GRN{n:03d}" for n in rows],
+                    "currency": ["PKR" if n % 3 else "USD" for n in rows],
+                    "invoice_date": [f"2024-03-{n % 28 + 1:02d}" for n in rows],
+                }
+            ),
+            "orders": pl.DataFrame(
+                {
+                    "po_number": [f"PO{n:03d}" for n in rows],
+                    "grn_id": [f"GRN{n:03d}" for n in rows],
+                    "buyer": [f"B{n % 4}" for n in rows],
+                    # Received on the invoice date, except three received after.
+                    "grn_date": [
+                        f"2024-04-{n % 28 + 1:02d}" if n in (4, 14, 24) else f"2024-03-{n % 28 + 1:02d}"
+                        for n in rows
+                    ],
+                }
+            ),
+        },
+        [
+            {"name": "inv_by_po", "left": "invoices", "right": "orders",
+             "left_on": ["po_link"], "right_on": ["po_number"]},
+            {"name": "inv_by_grn", "left": "invoices", "right": "orders",
+             "left_on": ["grn_link"], "right_on": ["grn_id"]},
+            {"name": "orders_inv", "left": "orders", "right": "invoices",
+             "left_on": ["po_number"], "right_on": ["po_link"]},
+        ],
+    )
+    swept = _swept(ws)
+    floor = register.build_floor(ws, swept)
+    entries = _entries(floor, "grn_date", "invoice_date")
+    assert len(entries) == 1, [(item.frame, item.params) for item in entries]
+    entry = entries[0]
+    assert entry.flagged == 3
+    assert {entry.frame, *entry.also_on} == {"inv_by_po", "inv_by_grn", "orders_inv"}
+
+    # Without the fingerprint identity alone keeps the routes apart, which is
+    # what this test would otherwise pass vacuously on.
+    unprinted = {
+        frame: [{k: v for k, v in item.items() if k != "flagged_digest"} for item in items]
+        for frame, items in swept.items()
+    }
+    assert len(_entries(register.build_floor(ws, unprinted), "grn_date", "invoice_date")) > 1
+
+
+def test_routes_that_flag_different_rows_stay_apart():
+    """The job-title case: a route that changes the rows changes the answer.
+
+    One amount against one limit column, reached through the approver and
+    through the verifier. Both flag three invoices, but not the same three, so
+    they are two questions and the merge must not fold them.
+    """
+    rows = range(30)
+    ws = _joined_workspace(
+        "Roles",
+        {
+            "invoices": pl.DataFrame(
+                {
+                    "invoice_id": [f"INV{n:03d}" for n in rows],
+                    "approver_id": [f"S{n % 10:02d}" for n in rows],
+                    "verifier_id": [f"S{(n + 3) % 10:02d}" for n in rows],
+                    "amount": [500.0 + n for n in rows],
+                }
+            ),
+            "staff": pl.DataFrame(
+                {
+                    "staff_id": [f"S{n:02d}" for n in range(10)],
+                    "grade": [f"G{n % 3}" for n in range(10)],
+                    "limit_amount": [100.0 if n == 0 else 1000.0 + n for n in range(10)],
+                }
+            ),
+        },
+        [
+            {"name": "inv_approver", "left": "invoices", "right": "staff",
+             "left_on": ["approver_id"], "right_on": ["staff_id"]},
+            {"name": "inv_verifier", "left": "invoices", "right": "staff",
+             "left_on": ["verifier_id"], "right_on": ["staff_id"]},
+        ],
+    )
+    floor = register.build_floor(ws, _swept(ws))
+    entries = _entries(floor, "amount", "limit_amount")
+    assert {item.frame for item in entries} == {"inv_approver", "inv_verifier"}
+    assert all(item.flagged == 3 and not item.also_on for item in entries)
+
+
+def test_the_row_fingerprint_never_reaches_model_context(swept_workspace):
+    """The merge key is a hash of row values, so no prompt carries it."""
+    from app.agent.context import adapters
+
+    found = probes.probe_frame(swept_workspace, "invoices")
+    assert any(item.get("flagged_digest") for item in found)
+    assert not any("_flagged_rows" in item for item in found)
+    stripped = adapters._without_digest(found[0])
+    assert "flagged_digest" not in stripped
+
+
 def test_a_reference_that_resolves_nowhere_is_one_finding_not_four():
     """The sweep names *a* master when every candidate fails identically.
 

@@ -27,6 +27,7 @@ this application stays — in the evidence sidecar the execution writes.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
@@ -202,6 +203,10 @@ def _nomination(
         "reading": reading,
         "verdict_text": result.verdict_text,
         **({"evidence": evidence} if evidence else {}),
+        # The flagged rows themselves, for :func:`probe_frame` to fingerprint
+        # and drop. They never leave this module: a nomination is cached on the
+        # run and handed to model context, and neither may carry rows.
+        **({_FLAGGED_ROWS: result.detail} if flagged else {}),
     }
 
 
@@ -484,7 +489,9 @@ def comparison_nominations(
     """
     candidates: list[tuple] = []
     for mode, class_name in (("date", "date"), ("number", "numeric")):
-        columns = classes.get(class_name) or []
+        # Pairs in name order, so a pair reads the same way round on every frame
+        # whatever column order the frame's root gave it.
+        columns = sorted(classes.get(class_name) or [])
         for index, left in enumerate(columns):
             for right in columns[index + 1 :]:
                 if mode == "number" and not _comparable_magnitude(df, left, right):
@@ -611,7 +618,7 @@ def equality_nominations(
     so a reader who disagrees with the reading can see the other one.
     """
     nominations: list[dict] = []
-    columns = classes.get("keylike") or []
+    columns = sorted(classes.get("keylike") or [])
     domains = {column: _domain(df, column) for column in columns}
     for index, left in enumerate(columns):
         for right in columns[index + 1 :]:
@@ -1042,6 +1049,165 @@ def format_nominations(
     return nominations
 
 
+# ------------------------------------------------------------ flagged rows
+_FLAGGED_ROWS = "_flagged_rows"
+
+
+def _spec_columns(value: object, columns: frozenset[str]) -> set[str]:
+    """Every frame column a spec's parameters name, whatever the test."""
+    if isinstance(value, Mapping):
+        return set().union(*(_spec_columns(item, columns) for item in value.values()))
+    if isinstance(value, (list, tuple)):
+        return set().union(*(_spec_columns(item, columns) for item in value))
+    return {value} if isinstance(value, str) and value in columns else set()
+
+
+def _origin_column(column: str, base_columns: Iterable[str]) -> str | None:
+    """The base-table name of a frame column, undoing a collision suffix."""
+    names = set(base_columns)
+    if column in names:
+        return column
+    stems = [name for name in names if column.startswith(name + "_")]
+    return max(stems, key=len) if stems else None
+
+
+def _unique_columns(df: pl.DataFrame) -> frozenset[str]:
+    """Columns whose non-null values are all distinct: the ones a join can key on."""
+    unique = set()
+    for column in df.columns:
+        series = df[column].drop_nulls()
+        if series.len() and series.n_unique() == series.len():
+            unique.add(column)
+    return frozenset(unique)
+
+
+class _RowFingerprint:
+    """Which rows a nomination flagged, in terms that survive the join route.
+
+    The same check swept on fourteen frames flags the same five invoices on all
+    fourteen, but no frame-level fact says so: each frame has a different root,
+    a different key into each joined table, and a different row count. The
+    flagged rows are the one thing they share, and the register needs that to
+    see fourteen measurements as one finding.
+
+    A row is named by the values it holds in the tables the check reads — the
+    columns the check names, and every *non-key* column of the base tables they
+    come from — under each column's base-table name. Both halves are needed.
+    The read columns alone cannot tell rows apart where they hold a flag: eight
+    claims in ``Review required`` and a different eight read the same. All of a
+    source table's columns cannot be used either, because a join keeps its right
+    key under the left key's name, so which key columns a frame still has
+    depends on the route that built it. Key columns are left out for that
+    reason, and the remaining columns are present, with the same values, on
+    every frame that reaches the table. Values are hashed, never kept.
+    """
+
+    def __init__(self, workspace: Workspace, frame: str, df: pl.DataFrame) -> None:
+        self.workspace = workspace
+        self.columns = frozenset(df.columns)
+        try:
+            self.origins = join_diagnostics.column_origins(workspace, frame)
+        except Exception:  # noqa: BLE001 - provenance unknown: read columns only
+            self.origins = {}
+        self._tables: dict[str, tuple[tuple[str, ...], frozenset[str]] | None] = {}
+
+    def _table(self, name: str) -> tuple[tuple[str, ...], frozenset[str]] | None:
+        if name not in self._tables:
+            try:
+                base = self.workspace.get_frame(name)
+                self._tables[name] = (tuple(base.columns), _unique_columns(base))
+            except Exception:  # noqa: BLE001 - an unloadable table adds no columns
+                self._tables[name] = None
+        return self._tables[name]
+
+    def _origin(self, column: str) -> tuple[str, str, frozenset[str]] | None:
+        table = self.origins.get(column)
+        shape = self._table(table) if table else None
+        origin = _origin_column(column, shape[0]) if shape else None
+        return (table, origin, shape[1]) if origin else None
+
+    def projection(self, params: Mapping[str, object]) -> dict[str, str]:
+        """Frame column -> stable label, for the columns that identify a row."""
+        read = _spec_columns(params, self.columns)
+        labels: dict[str, str] = {}
+        sources: set[str] = set()
+        for column in read:
+            found = self._origin(column)
+            labels[column] = f"{found[0]}.{found[1]}" if found else column
+            if found:
+                sources.add(found[0])
+        for column in self.columns - read:
+            found = self._origin(column)
+            if found and found[0] in sources and found[1] not in found[2]:
+                labels[column] = f"{found[0]}.{found[1]}"
+        return labels
+
+    def digest(self, nomination: Mapping[str, object]) -> str | None:
+        rows = nomination.get(_FLAGGED_ROWS)
+        if not isinstance(rows, pl.DataFrame) or not rows.height:
+            return None
+        labels = {
+            column: label
+            for column, label in self.projection(nomination.get("params") or {}).items()
+            if column in rows.columns
+        }
+        if not labels:
+            return None
+        ordered = sorted(labels, key=lambda column: labels[column])
+        hashed = sorted(
+            hashlib.sha1(
+                json.dumps(list(row), default=str, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+            for row in rows.select(ordered).rows()
+        )
+        payload = json.dumps([[labels[c] for c in ordered], hashed], separators=(",", ":"))
+        return "rows:" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+    def labels(self) -> dict[str, str]:
+        """Frame column -> ``table.column`` for every column whose origin is known."""
+        labelled: dict[str, str] = {}
+        taken: set[str] = set()
+        for column in sorted(self.columns):
+            found = self._origin(column)
+            label = f"{found[0]}.{found[1]}" if found else None
+            if label and label not in taken:
+                labelled[column] = label
+                taken.add(label)
+        return labelled
+
+
+def flagged_rows(
+    workspace: Workspace, frame: str, test: str, params: Mapping[str, object]
+) -> tuple[dict[str, int], list[tuple]] | None:
+    """One check's flagged rows on one frame, every column under its origin name.
+
+    The register's confirmation for a merge the fingerprint proposes. The
+    fingerprint only sees the tables a check reads, so two routes through
+    *different* rows of a table the check does not read — a limit reached
+    through the approver and through the requester, where every title happens
+    to carry the same limit — fingerprint alike. Compared here on every column
+    both frames hold, the approver and the requester differ, while two keys
+    into the same order do not. Read locally and compared locally; nothing
+    here is kept.
+    """
+    try:
+        df = workspace.get_frame(frame)
+        source = dataclasses.replace(workspace.frame_source(), origin=frame)
+    except Exception:  # noqa: BLE001 - a frame that will not load confirms nothing
+        return None
+    result = _run(df, test, dict(params), source)
+    if result is None or result.detail is None:
+        return None
+    labels = {
+        column: label
+        for column, label in _RowFingerprint(workspace, frame, df).labels().items()
+        if column in result.detail.columns
+    }
+    ordered = sorted(labels, key=lambda column: labels[column])
+    index = {labels[column]: position for position, column in enumerate(ordered)}
+    return index, result.detail.select(ordered).rows()
+
+
 # --------------------------------------------------------------------- sweep
 def rank(nomination: Mapping[str, object]) -> tuple:
     """Most worth a turn first.
@@ -1121,6 +1287,13 @@ def probe_frame(workspace: Workspace, frame: str) -> list[dict]:
         kept.append(nomination)
         if len(kept) >= MAX_NOMINATIONS_PER_FRAME:
             break
+    fingerprint = _RowFingerprint(workspace, frame, df)
+    for nomination in kept:
+        digest = fingerprint.digest(nomination)
+        if digest:
+            nomination["flagged_digest"] = digest
+    for nomination in nominations:
+        nomination.pop(_FLAGGED_ROWS, None)
     return kept
 
 

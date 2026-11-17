@@ -63,6 +63,49 @@ def _resolve_provenance(
     return value, set()
 
 
+#: Each comparison operator, read from the other column's side.
+_MIRRORED_OPS: dict[str, str] = {
+    "lt": "gt",
+    "gt": "lt",
+    "le": "ge",
+    "ge": "le",
+    "eq": "eq",
+    "ne": "ne",
+}
+
+
+def _canonical_comparison(spec: object) -> object:
+    """Write a column comparison with its columns in name order.
+
+    ``INVOICE_DATE ge GRN_DATE`` and ``GRN_DATE le INVOICE_DATE`` breach on the
+    same rows. Which way round a spec arrives depends on nothing but the order
+    in which a frame happens to list its columns, and that order follows the
+    frame's root — so before this, one ordering swept from an invoice-rooted and
+    a requisition-rooted frame was two identities, and on the procurement
+    engagement every date and amount ordering was saved twice over for that
+    reason alone. The names compared are the resolved ``table.column`` ones
+    where provenance is known, so the order is the same on every frame.
+    """
+    if not isinstance(spec, Mapping) or spec.get("test") != "compare_columns":
+        return spec
+    params = spec.get("params")
+    if not isinstance(params, Mapping):
+        return spec
+    column, other = params.get("column"), params.get("other")
+    op = str(params.get("op") or "")
+    if (
+        not isinstance(column, str)
+        or not isinstance(other, str)
+        or op not in _MIRRORED_OPS
+        or column <= other
+    ):
+        return spec
+    return {
+        **spec,
+        "params": {**params, "column": other, "other": column, "op": _MIRRORED_OPS[op]},
+    }
+
+
 def spec_scope(spec: Mapping[str, Any], origins: Mapping[str, str]) -> set[str]:
     """The base tables a spec's columns actually come from."""
     _, tables = _resolve_provenance(_plain_json(spec), origins)
@@ -130,6 +173,10 @@ def analysis_semantic_id(
     A spec reading only its frame's root keeps the identity it always had: the
     root is the same table on every frame in the family, and an invoice-only
     date lag really is one analysis however many masters were joined on.
+
+    A column comparison is identified with its columns in name order (see
+    :func:`_canonical_comparison`), so ``A ≥ B`` and ``B ≤ A`` are one analysis.
+    A comparison already written in that order keeps the identity it had.
     """
     resolved_spec: object = _plain_json(spec)
     scope = str(table)
@@ -149,7 +196,7 @@ def analysis_semantic_id(
                     [scope, str(root), *(f"{name}@{key}" for name, key in reached)]
                 )
     canonical = json.dumps(
-        {"kind": str(kind), "table": scope, "spec": resolved_spec},
+        {"kind": str(kind), "table": scope, "spec": _canonical_comparison(resolved_spec)},
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

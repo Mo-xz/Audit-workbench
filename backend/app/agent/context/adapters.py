@@ -3473,6 +3473,10 @@ def analysis_reading_scope(
     )
 
 
+def _without_digest(item: Mapping[str, object]) -> dict[str, object]:
+    return {key: value for key, value in item.items() if key != "flagged_digest"}
+
+
 def analysis_definition_scope(
     workspace: Workspace,
     target: str,
@@ -3626,13 +3630,15 @@ def analysis_definition_scope(
             # and finding out afterwards which of them had anything in them.
             # Counts and column names only — the rows behind a nomination stay
             # in the evidence sidecar its execution writes.
+            # ``flagged_digest`` is the register's merge key, a hash of row
+            # values; it says nothing a model can use, so it is not supplied.
             ANALYSIS_PROBE_SOURCE_ID: tuple(
                 ContextCandidate(
                     source_ref=(
                         f"probe:{item.get('frame')}:{item.get('test')}:{index}"
                     ),
-                    source=dict(item),
-                    representations={"table_aggregate": dict(item)},
+                    source=_without_digest(item),
+                    representations={"table_aggregate": _without_digest(item)},
                     metadata={
                         "table": str(item.get("frame") or ""),
                         "family": str(item.get("family") or ""),

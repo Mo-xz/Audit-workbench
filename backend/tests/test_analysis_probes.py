@@ -276,8 +276,9 @@ def test_two_roles_over_one_domain_are_expected_to_differ():
     nomination = _find(
         probes.probe_frame(ws, "invoice_data"),
         "compare_columns",
-        column="VERIFIED_BY_ID",
-        other="SUPERVISOR_APPROVAL_ID",
+        # Pairs are swept in name order, so they read the same on every frame.
+        column="SUPERVISOR_APPROVAL_ID",
+        other="VERIFIED_BY_ID",
     )
     assert nomination is not None
     assert nomination["params"]["op"] == "ne"
@@ -304,8 +305,8 @@ def test_one_attribute_stated_twice_is_expected_to_agree():
     nomination = _find(
         probes.probe_frame(ws, "requisitions"),
         "compare_columns",
-        column="REQUESTER_DEPARTMENT",
-        other="DEPARTMENT",
+        column="DEPARTMENT",
+        other="REQUESTER_DEPARTMENT",
     )
     assert nomination is not None
     assert nomination["params"]["op"] == "eq"

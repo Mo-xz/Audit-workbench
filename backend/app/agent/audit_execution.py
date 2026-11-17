@@ -1135,7 +1135,11 @@ class AuditWorkflowExecution(ActionExecution):
         """
         self.ws = subject
         document_ids = self._curated_document_ids()
-        scope = planning_context_scope(self.ws, document_ids=document_ids)
+        scope = planning_context_scope(
+            self.ws,
+            document_ids=document_ids,
+            instruction=workflow_scope(self.run).get("instruction"),
+        )
         supplied = scope.candidates.get("planning_documents") or ()
         task = self.add_task(
             "context",
@@ -1843,7 +1847,13 @@ class AuditWorkflowExecution(ActionExecution):
 
         def context_provider():
             return resolve_context(
-                self, self.context_resolver, capability, unit, cycle_scope(self.ws)
+                self,
+                self.context_resolver,
+                capability,
+                unit,
+                cycle_scope(
+                    self.ws, instruction=workflow_scope(self.run).get("instruction")
+                ),
             )
 
         def approval_provider(proposal):

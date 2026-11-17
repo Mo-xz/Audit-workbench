@@ -1056,6 +1056,7 @@ class AnalysisWorkflowExecution(BaseRunner):
                         for frame in (frames if self.legacy_inputs else table_scope.tables)
                         for domain in probes.value_domains(self.input_workspace(), frame)
                     ],
+                    instruction=workflow_scope(self.run).get("instruction"),
                 ),
             )
 
@@ -1521,7 +1522,9 @@ class AnalysisWorkflowExecution(BaseRunner):
                 self.ws,
                 capability,
                 unit,
-                analysis_summary_scope(self.ws),
+                analysis_summary_scope(
+                    self.ws, instruction=workflow_scope(self.run).get("instruction")
+                ),
             )
 
         def approval_provider(proposal):

@@ -1101,6 +1101,50 @@ def skipped(run: dict) -> list[dict]:
     return result
 
 
+def run_instruction(run: dict) -> str:
+    """The auditor's instruction a workflow run carried, or empty."""
+
+    scope = (run.get("workflow") or {}).get("scope") or {}
+    return str(scope.get("instruction") or "").strip()
+
+
+def instruction_account(run: dict) -> str:
+    """Where the auditor's instruction went, said once at the close.
+
+    An instruction that reached no step used to vanish without a word: the run
+    reported success and the auditor took the request as honoured (B6). The
+    consumers are read from the manifests, so this states what each turn was
+    actually shown rather than what it was meant to be.
+    """
+
+    if not run_instruction(run):
+        return ""
+    stages = (run.get("workflow") or {}).get("stages") or []
+    titles = {
+        str(stage.get("capability") or ""): str(stage.get("title") or "")
+        for stage in stages
+    }
+    consumers = [str(value) for value in run.get("instruction_consumers") or []]
+    if consumers:
+        named = [titles.get(value) or humanize(value) for value in consumers]
+        return f"Your instructions were given to: {_joined(named, 'and')}."
+    if not any(stage.get("units") for stage in stages):
+        return (
+            "Your instructions reached no step: everything this asked for was "
+            "already in place, so nothing was redone. Ask for a revision, or ask "
+            "to regenerate it, to apply them."
+        )
+    ran = [
+        str(stage.get("title") or humanize(stage.get("capability")))
+        for stage in stages
+        if stage.get("units")
+    ]
+    return (
+        "Your instructions reached no step: none of the steps that ran "
+        f"({_joined(ran, 'and')}) takes instructions."
+    )
+
+
 def closing_text(run: dict, status: str | None = None) -> str:
     """The agent's closing turn: what happened, what is open, what is next.
 
@@ -1195,6 +1239,10 @@ def closing_text(run: dict, status: str | None = None) -> str:
                 f"{_count(len(reviewing), 'item is', 'items are')} waiting on your review:"
             )
             lines.extend(f"- {item['message']}" for item in reviewing)
+
+    account = instruction_account(run)
+    if account:
+        lines.append(account)
 
     next_outcomes = list((run.get("workflow") or {}).get("next_outcomes") or [])
     if (

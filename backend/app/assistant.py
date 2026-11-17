@@ -511,7 +511,9 @@ class Commander:
     """
 
     catalog: tuple[dict, ...]
-    launch_command: Callable[[str], dict]
+    # ``launch_command(command_id)`` or ``launch_command(command_id, carried)``,
+    # where ``carried`` quotes earlier requirements the message continues.
+    launch_command: Callable[..., dict]
     # The hand-off to the steering loop, and the only way this turn reaches
     # anything a registered command does not already cover. Optional so a
     # caller that has not opted into it gets the single mutating tool.
@@ -552,6 +554,18 @@ def _command_schemas(commander: Commander | None) -> list[dict]:
                             "type": "string",
                             "enum": [item["id"] for item in commander.catalog],
                             "description": "Which registered workflow to start.",
+                        },
+                        "carried_requirements": {
+                            "type": "string",
+                            "description": (
+                                "Only when the auditor's message continues an "
+                                "earlier request in this conversation (\"carry "
+                                "on\", \"as I asked\"): the specific requirements "
+                                "from those earlier messages, quoted in the "
+                                "auditor's own words. The run is given the "
+                                "auditor's message verbatim; this carries what "
+                                "it refers back to. Leave it out otherwise."
+                            ),
                         },
                     },
                     "required": ["command_id"],
@@ -742,6 +756,10 @@ class _Session:
                 for artifact in (run.get("artifacts") or [])[:40]
             ],
             "open_items": narration.blockers(run),
+            # Where the auditor's own words went, read from the manifests. A
+            # request reported as honoured when it reached no step is how B6
+            # stayed invisible.
+            "instruction": narration.instruction_account(run) or None,
             "closing_message": closing[:4_000],
             "error": run.get("error"),
             "warnings": [str(value)[:1_000] for value in (run.get("warnings") or [])[-10:]],
@@ -1158,7 +1176,12 @@ class _Session:
             raise WorkspaceError(
                 f"Unknown command '{command_id}'. Available: {', '.join(sorted(known))}."
             )
-        self.started_run = self.commander.launch_command(command_id)
+        carried = str(args.get("carried_requirements") or "").strip()
+        self.started_run = (
+            self.commander.launch_command(command_id, carried)
+            if carried
+            else self.commander.launch_command(command_id)
+        )
         return dict(self.started_run), None
 
     def take_action(self, args: dict):
@@ -1202,7 +1225,7 @@ Rules:
 - Use tools for claims about current workspace state; never guess from the \
 wording of the question.
 - Use get_audit_progress for audit status, remaining work, blockers, and next \
-tasks. Use get_latest_run for what a prior run did or why it stopped.
+tasks. Use get_latest_run for what a prior run did or why it stopped. When a run carried the auditor's instructions, say where they went by quoting its `instruction` field; never say a request was applied that it does not name.
 - inspect_audit_artifacts surveys one area (planning, RCM, fieldwork, \
 findings, report, analysis); list_artifacts and get_artifact read one artifact \
 in full by typed ref, and are the only way to reach a data test, a document \

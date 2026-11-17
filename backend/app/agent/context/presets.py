@@ -676,9 +676,20 @@ PRESETS.register(
                     ),
                     budget=ContextBudget(max_items=8, max_characters=40_000),
                 ),
+                # What the auditor asked for, when a person asked for something.
+                # Optional: absent on every run the workflow schedules itself.
+                ContextSource(
+                    id="instruction",
+                    source_type="instructions",
+                    required=False,
+                    selector=ContextSelector(selector_id="instructions.current"),
+                    representations=(ContextRepresentation("auditor_instruction"),),
+                    budget=ContextBudget(max_items=1, max_characters=2_000),
+                ),
             ),
-            budget=ContextBudget(max_items=9, max_characters=50_000),
+            budget=ContextBudget(max_items=10, max_characters=52_000),
             privacy=ContextPrivacy(
+                allow_auditor_instruction=True,
                 allow_planning_context=True,
                 allow_document_text=True,
             ),
@@ -1217,8 +1228,18 @@ PRESETS.register(
                     representations=(ContextRepresentation("table_metadata"),),
                     budget=ContextBudget(max_items=24, max_characters=16_000),
                 ),
+                # What the auditor asked for, when a person asked for something.
+                # Optional: absent on every run the workflow schedules itself.
+                ContextSource(
+                    id="instruction",
+                    source_type="instructions",
+                    required=False,
+                    selector=ContextSelector(selector_id="instructions.current"),
+                    representations=(ContextRepresentation("auditor_instruction"),),
+                    budget=ContextBudget(max_items=1, max_characters=2_000),
+                ),
             ),
-            budget=ContextBudget(max_items=26, max_characters=86_000),
+            budget=ContextBudget(max_items=27, max_characters=88_000),
             # Names and shapes only. No document text, no profile, no row: this
             # stage runs *before* the evidence read, and a cycle that needed any
             # of them would put the extraction pass back in front of the matrix,
@@ -1228,6 +1249,7 @@ PRESETS.register(
             # travels as ``current_artifact`` under that permission. No document
             # source is declared, so no evidence text can reach this turn.
             privacy=ContextPrivacy(
+                allow_auditor_instruction=True,
                 allow_planning_context=True,
                 allow_document_text=True,
                 allow_table_metadata=True,
@@ -1836,14 +1858,25 @@ PRESETS.register(
                     representations=(ContextRepresentation("current_artifact"),),
                     budget=ContextBudget(max_items=1, max_characters=20_000),
                 ),
+                # What the auditor asked for, when a person asked for something.
+                # Optional: absent on every run the workflow schedules itself.
+                ContextSource(
+                    id="instruction",
+                    source_type="instructions",
+                    required=False,
+                    selector=ContextSelector(selector_id="instructions.current"),
+                    representations=(ContextRepresentation("auditor_instruction"),),
+                    budget=ContextBudget(max_items=1, max_characters=2_000),
+                ),
             ),
-            budget=ContextBudget(max_items=577, max_characters=180_000),
+            budget=ContextBudget(max_items=578, max_characters=182_000),
             # The same class as ``analysis.definitions`` and no wider. Breadth
             # here is across frames, not down into rows: twenty column
             # inventories disclose what one column inventory discloses, twenty
             # times. ``allow_table_rows`` remains denied and ``table_rows``
             # remains structurally rejected at the resolver boundary.
             privacy=ContextPrivacy(
+                allow_auditor_instruction=True,
                 allow_document_text=True,
                 allow_table_metadata=True,
                 allow_table_profiles=True,
@@ -2118,9 +2151,20 @@ PRESETS.register(
                     representations=(ContextRepresentation("planning_context"),),
                     budget=ContextBudget(max_items=1, max_characters=8_000),
                 ),
+                # What the auditor asked for, when a person asked for something.
+                # Optional: absent on every run the workflow schedules itself.
+                ContextSource(
+                    id="instruction",
+                    source_type="instructions",
+                    required=False,
+                    selector=ContextSelector(selector_id="instructions.current"),
+                    representations=(ContextRepresentation("auditor_instruction"),),
+                    budget=ContextBudget(max_items=1, max_characters=2_000),
+                ),
             ),
-            budget=ContextBudget(max_items=250, max_characters=170_000),
+            budget=ContextBudget(max_items=251, max_characters=172_000),
             privacy=ContextPrivacy(
+                allow_auditor_instruction=True,
                 allow_planning_context=True,
                 allow_table_metadata=True,
                 allow_table_profiles=True,

@@ -2,6 +2,7 @@ import hashlib
 import inspect
 
 import polars as pl
+import pytest
 
 from app import (
     analysis_memo,
@@ -1556,3 +1557,16 @@ def test_a_scope_built_without_an_instruction_declares_the_source_empty():
     )
 
     assert scope.candidates[context_adapters.INSTRUCTION_SOURCE_ID] == ()
+
+
+@pytest.mark.parametrize("preset_id", [
+    "analysis.reading", "analysis.summary", "planning.context", "planning.cycle",
+])
+def test_the_stages_that_decide_and_report_what_is_tested_read_the_instruction(preset_id):
+    """The register decides what is tested and the memo reports it; planning
+    context and cycle fix scope and steps. Each must see what the auditor asked."""
+
+    spec = PRESETS.compile(preset_id)
+
+    assert context_adapters.INSTRUCTION_SOURCE_ID in [source.id for source in spec.sources]
+    assert spec.privacy.allow_auditor_instruction

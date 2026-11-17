@@ -180,6 +180,43 @@ def test_start_command_rejects_an_unregistered_command(workspace_with_data):
     assert session.started_run is None
 
 
+def test_start_command_passes_carried_requirements_only_when_given(workspace_with_data):
+    calls: list = []
+
+    def launch_command(*args):
+        calls.append(args)
+        return {"kind": "run_started", "run_id": "20260801-000000-abcdef"}
+
+    commander = _commander(launch_command=launch_command)
+    earlier = "test capture timeliness, dealing hours and segregation"
+
+    assistant._Session(workspace_with_data, commander=commander).dispatch(
+        "start_command", {"command_id": "generate_report"},
+    )
+    assistant._Session(workspace_with_data, commander=commander).dispatch(
+        "start_command", {"command_id": "generate_report", "carried_requirements": earlier},
+    )
+
+    assert calls == [("generate_report",), ("generate_report", earlier)]
+
+
+def test_the_coordinator_reads_where_a_runs_instruction_went():
+    """So it cannot say a request was applied when the run says it was not."""
+
+    payload = assistant._Session._run_payload({
+        "id": "20261107-000000-bbbbbb", "status": "completed", "mode": "auto",
+        "workspace_id": "ws", "created": "2026-11-07T00:00:00+00:00",
+        "workflow": {
+            "scope": {"instruction": "Focus on settlement."},
+            "stages": [{"capability": "analysis.summarized", "title": "Analysis summary",
+                        "units": [{"id": "u0"}]}],
+        },
+        "instruction_consumers": ["analysis.summarized"],
+    })
+
+    assert payload["instruction"] == "Your instructions were given to: Analysis summary."
+
+
 def test_mutating_tools_are_unavailable_without_a_commander(workspace_with_data):
     session = assistant._Session(workspace_with_data)
 

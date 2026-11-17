@@ -122,10 +122,14 @@ def run_account(child: dict) -> dict:
                 "more_refs": max(0, len(refs) - MAX_ACCOUNT_REFS),
             }
         )
+    instruction = narration.instruction_account(child)
     return {
         "run_id": child.get("id"),
         "committed": committed,
         "nothing_to_do": nothing_to_do,
+        # Where the auditor's words went in this child, from its manifests, so
+        # the loop reconciles "I applied your instructions" against the record.
+        **({"instruction": instruction} if instruction else {}),
     }
 
 

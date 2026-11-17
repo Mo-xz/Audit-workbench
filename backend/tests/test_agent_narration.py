@@ -1606,3 +1606,59 @@ def test_a_run_recorded_before_the_code_still_reads_as_awaiting_evidence():
     assert len(items) == 1
     assert items[0]["severity"] == "evidence"
     assert items[0]["message"].startswith("2 tests are waiting for evidence")
+
+
+# --------------------------------------------------------------------------- #
+# Where the auditor's instruction went. A run that was given one says which
+# steps read it, or that none did and why, so an instruction never vanishes
+# behind a "Done".
+# --------------------------------------------------------------------------- #
+def _instructed(*, instruction="Focus on settlement.", consumers=(), stages=()):
+    return {
+        "id": "20261107-000000-bbbbbb",
+        "workflow": {"scope": {"instruction": instruction} if instruction else {},
+                     "stages": list(stages)},
+        "instruction_consumers": list(consumers),
+    }
+
+
+def _ran(capability, title, units=1):
+    return {"capability": capability, "title": title,
+            "units": [{"id": f"u{index}"} for index in range(units)]}
+
+
+def test_the_close_names_the_steps_an_instruction_was_given_to():
+    run = _instructed(
+        consumers=["analysis.register_ready", "analysis.summarized"],
+        stages=[_ran("analysis.register_ready", "Assertion register"),
+                _ran("analysis.summarized", "Analysis summary")],
+    )
+
+    assert narration.instruction_account(run) == (
+        "Your instructions were given to: Assertion register and Analysis summary."
+    )
+
+
+def test_an_instruction_that_met_only_current_outcomes_says_so():
+    """Nothing ran because everything was in place: say the instruction was not
+    applied, rather than report success."""
+
+    run = _instructed(stages=[_ran("planning.apm_ready", "Planning memorandum", units=0)])
+
+    account = narration.instruction_account(run)
+    assert account.startswith("Your instructions reached no step")
+    assert "already in place" in account
+    assert account in narration.closing_text({**run, "status": "completed"}, "completed")
+
+
+def test_an_instruction_no_running_step_takes_names_the_steps_that_ran():
+    run = _instructed(stages=[_ran("data.relationships_inferred", "Table relationships")])
+
+    assert narration.instruction_account(run) == (
+        "Your instructions reached no step: none of the steps that ran "
+        "(Table relationships) takes instructions."
+    )
+
+
+def test_a_run_without_an_instruction_says_nothing_about_one():
+    assert narration.instruction_account(_instructed(instruction="")) == ""

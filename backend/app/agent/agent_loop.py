@@ -504,6 +504,14 @@ class AgentLoop(BaseRunner):
 
         self.checkpoint()
         self._refresh_workspace()
+        # The auditor's own words reach every child the loop starts, unless the
+        # loop gave this child a more specific instruction of its own. The
+        # loop's brief is a paraphrase; the request it paraphrases is on the
+        # loop's context, and a child that saw only the paraphrase lost what it
+        # did not repeat.
+        inherited = str((self.run.get("context") or {}).get("instruction") or "").strip()
+        if inherited and not str((context or {}).get("instruction") or "").strip():
+            context = {**(context or {}), "instruction": inherited}
         started = time.monotonic()
         try:
             child = runner.run_child_run(self.ws, self.run, command, context)

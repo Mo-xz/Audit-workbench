@@ -3752,7 +3752,10 @@ grounded in the documents: objective, entity, period, scope, materiality,
 key_contacts, and background_notes. Every supplied context value must be a
 string; format multiple key contacts as one newline-separated string. Omit fields that the documents do not
 support; do not turn policy requirements into claims about actual control
-operation. {JSON_RULES} {LANGUAGE_RULES}"""
+operation. Where AUDITOR INSTRUCTION states the engagement's scope, objective
+or period ("sections 4, 5 and 7 only", "exclude settlement"), it decides those
+fields: write them as the auditor stated them, and say in background_notes
+where the documents describe something wider. {JSON_RULES} {LANGUAGE_RULES}""" + f"\n\n{AUDITOR_INSTRUCTION_RULE}"
 
 PLANNING_CONTEXT_CURRENT_SOURCE_ID = "current_planning_context"
 PLANNING_CONTEXT_DOCUMENT_SOURCE_ID = "planning_documents"
@@ -3865,8 +3868,10 @@ def run_planning_context_worker(
         raise WorkerContractError(
             "Planning-context synthesis requires at least one supplied document."
         )
+    instruction = auditor_instruction(request)
     user = (
-        "CURRENT PLANNING CONTEXT:\n"
+        (f"AUDITOR INSTRUCTION:\n{instruction}\n\n" if instruction else "")
+        + "CURRENT PLANNING CONTEXT:\n"
         f"{json.dumps(current[0] if current else {}, default=str)}\n\n"
         "INCLUDED DOCUMENT CONTENT:\n"
         f"{json.dumps(list(documents), default=str)}"
@@ -3964,7 +3969,10 @@ naming, reuse that wording exactly: the matrix's rows are grouped by it, and
 renaming a step it already uses orphans them.
 
 You are describing the process, not assessing it. No risks, no controls, no
-judgement about whether a step is adequately covered. {JSON_RULES} """ + LANGUAGE_RULES
+judgement about whether a step is adequately covered. {JSON_RULES} 
+Where AUDITOR INSTRUCTION includes or excludes part of the process ("stop at
+confirmation", "settlement is out of scope"), the steps follow it: a step it
+excludes is not a step.""" + f"\n\n{AUDITOR_INSTRUCTION_RULE}" + LANGUAGE_RULES
 
 CYCLE_PLANNING_SOURCE_ID = "planning_context"
 CYCLE_CURRENT_APM_SOURCE_ID = "current_apm"
@@ -4061,8 +4069,10 @@ def validate_cycle_proposal(
 
 
 def _cycle_user(request: WorkerRequest) -> str:
+    instruction = auditor_instruction(request)
     return json.dumps(
         {
+            **({"AUDITOR INSTRUCTION": instruction} if instruction else {}),
             "REVISED APM": str(_resolved_item(request, CYCLE_CURRENT_APM_SOURCE_ID) or ""),
             "PLANNED RISK THEMES": [
                 str(theme) for theme in request.unit_input.get("risk_themes") or []

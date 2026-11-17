@@ -1800,7 +1800,20 @@ Descriptors marked selectable=false supply dependency columns only, not targets.
 Do not restate a nomination as an added assertion. It is already in the
 register, and adding it again asks a model to rewrite a spec that was measured
 exactly.
-{JSON_RULES} {LANGUAGE_RULES}"""
+
+**When AUDITOR INSTRUCTION is present**, the auditor has named what they want
+tested, and this is the only turn that decides what gets tested. Account for
+every test it names in `instruction_response`, one entry each, quoting what was
+asked in `asked`:
+- `added`: you add an assertion for it in `add` (repeat the assertion in
+  `reference`);
+- `nomination`: a supplied nomination already measures it (its ref in
+  `reference`);
+- `unanswerable`: no field in this data records it (the reason in `reference`;
+  it is recorded with the other unanswerable questions).
+A test the auditor named is never silently left out: the memo says what was
+asked and what was tested, from this answer.
+{JSON_RULES} {LANGUAGE_RULES}""" + f"\n\n{AUDITOR_INSTRUCTION_RULE}"
 
 
 def _reading_frames(request: WorkerRequest) -> dict[str, set[str]]:
@@ -1860,7 +1873,7 @@ def _reading_submission_tool(request: WorkerRequest) -> dict[str, Any]:
     frame_schema: dict[str, Any] = {"type": "string"}
     if frames:
         frame_schema = {"type": "string", "enum": frames}
-    return {
+    tool = {
         "type": "function",
         "function": {
             "name": READING_SUBMISSION_TOOL,
@@ -1938,6 +1951,30 @@ def _reading_submission_tool(request: WorkerRequest) -> dict[str, Any]:
             },
         },
     }
+    if auditor_instruction(request):
+        # The auditor named what they want tested: the answer to that is part
+        # of the register, required, so a named test cannot go unmentioned.
+        parameters = tool["function"]["parameters"]
+        parameters["properties"]["instruction_response"] = {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["asked", "answer", "reference"],
+                "properties": {
+                    "asked": {"type": "string", "minLength": 3},
+                    "answer": {"type": "string", "enum": list(INSTRUCTION_ANSWERS)},
+                    "reference": {"type": "string", "minLength": 3},
+                },
+            },
+        }
+        parameters["required"] = [*parameters["required"], "instruction_response"]
+    return tool
+
+
+#: How the register answers each test the auditor's instruction names.
+INSTRUCTION_ANSWERS = ("added", "nomination", "unanswerable")
 
 
 def _reading_submission_response(message: object) -> str:
@@ -1966,6 +2003,13 @@ def _reading_response_schema(response: str) -> Mapping[str, Any]:
                 f"every `{section}` entry must be an object"
             )
         settled[section] = value
+    answers = payload.get("instruction_response")
+    if answers is not None:
+        if not isinstance(answers, list) or any(not isinstance(item, dict) for item in answers):
+            raise WorkerResponseValidationError(
+                "`instruction_response` must be an array of objects"
+            )
+        settled["instruction_response"] = answers
     return settled
 
 
@@ -2070,6 +2114,46 @@ def validate_reading_proposal(
         if str(item.get("question") or "").strip()
     ]
 
+    answered: list[dict[str, str]] = []
+    if auditor_instruction(request):
+        # The one check this turn owes the auditor: every test they named is
+        # added, pointed at, or said to be unanswerable. A reading silent on
+        # the instruction is the stage-1 failure (B6), and costs one repair.
+        responses = list(proposal.get("instruction_response") or ())
+        if not responses:
+            errors.append(
+                "AUDITOR INSTRUCTION names tests to run; account for each in "
+                "instruction_response as added, nomination or unanswerable"
+            )
+        for index, item in enumerate(responses):
+            label = f"instruction_response[{index}]"
+            asked = str(item.get("asked") or "").strip()
+            answer = str(item.get("answer") or "").strip()
+            reference = str(item.get("reference") or "").strip()
+            if not asked or answer not in INSTRUCTION_ANSWERS or not reference:
+                errors.append(
+                    f"{label} needs what was asked, an answer of "
+                    f"{', '.join(INSTRUCTION_ANSWERS)}, and its reference"
+                )
+                continue
+            if answer == "nomination" and reference not in nominations:
+                errors.append(
+                    f"{label} points at '{reference}', which is not a supplied "
+                    "nomination"
+                )
+                continue
+            if answer == "added" and not authored:
+                errors.append(
+                    f"{label} says an assertion was added for '{asked}', but "
+                    "`add` is empty"
+                )
+                continue
+            if answer == "unanswerable" and not any(
+                entry["question"] == asked for entry in unanswerable
+            ):
+                unanswerable.append({"question": asked, "why": reference})
+            answered.append({"asked": asked, "answer": answer, "reference": reference})
+
     if errors:
         raise WorkerResponseValidationError(errors)
     return {
@@ -2077,6 +2161,7 @@ def validate_reading_proposal(
         "add": authored,
         "decline": declines,
         "unanswerable": unanswerable,
+        **({"instruction_response": answered} if answered else {}),
     }
 
 
@@ -2113,9 +2198,12 @@ def run_analysis_reading_worker(
         READING_REGISTRY_SOURCE_ID,
         READING_DOMAIN_SOURCE_ID,
         READING_HYPOTHESIS_SOURCE_ID,
+        AUDITOR_INSTRUCTION_SOURCE_ID,
     )
+    instruction = auditor_instruction(request)
     user = json.dumps(
         {
+            **({"AUDITOR INSTRUCTION": instruction} if instruction else {}),
             **({"ANALYTICS CATALOG": catalog} if catalog else {}),
             "FRAME MAP": frames,
             **({"VALUE DOMAINS": domains} if domains else {}),
@@ -2167,7 +2255,7 @@ def run_analysis_reading_worker(
 ANALYSIS_READING_RESPONSE_SCHEMA = WorkerResponseSchema(
     schema_id="analysis.reading.response",
     schema_hash=_sha256_text(
-        "analysis-reading-response:v1:keep-add-decline-unanswerable"
+        "analysis-reading-response:v2:keep-add-decline-unanswerable-instruction"
     ),
     validator=_reading_response_schema,
 )
@@ -2235,7 +2323,14 @@ no heading, no fenced block, and no draft you then replace.
 
 `lead` is a short paragraph saying what the analysis concluded — the two or
 three things a reader who stops there should leave with. Not what was performed:
-what it showed. The other parts become these sections, in this order:
+what it showed.
+
+When AUDITOR INSTRUCTION is present, the auditor asked for particular tests.
+`lead` says, in one sentence, which of them the data could test and which it
+could not, and a result described as clean is clean only on the dimensions
+named: never "clean on every tested dimension" while a test the auditor asked
+for was not run. The register's answer to the instruction is in the supplied
+context. The other parts become these sections, in this order:
 {_SECTION_LIST}
 
 PROCEDURE REFERENCES numbers every procedure you were supplied. Refer to one by
@@ -2401,7 +2496,7 @@ the entry rests on, and list none you only mention in passing.
 Call {SUMMARY_SUBMISSION_TOOL} exactly once, with every part filled in.
 
 {LANGUAGE_RULES}
-"""
+""" + f"\n\n{AUDITOR_INSTRUCTION_RULE}"
 
 SUMMARY_RESULTS_SOURCE_ID = "analysis_results"
 SUMMARY_EXCEPTIONS_SOURCE_ID = "analysis_exceptions"
@@ -3273,7 +3368,14 @@ def run_analysis_summary_worker(
             # refers to a procedure and the id is not something the writer ever
             # needs to type.
             "PROCEDURE REFERENCES": _summary_reference_sheet(request),
-            "RESOLVED CONTEXT": _model_facing_context(request),
+            **(
+                {"AUDITOR INSTRUCTION": auditor_instruction(request)}
+                if auditor_instruction(request)
+                else {}
+            ),
+            "RESOLVED CONTEXT": _model_facing_context(
+                request, AUDITOR_INSTRUCTION_SOURCE_ID
+            ),
         },
         indent=1,
         ensure_ascii=False,

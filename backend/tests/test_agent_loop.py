@@ -1402,3 +1402,19 @@ def test_the_turn_cap_names_actions_that_never_ran(monkeypatch, workspace_with_d
     assert "as far as one request goes" in closing
     assert "Actions that did not run: create_validation_rules (failed" in closing
     assert "Expression needs Polars code" in closing
+
+
+def test_the_account_of_a_child_run_says_where_its_instruction_went():
+    child = {
+        "id": "20261107-000000-bbbbbb",
+        "workflow": {
+            "scope": {"instruction": "Focus on settlement."},
+            "stages": [{"capability": "planning.rcm_ready", "title": "Risk and control matrix",
+                        "units": [{"id": "u0"}]}],
+        },
+        "instruction_consumers": ["planning.rcm_ready"],
+    }
+
+    account = loop_tools.run_account(child)
+
+    assert account["instruction"] == "Your instructions were given to: Risk and control matrix."

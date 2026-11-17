@@ -865,11 +865,13 @@ def planning_context_scope(
     workspace: Workspace,
     *,
     document_ids: Iterable[str] | None = None,
+    instruction: str | None = None,
 ) -> ContextScope:
     """Build the local candidate scope for the planning-context synthesis unit."""
     context = dict(workspace.planning.get("context") or {})
     return ContextScope(
         candidates={
+            INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),
             PLANNING_CONTEXT_CURRENT_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="planning:context",
@@ -1184,6 +1186,7 @@ def cycle_scope(
     workspace: Workspace,
     *,
     planning_context: Mapping[str, object] | None = None,
+    instruction: str | None = None,
 ) -> ContextScope:
     """Build the local candidate scope for the cycle-design capability.
 
@@ -1205,6 +1208,7 @@ def cycle_scope(
     current_apm = str(workspace.planning.get("apm_markdown") or "")
     return ContextScope(
         candidates={
+            INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),
             CYCLE_PLANNING_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="planning:context",
@@ -3378,6 +3382,7 @@ def analysis_reading_scope(
     hypotheses: Iterable[Mapping[str, object]] = (),
     value_domains: Iterable[Mapping[str, object]] = (),
     analytics_registry: object = None,
+    instruction: str | None = None,
 ) -> ContextScope:
     """The whole map, once: every frame's columns and every measured nomination.
 
@@ -3422,6 +3427,7 @@ def analysis_reading_scope(
     )
     return ContextScope(
         candidates={
+            INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),
             READING_FRAMES_SOURCE_ID: tuple(frame_candidates),
             # Every measured nomination in the engagement, already deduplicated
             # and already ranked. Each carries the reference the reading turn
@@ -3933,7 +3939,9 @@ def analysis_coverage_gaps(workspace: Workspace) -> dict[str, object]:
     }
 
 
-def analysis_summary_scope(workspace: Workspace) -> ContextScope:
+def analysis_summary_scope(
+    workspace: Workspace, *, instruction: str | None = None
+) -> ContextScope:
     """Build the local candidate scope for the one analysis-summary unit."""
     gaps = analysis_coverage_gaps(workspace)
     planning_context = dict(workspace.planning.get("context") or {})
@@ -3945,6 +3953,7 @@ def analysis_summary_scope(workspace: Workspace) -> ContextScope:
     base_tables = {str(item.get("name") or "") for item in workspace.tables}
     return ContextScope(
         candidates={
+            INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),
             SUMMARY_RESULTS_SOURCE_ID: analysis_summary_result_candidates(workspace),
             SUMMARY_EXCEPTIONS_SOURCE_ID: analysis_summary_exception_candidates(
                 workspace, failures=True

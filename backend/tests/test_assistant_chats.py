@@ -696,8 +696,9 @@ def test_coordinator_starting_a_run_is_recorded_as_an_action(workspace_with_data
     configured(monkeypatch)
     launched = {}
 
-    def fake_start(workspace, mode, command, parent_run_id=None):
+    def fake_start(workspace, mode, command, parent_run_id=None, context=None):
         launched.update(command)
+        launched["run_context"] = dict(context or {})
         run = store.new_command_run(workspace, mode, command, parent_run_id=parent_run_id)
         run["status"] = "completed"
         store.save_run(workspace, run)
@@ -722,6 +723,10 @@ def test_coordinator_starting_a_run_is_recorded_as_an_action(workspace_with_data
 
     assert result["outcome"]["kind"] == "run_started"
     assert launched["goal_template"] == "report"
+    # The auditor's own words travel with the run they started (B6).
+    assert launched["run_context"]["instruction"] == (
+        "I think it is time we pulled the report together."
+    )
     messages = result["chat"]["messages"]
     assert messages[0]["resolved_intent"] == "act"
     assert messages[0]["outcome"]["run_id"] == result["outcome"]["run_id"]
@@ -840,3 +845,127 @@ def test_a_requested_outcomes_message_still_refuses_an_undeclared_scope_key(
     })
 
     assert result["outcome"]["kind"] == "error"
+
+
+# --------------------------------------------------------------------------- #
+# The auditor's instruction: what a person typed travels with the run it starts,
+# so every stage that declares an instruction source reads it.
+# --------------------------------------------------------------------------- #
+TYPED_REQUEST = "Analyse the data and test capture timeliness, dealing hours and segregation."
+
+
+def _from_composer(content=TYPED_REQUEST, source="composer"):
+    return {"id": "msg_1", "content": content, "source": source}
+
+
+@pytest.fixture
+def started_runs(monkeypatch):
+    calls: list[dict] = []
+    configured(monkeypatch)
+    monkeypatch.setattr(assistant_chats, "_active_run", lambda workspace, summaries=None: None)
+
+    def start(workspace, mode, command, parent_run_id=None, context=None):
+        calls.append({"command": command, "context": dict(context or {})})
+        return {"id": "20261107-000000-aaaaaa", "command": {"id": "cmd_1"}}
+
+    monkeypatch.setattr(assistant_chats.runner, "start_command_run", start)
+    return calls
+
+
+@pytest.mark.parametrize("content, source, expected", [
+    (TYPED_REQUEST, "composer", TYPED_REQUEST),
+    ("/analysis", "composer", ""),
+    # A registered command phrase is the command itself, like a button.
+    ("Generate the audit report.", "composer", ""),
+    ("Run the saved analyses", "tab_button", ""),
+    ("Run the saved analyses", "shortcut", ""),
+    ("   ", "composer", ""),
+])
+def test_only_words_a_person_typed_are_an_instruction(content, source, expected):
+    assert assistant_chats.auditor_instruction_of(_from_composer(content, source)) == expected
+
+
+def test_a_typed_request_routed_to_a_template_carries_the_auditors_words(
+    workspace_with_data, started_runs,
+):
+    assistant_chats._launch_command(
+        workspace_with_data, "chat_1", _from_composer(), {"messages": []}, "auto",
+        goal_template="data_analysis",
+    )
+
+    assert started_runs[0]["context"]["instruction"] == TYPED_REQUEST
+
+
+def test_a_button_label_is_not_an_instruction(workspace_with_data, started_runs):
+    assistant_chats._launch_command(
+        workspace_with_data, "chat_1", _from_composer("Run the saved analyses", "tab_button"),
+        {"messages": []}, "auto", goal_template="analysis_execution",
+    )
+
+    assert "instruction" not in started_runs[0]["context"]
+
+
+def test_an_instruction_the_caller_supplied_is_kept(workspace_with_data, started_runs):
+    assistant_chats._launch_command(
+        workspace_with_data, "chat_1", _from_composer(), {"messages": []}, "auto",
+        goal_template="data_analysis", run_context={"instruction": "Focus on segregation."},
+    )
+
+    assert started_runs[0]["context"]["instruction"] == "Focus on segregation."
+
+
+def test_a_loop_hand_off_keeps_the_verbatim_request_beside_its_brief(
+    workspace_with_data, started_runs,
+):
+    commander = assistant_chats._commander(
+        workspace_with_data, "chat_1", _from_composer(), {"messages": []}, "auto",
+    )
+
+    commander.launch_loop("Run the data analysis focused on the policy clauses.")
+
+    # The brief is the coordinator's paraphrase; the instruction is the request.
+    assert started_runs[0]["command"]["text"].startswith("Run the data analysis")
+    assert started_runs[0]["context"]["instruction"] == TYPED_REQUEST
+
+
+def test_a_continuing_message_carries_the_requirements_it_refers_to(
+    workspace_with_data, started_runs,
+):
+    """"Carry on with the analysis" names no test; the ones it means were in an
+    earlier message. The coordinator quotes them, and the instruction is the
+    verbatim message followed by that quote."""
+
+    carry_on = "Please carry on with the analysis and tell me what exceptions you find."
+    earlier = "test capture timeliness, dealing hours and segregation between dealers and confirmers"
+    command_id = next(
+        key for key, item in assistant_chats.commands.COMMANDS.items()
+        if item.goal_template == "data_analysis"
+    )
+    commander = assistant_chats._commander(
+        workspace_with_data, "chat_1", _from_composer(carry_on), {"messages": []}, "auto",
+    )
+
+    commander.launch_command(command_id, earlier)
+
+    instruction = started_runs[0]["context"]["instruction"]
+    assert instruction.startswith(carry_on)
+    assert "segregation between dealers and confirmers" in instruction
+
+
+def test_every_goal_template_accepts_an_instruction_as_run_context(workspace_with_data, monkeypatch):
+    seen: dict = {}
+
+    def process(workspace, chat_id, user, record, mode, goal_template, run_kind,
+                run_context, requested_outcomes, local_handler):
+        seen["run_context"] = run_context
+        return {"kind": "run_started"}
+
+    monkeypatch.setattr(assistant_chats, "_process_message", process)
+    chat = assistant_chats.create_chat(workspace_with_data)
+
+    assistant_chats.send_message(workspace_with_data, chat["id"], {
+        "content": "Draft the APM", "intent": "act", "request_id": "req_instruction_1",
+        "goal_template": "apm_only", "run_context": {"instruction": "Focus on settlement."},
+    })
+
+    assert seen["run_context"] == {"instruction": "Focus on settlement."}

@@ -287,3 +287,93 @@ def test_content_is_still_the_fallback_when_no_tool_call_matches():
     """A provider that ignores forced tools is still answering the question."""
     message = {"content": '{"keep": []}', "tool_calls": []}
     assert analysis_worker._reading_submission_response(message) == '{"keep": []}'
+
+
+# --------------------------------------------------------------------------- #
+# The auditor's instruction (B6)
+# --------------------------------------------------------------------------- #
+INSTRUCTION = "Test that every invoice references a real order, and test approval limits."
+
+
+@pytest.fixture
+def instructed_request() -> WorkerRequest:
+    """The same map, resolved with an auditor instruction in scope."""
+    ws = workspaces.create_workspace("Reading worker instructed")
+    ws.add_table(
+        "invoices.csv",
+        pl.DataFrame({"invoice_no": ["A", "B"], "po_link": ["P1", "P9"]}).write_csv().encode(),
+    )
+    capability = ANALYSIS_REGISTRY.get("analysis.register_ready")
+    _manifest, bundle = ContextResolver().resolve(
+        ws,
+        capability,
+        {"id": "analysis_reading"},
+        analysis_reading_scope(
+            ws,
+            ["invoices"],
+            nominations=[{
+                "ref": "N01", "frame": "invoices", "test": "duplicates",
+                "params": {"columns": ["invoice_no"]}, "flagged": 0, "tested": 2,
+                "reading": "no invoice_no repeats",
+            }],
+            instruction=INSTRUCTION,
+        ),
+    )
+    return WorkerRequest(
+        worker_id=analysis_worker.ANALYSIS_READING_WORKER_ID,
+        capability_id=capability.id,
+        unit_id="analysis_reading",
+        context=bundle,
+    )
+
+
+def test_a_reading_silent_on_the_auditors_instruction_is_repaired(instructed_request):
+    """Stage 1 of the Treasury run: the auditor named four tests and the register
+    added none of them. Silence on an instruction now costs one repair."""
+
+    with pytest.raises(WorkerResponseValidationError, match="instruction_response"):
+        analysis_worker.validate_reading_proposal(_empty(), instructed_request)
+
+
+def test_each_named_test_is_added_pointed_at_or_said_to_be_unanswerable(instructed_request):
+    proposal = {
+        **_empty(),
+        "add": [{
+            "frame": "invoices", "columns": ["po_link"],
+            "assertion": "Every invoice references an order that exists.",
+            "why": "An invoice against no order has no approved commitment behind it.",
+        }],
+        "instruction_response": [
+            {"asked": "every invoice references a real order", "answer": "added",
+             "reference": "Every invoice references an order that exists."},
+            {"asked": "approval limits", "answer": "unanswerable",
+             "reference": "No approver or limit column exists in the invoices supplied."},
+        ],
+    }
+
+    settled = analysis_worker.validate_reading_proposal(proposal, instructed_request)
+
+    assert [item["answer"] for item in settled["instruction_response"]] == ["added", "unanswerable"]
+    # An unanswerable request joins the register's unanswerable questions, so
+    # the memo and the report carry it like any other.
+    assert {"question": "approval limits",
+            "why": "No approver or limit column exists in the invoices supplied."} in settled["unanswerable"]
+
+
+def test_an_answer_pointing_at_no_nomination_is_rejected(instructed_request):
+    proposal = {**_empty(), "instruction_response": [
+        {"asked": "duplicate invoices", "answer": "nomination", "reference": "N99"},
+    ]}
+
+    with pytest.raises(WorkerResponseValidationError, match="not a supplied"):
+        analysis_worker.validate_reading_proposal(proposal, instructed_request)
+
+
+def test_the_submission_requires_an_answer_only_when_there_is_an_instruction(
+    reading_request, instructed_request,
+):
+    plain = analysis_worker._reading_submission_tool(reading_request)["function"]["parameters"]
+    asked = analysis_worker._reading_submission_tool(instructed_request)["function"]["parameters"]
+
+    assert "instruction_response" not in plain["properties"]
+    assert "instruction_response" in asked["required"]

@@ -683,3 +683,19 @@ def test_a_retry_may_narrow_to_part_of_what_the_command_covered(
     assert runner.retry_run(workspace_with_data, failed["id"])["command"][
         "target_refs"
     ] == ["rcm:RCM-1", "rcm:RCM-2"]
+
+
+def test_a_runs_instruction_reaches_the_workflow_scope(workspace_with_data):
+    """Binders read the instruction from the scope, beside every other narrowing."""
+
+    run = store.new_command_run(
+        workspace_with_data, "auto",
+        {"source": "chat", "text": "Analyse the data.", "goal_template": "data_analysis"},
+    )
+    run["context"] = {"instruction": "Test segregation between dealers and confirmers."}
+
+    _definition, scope = routing.resolution_scope(
+        workspace_with_data, run, {"requested_outcomes": ["analysis.executed"]},
+    )
+
+    assert scope["instruction"] == "Test segregation between dealers and confirmers."

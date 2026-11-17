@@ -562,6 +562,12 @@ def run_summary(run: dict) -> dict:
         "requested_outcomes": list((run.get("workflow") or {}).get("requested_outcomes") or []),
         "next_outcomes": list((run.get("workflow") or {}).get("next_outcomes") or []),
         "workflow_explanation": (run.get("workflow") or {}).get("workflow_explanation"),
+        # Whether the run carried the auditor's instruction, and which steps
+        # were given it: what the coordinator quotes rather than assumes.
+        "instruction_given": bool(
+            str(((run.get("workflow") or {}).get("scope") or {}).get("instruction") or "").strip()
+        ),
+        "instruction_consumers": list(run.get("instruction_consumers") or []),
     }
 
 

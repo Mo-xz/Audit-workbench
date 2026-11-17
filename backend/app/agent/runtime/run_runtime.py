@@ -11,6 +11,11 @@ from .. import store
 from ..context import ContextManifest, load_manifest, persist_manifest
 from .interactions import InteractionTransitions
 
+#: The declared source that carries the auditor's instruction
+#: (``context.adapters.INSTRUCTION_SOURCE_ID``). Restated rather than imported:
+#: the runtime stays below the adapters, which reach into the workspace.
+INSTRUCTION_SOURCE_ID = "instruction"
+
 DEFAULT_MAX_MODEL_TURNS = 40
 DEFAULT_MAX_RUNTIME_SECONDS = 3600
 
@@ -215,9 +220,25 @@ class DefaultRunRuntime:
         self,
         manifest: ContextManifest,
     ) -> dict[str, str]:
-        """Persist one content-free manifest through the run's write lock."""
+        """Persist one content-free manifest through the run's write lock.
+
+        Also notes which capabilities were actually given the auditor's
+        instruction. The manifest is the one record of what a turn was shown,
+        so it is the honest place to read it from: the closing message reports
+        where the instruction went, and says so when it went nowhere.
+        """
         with self._state_lock:
-            return persist_manifest(self.workspace, self.run["id"], manifest)
+            reference = persist_manifest(self.workspace, self.run["id"], manifest)
+            if any(
+                selection.source_id == INSTRUCTION_SOURCE_ID
+                for selection in manifest.selections
+            ):
+                consumers = list(self.run.get("instruction_consumers") or [])
+                if manifest.capability_id not in consumers:
+                    consumers.append(manifest.capability_id)
+                    self.run["instruction_consumers"] = consumers
+                    store.save_run(self.workspace, self.run)
+            return reference
 
     def load_context_manifest(
         self,

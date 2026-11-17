@@ -732,8 +732,12 @@ def send_message(workspace: Workspace, chat_id: str, payload: dict) -> dict:
                 # narrow scope through `target_refs` — the same mechanism the
                 # direct run-creation endpoint accepts.
                 allowed = (
-                    routing.TEMPLATE_RUN_CONTEXT_KEYS.get(goal_template)
-                    if goal_template else (OUTCOME_RUN_CONTEXT_KEYS if requested_outcomes else None)
+                    # Every template accepts an instruction: it is scope, the
+                    # auditor saying what they want, never a routing override.
+                    routing.TEMPLATE_RUN_CONTEXT_KEYS.get(goal_template, frozenset())
+                    | {"instruction"}
+                    if goal_template
+                    else (OUTCOME_RUN_CONTEXT_KEYS if requested_outcomes else None)
                 )
                 if requested != "act" or allowed is None or not set(run_context) <= allowed:
                     raise WorkspaceError(
@@ -804,6 +808,26 @@ class CommandLaunchError(WorkspaceError):
         self.run_id = run_id
 
 
+def auditor_instruction_of(user: Mapping) -> str:
+    """The auditor's message as an instruction, or empty when it is not one.
+
+    Typed in the composer and not a bare slash command. Everything else that
+    reaches a launcher is a label for the command it starts.
+    """
+
+    if str(user.get("source") or "composer") != "composer":
+        return ""
+    text = str(user.get("content") or "").strip()
+    if not text or text.startswith("/"):
+        return ""
+    # A message that is, whole, one of a command's registered phrases
+    # ("Generate the audit report.") is the command, like a button: it asks
+    # for nothing the command does not already do.
+    if commands.match_phrase(text) is not None:
+        return ""
+    return text
+
+
 def _launch_command(
     workspace: Workspace, chat_id: str, user: dict, record: dict, mode: str,
     *, goal_template: str | None = None, run_context: dict | None = None,
@@ -860,6 +884,18 @@ def _launch_command(
         refs = [{"kind": "assistant_artifact", "id": artifact["id"], "title": artifact.get("title")}]
 
     planning_context = dict(run_context or {})
+    # What the auditor asked for, in their own words, carried as the run's
+    # instruction so every stage that declares one reads it. Only a message a
+    # person typed: a button or shortcut label ("Run the saved analyses") and a
+    # bare slash command ask for the command, nothing more. Verbatim rather
+    # than the coordinator's paraphrase, for the reason force permission is
+    # read from the message and never the brief: a paraphrase drops exactly
+    # the specific asks this exists to carry. A freeform "test capture
+    # timeliness, dealing hours and segregation" routed to `data_analysis`
+    # once reached the register as nothing at all (B6).
+    instruction = auditor_instruction_of(user)
+    if instruction and not str(planning_context.get("instruction") or "").strip():
+        planning_context["instruction"] = instruction
     target_refs: list[str] = []
     if goal_template == "finding_draft":
         observation_id = str(planning_context.get("observation_id") or "").strip()
@@ -1039,10 +1075,31 @@ def _commander(
     stays read-only for every caller that does not pass one.
     """
 
-    def launch_command(command_id: str) -> dict:
+    def launch_command(command_id: str, carried: str = "") -> dict:
+        # The run is given the auditor's message verbatim. A message that
+        # continues an earlier request ("carry on with the analysis") names
+        # nothing itself: the tests it means were in the message before. The
+        # coordinator holds the conversation, so it quotes what is carried, and
+        # the instruction is both: B6 was exactly this, a "carry on" routed to
+        # `data_analysis` whose named tests were one message back.
+        instruction = auditor_instruction_of(user)
+        carried = str(carried or "").strip()
+        context = (
+            {
+                "instruction": (
+                    f"{instruction}\n\nEarlier in this conversation the auditor "
+                    f"asked: {carried}"
+                    if carried
+                    else instruction
+                )
+            }
+            if instruction
+            else {}
+        )
         return _launch_command(
             workspace, chat_id, user, record, mode,
             goal_template=commands.COMMANDS[command_id].goal_template,
+            run_context=context or None,
         )
 
     def launch_loop(brief: str) -> dict:

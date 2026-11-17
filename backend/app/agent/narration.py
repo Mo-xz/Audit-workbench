@@ -21,6 +21,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from . import store
+from .workflows import documents as documents_workflow
 
 if TYPE_CHECKING:
     from .context import ContextManifest
@@ -1301,6 +1302,16 @@ _NEXT_STEPS: dict[str, tuple[str, str]] = {
     "report.working_draft": ("Draft the report", "Draft the report."),
 }
 
+# A suggestion normally requests the one capability it is keyed by. "Analyse the
+# documents" is the exception: the documents graph forks at `categorized`, so
+# `documents.analysis_generated` alone closes over the prose branch and leaves
+# every evidence document categorized but untyped, unread and unstamped — with
+# the run reporting completed. The Record page's button asks for the full set
+# for the same reason (`engagement_record.py`), so the chip must too.
+_NEXT_STEP_OUTCOMES: dict[str, list[str]] = {
+    "documents.analysis_generated": list(documents_workflow.FULL_DOCUMENT_OUTCOMES),
+}
+
 # Guided workflows remain available as a fallback for an empty chat, but a
 # completed workflow should not be offered again.  Each command maps to the
 # outcomes it can still contribute to; the button is visible while any one of
@@ -1421,7 +1432,9 @@ def next_steps(workspace, state: dict[str, dict] | None = None, *, limit: int = 
                 "capability": capability_id,
                 # This is a declared outcome, not just wording for the
                 # assistant to interpret again.
-                "requested_outcomes": [capability_id],
+                "requested_outcomes": list(
+                    _NEXT_STEP_OUTCOMES.get(capability_id, [capability_id])
+                ),
                 "label": label,
                 "command": command,
                 "reason": reasons[0] if reasons else "",

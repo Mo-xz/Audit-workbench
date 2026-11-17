@@ -858,7 +858,16 @@ def test_next_steps_come_from_readiness_and_preserve_declared_outcomes():
     all_steps = narration.next_steps(None, all_missing, limit=len(narration._NEXT_STEPS))
     assert len(all_steps) == len(narration._NEXT_STEPS)
     for step in all_steps:
-        assert step["requested_outcomes"] == [step["capability"]]
+        if step["capability"] == "documents.analysis_generated":
+            # Both branches of the documents graph, or evidence is left untyped.
+            assert step["requested_outcomes"] == [
+                "documents.categorized",
+                "documents.types_classified",
+                "documents.schemas_stamped",
+                "documents.analysis_generated",
+            ]
+        else:
+            assert step["requested_outcomes"] == [step["capability"]]
         resolved = routing.classify_command(
             {
                 "source": "tab_button",

@@ -245,6 +245,17 @@ def destination() -> dict[str, Any]:
     # no third party — but LMSTUDIO_BASE_URL can put it on another host, and
     # then requests do leave this machine.
     local = bool(provider == "lmstudio" or on_this_machine)
+    if status.get("replay"):
+        # Replay answers from the workspace's own recordings and opens no
+        # connection, so the provider named in settings is not a destination.
+        return {
+            "configured": bool(status.get("configured")),
+            "provider": provider,
+            "model": str(status.get("model") or ""),
+            "local": True,
+            "replay": True,
+            "summary": "Replaying recorded model responses. Nothing leaves this machine.",
+        }
     return {
         "configured": bool(status.get("configured")),
         "provider": provider,

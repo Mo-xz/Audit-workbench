@@ -20,6 +20,9 @@ provider and model are normal application settings saved through the UI:
                              in seconds (defaults to 60)
     AGENT_PROVIDER           optional provider override for agent runs
     AGENT_MODEL              optional model override for agent runs
+    LLM_REPLAY               ``on`` answers every call from the workspace's
+                             recorded calls and never opens a connection;
+                             see :mod:`.llm_replay`
 
 This module is a thin transport: it knows how to send a chat request (with
 optional tool schemas) and hand back the raw assistant message. It never sees
@@ -43,6 +46,7 @@ import urllib.request
 from . import assistant_settings
 from . import config  # noqa: F401  # load .env before reading os.environ
 from . import debug_store
+from . import llm_replay
 
 DEFAULT_LMSTUDIO_API_KEY = "lm-studio"
 USER_AGENT = "audit-workbench/0.1"
@@ -164,6 +168,25 @@ class ResolvedModelProfile:
 
 def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()
+
+
+REPLAY_API_KEY = "replay"
+
+
+def _api_key(provider: str) -> str:
+    """The key a provider is called with, or empty when it cannot be.
+
+    Under replay no provider is called, so a provider without a key is still
+    configured: the placeholder is what makes every readiness check agree that
+    the agent can run, and :func:`chat` answers before anything would send it.
+    """
+    meta = assistant_settings.PROVIDERS[provider]
+    key = _env(str(meta["api_key_env"]))
+    if provider == "lmstudio" and not key:
+        key = DEFAULT_LMSTUDIO_API_KEY
+    if not key and llm_replay.enabled():
+        key = REPLAY_API_KEY
+    return key
 
 
 def _request_timeout(default: int) -> int:
@@ -444,9 +467,7 @@ def resolve_model_profile(profile: str = "agent") -> ResolvedModelProfile:
     )
     capabilities = tuple(sorted(set(capabilities)))
     provider_meta = assistant_settings.PROVIDERS[provider]
-    api_key = _env(str(provider_meta["api_key_env"]))
-    if provider == "lmstudio" and not api_key:
-        api_key = DEFAULT_LMSTUDIO_API_KEY
+    api_key = _api_key(provider)
     configured = bool(api_key)
     reason = None
     if not configured:
@@ -490,9 +511,7 @@ def _settings(profile: str | dict = "assistant") -> LLMSettings:
         if provider_name not in assistant_settings.PROVIDERS or not model_name:
             raise LLMError("Persisted model profile snapshot is invalid.")
         provider_meta = assistant_settings.PROVIDERS[provider_name]
-        api_key = _env(str(provider_meta["api_key_env"]))
-        if provider_name == "lmstudio" and not api_key:
-            api_key = DEFAULT_LMSTUDIO_API_KEY
+        api_key = _api_key(provider_name)
         return LLMSettings(
             backend=provider_name,
             api_key=api_key,
@@ -519,10 +538,7 @@ def _settings(profile: str | dict = "assistant") -> LLMSettings:
         backend = resolved.provider
         model = resolved.model
     provider = assistant_settings.PROVIDERS[backend]
-    api_key_env = str(provider["api_key_env"])
-    api_key = _env(api_key_env)
-    if backend == "lmstudio" and not api_key:
-        api_key = DEFAULT_LMSTUDIO_API_KEY
+    api_key = _api_key(backend)
     return LLMSettings(
         backend=backend,
         api_key=api_key,
@@ -575,6 +591,7 @@ def status() -> dict:
         }
     return {
         "configured": bool(settings.api_key),
+        "replay": llm_replay.enabled(),
         "backend": settings.backend,
         "provider": settings.backend,
         "model": settings.model,
@@ -606,6 +623,7 @@ def agent_status() -> dict:
     text_profile = resolve_model_profile("agent")
     result = {
         "configured": bool(settings.api_key),
+        "replay": llm_replay.enabled(),
         "backend": settings.backend,
         "provider": settings.backend,
         "model": settings.model,
@@ -722,6 +740,12 @@ def chat(
     )
     trace = debug_store.current_context()
     trace_workspace_id = str(trace.get("workspace_id") or "")
+
+    if llm_replay.enabled():
+        return _replay(
+            body, trace, call_id, call_started,
+            on_delta=on_delta if streaming else None,
+        )
 
     if not settings.api_key:
         provider = assistant_settings.PROVIDERS[settings.backend]
@@ -968,6 +992,68 @@ def chat(
                                     started_monotonic=call_started)
         raise terminal
     raise LLMError("LLM request failed after retrying.")
+
+
+def _replay(
+    body: dict,
+    trace: dict,
+    call_id: str | None,
+    call_started: float,
+    *,
+    on_delta: Callable[[str], None] | None = None,
+) -> dict:
+    """Answer one call from the workspace's recordings; see :mod:`.llm_replay`."""
+    workspace_id = str(trace.get("workspace_id") or "")
+    try:
+        recording = llm_replay.find(body, trace)
+    except Exception as error:  # an unreadable recording is a miss, said plainly
+        recording = None
+        detail = f" ({error})"
+    else:
+        detail = ""
+    if recording is None:
+        stage = str(trace.get("stage") or "this step")
+        error = LLMError(
+            f"Replay mode has no recorded model response for {stage}{detail}. "
+            "Only steps performed once with a live model can be replayed."
+        )
+        if call_id:
+            debug_store.finish_call(
+                workspace_id, call_id, error=str(error), started_monotonic=call_started,
+            )
+        raise error
+    if call_id:
+        request_bytes = json.dumps(body).encode("utf-8")
+
+        def mark(record: dict) -> None:
+            record["request_size_bytes"] = len(request_bytes)
+            record["request_sha256"] = hashlib.sha256(request_bytes).hexdigest()
+            record["endpoint"] = "replay"
+            # The console lists a call as "provider / model"; a replayed call
+            # must not read there as a call the provider just answered.
+            record["provider"] = f"replayed · {record.get('provider') or 'recording'}"
+            record["replay"] = {
+                "call_id": recording.call_id,
+                "match": recording.match,
+                # Rejected answers skipped on the way to the one the run kept.
+                "skipped": list(recording.superseded),
+            }
+        debug_store.update_call(workspace_id, call_id, mark)
+        debug_store.finish_call(
+            workspace_id, call_id, payload=recording.payload, message=recording.message,
+            started_monotonic=call_started,
+        )
+    message = recording.message
+    if on_delta is not None and isinstance(message.get("content"), str) and message["content"]:
+        on_delta(message["content"])
+    choices = (recording.payload or {}).get("choices") or []
+    usage = (recording.payload or {}).get("usage")
+    finish_reason = choices[0].get("finish_reason") if choices else None
+    return {
+        **{key: value for key, value in message.items() if key not in REASONING_KEYS},
+        **({"usage": usage} if isinstance(usage, dict) else {}),
+        **({"finish_reason": str(finish_reason)} if finish_reason else {}),
+    }
 
 
 def _response_error(payload: object) -> tuple[object | None, str] | None:

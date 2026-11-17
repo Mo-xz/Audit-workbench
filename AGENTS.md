@@ -146,6 +146,10 @@ backend/app/
 |- assistant_settings.py       - provider/model settings validation
 |- llm.py                      - OpenAI-compatible stdlib transport for both
 |                                assistant and agent profiles
+|- llm_replay.py               - `LLM_REPLAY=on`: answer every call from the
+|                                workspace's recorded calls (exact request,
+|                                else same step and refs), serving only the
+|                                answer a run kept; never opens a connection
 |- sandbox.py                  - guarded local Python/Polars execution
 |- intake.py                   - staged mixed file/document intake
 |- documents.py                - document inventory, versions, extraction,

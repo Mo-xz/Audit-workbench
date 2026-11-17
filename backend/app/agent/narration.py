@@ -1326,7 +1326,7 @@ _GUIDED_WORKFLOWS: tuple[dict[str, object], ...] = (
         # engagements where every audit step was done — which reads as the
         # console failing to notice completed work.
         "outcomes": (
-            "analysis.executed",
+            "analysis.summarized",
             "findings.drafted",
             "working_papers.generated",
             "report.working_draft",
@@ -1341,7 +1341,11 @@ _GUIDED_WORKFLOWS: tuple[dict[str, object], ...] = (
     {
         "label": "Data analysis",
         "command": "analyze_data",
-        "outcomes": ("analysis.executed",),
+        # The template's terminal outcome is the memo, not the executed
+        # results. Gating on `analysis.executed` hid this button as soon as the
+        # saved analyses had run (`analysis_execution` stops there on purpose),
+        # while the memo the button would write was still owed.
+        "outcomes": ("analysis.summarized",),
     },
     {
         "label": "Document tests",

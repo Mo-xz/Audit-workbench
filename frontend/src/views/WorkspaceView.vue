@@ -122,7 +122,9 @@ provide(workspaceContextKey, {
   sectionById,
   reload,
   reloadStatus: loadEngagementStatus,
-  requestImport: () => { folderImportOpen.value = true },
+  // Straight to the system file picker: choosing files is the import, and the
+  // dialog appears only once there is progress to show.
+  requestImport: () => { importDialogRef.value?.pickFiles() },
 })
 
 // Workspace-wide desktop drop target. Listeners live on window so a drop on
@@ -153,8 +155,8 @@ async function onWindowDrop(event: DragEvent) {
   if (folderImportOpen.value) return
   const files = await collectDroppedFiles(event)
   if (!files.length) return
-  importDialogRef.value?.stageExternal(files)
-  folderImportOpen.value = true
+  // Dropping is importing; the dialog opens itself to show progress.
+  void importDialogRef.value?.importFiles(files)
 }
 
 onMounted(async () => {
@@ -237,7 +239,7 @@ onUnmounted(() => {
       <div class="drop-overlay-card">
         <i class="aw-icon aw-icon-cloud-upload" />
         <strong>Drop to import</strong>
-        <span>Files and folders are staged for review before anything is added.</span>
+        <span>Files, folders and zip archives import as soon as you drop them.</span>
       </div>
     </div>
   </div>

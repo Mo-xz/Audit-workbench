@@ -331,7 +331,11 @@ frontend/src/
    |- DataTestsTab.vue         - data test authoring/history/results
    |- FindingsTab.vue          - finding editing and support checks
    |- ReportTab.vue            - report draft, preview, sources, quality
-   |- ImportDialog.vue         - staged folder/file import review
+   |- ImportDialog.vue         - one-action import: choosing or dropping files
+   |                             is the import; zip archives are unpacked in
+   |                             the browser an entry at a time
+   |                             (`composables/archives.ts`), never by the
+   |                             server
    |- PostImportPlanningOffer.vue - shortcut from intake into planning
    |- MarkdownEditor.vue / MarkdownView.vue - safe markdown editing/rendering
    |- CodeEditor.vue           - local code editing surface

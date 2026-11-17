@@ -2,15 +2,34 @@
  * workspace-wide drop target. Directories are walked recursively through the
  * FileSystemEntry API so dropped folders keep their relative paths. */
 
+/**
+ * One file waiting to be imported. Its bytes are read only when the upload
+ * asks for them: a picked or dropped file is already on disk, and a file inside
+ * a zip archive is inflated then (see `archives.ts`), so an unchanged file the
+ * server does not request is never read at all.
+ */
 export interface StagedFile {
-  file: File
   relativePath: string
+  size: number
+  lastModified: number
+  type: string
+  read: () => Promise<Blob>
+}
+
+export function stagedFromFile(file: File, relativePath = file.name): StagedFile {
+  return {
+    relativePath,
+    size: file.size,
+    lastModified: file.lastModified,
+    type: file.type,
+    read: () => Promise.resolve(file),
+  }
 }
 
 async function walk(entry: FileSystemEntry, prefix: string, out: StagedFile[]): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject))
-    out.push({ file, relativePath: `${prefix}${entry.name}` })
+    out.push(stagedFromFile(file, `${prefix}${entry.name}`))
     return
   }
   if (!entry.isDirectory) return
@@ -40,5 +59,5 @@ export async function collectDroppedFiles(event: DragEvent): Promise<StagedFile[
     for (const entry of entries) if (entry) await walk(entry, '', out)
     return out
   }
-  return Array.from(transfer.files ?? []).map((file) => ({ file, relativePath: file.name }))
+  return Array.from(transfer.files ?? []).map((file) => stagedFromFile(file))
 }

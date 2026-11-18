@@ -221,7 +221,7 @@ export type Rating = typeof RATINGS[number]
  * whether it assigns a rating, so this mirrors that pattern rather than
  * improving on it.
  */
-const RATING_CLAIM = /\*\*\s*(satisfactory|fair|marginal|unsatisfactory)\s*\*\*|\brating\b[^A-Za-z0-9]{0,12}(satisfactory|fair|marginal|unsatisfactory)\b/i
+const RATING_CLAIM = /\*\*\s*(satisfactory|fair|marginal|unsatisfactory)\s*[.:;,!]?\s*\*\*|\brating\b[^A-Za-z0-9]{0,12}(satisfactory|fair|marginal|unsatisfactory)\b/i
 
 export function ratingClaim(markdown: string): Rating | null {
   const match = RATING_CLAIM.exec(markdown || '')

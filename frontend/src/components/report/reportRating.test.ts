@@ -8,6 +8,9 @@ describe('the rating a report asserts', () => {
     expect(ratingClaim('**Rating: Fair**\n\nThis is the most favourable rating.')).toBe('fair')
     expect(ratingClaim('**Marginal**. The control environment is weak.')).toBe('marginal')
     expect(ratingClaim('Overall rating: Unsatisfactory.')).toBe('unsatisfactory')
+    // The drafted conclusion's own opening: the full stop inside the bold.
+    expect(ratingClaim('**Unsatisfactory.** The control environment does not provide assurance.')).toBe('unsatisfactory')
+    expect(ratingClaim('**Fair:** controls mostly operate.')).toBe('fair')
     // Words between are not a rating claim — to report.py either.
     expect(ratingClaim('The overall rating is Fair.')).toBeNull()
   })

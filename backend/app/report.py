@@ -86,9 +86,12 @@ _PRELIMINARY_BANNER = (
 )
 # A rating is claimed either in bold or after the word "rating". Both forms are
 # required to carry the word itself, because "fair" is ordinary English and a
-# looser pattern would raise an error on prose that assigns nothing.
+# looser pattern would raise an error on prose that assigns nothing. The bold
+# form admits one closing punctuation mark inside the asterisks: a conclusion
+# opening "**Unsatisfactory.**" assigns that rating, and reading it as no claim
+# drew the report as unrated and let an overstated rating pass the check below.
 _RATING_CLAIM = re.compile(
-    r"\*\*\s*(satisfactory|fair|marginal|unsatisfactory)\s*\*\*"
+    r"\*\*\s*(satisfactory|fair|marginal|unsatisfactory)\s*[.:;,!]?\s*\*\*"
     r"|\brating\b[^A-Za-z0-9]{0,12}(satisfactory|fair|marginal|unsatisfactory)\b",
     re.IGNORECASE,
 )
@@ -1402,8 +1405,25 @@ def _drafted_sections(
             raise ValueError(
                 "no overall rating may be assigned while fieldwork remains open"
             )
-        if body := str(parsed.get("conclusion") or "").strip():
-            drafted[_CONCLUSION_SECTION_KEY] = body
+        body = str(parsed.get("conclusion") or "").strip()
+        if not body:
+            return
+        # The validated `rating` is the claim; the prose is how the report
+        # states it, and every reader recovers the rating from the prose. So
+        # the prose must say it, in a form `_RATING_CLAIM` reads, and must not
+        # say a different one.
+        stated = _RATING_CLAIM.search(body)
+        stated_rating = (
+            next(value for value in stated.groups() if value is not None).casefold()
+            if stated else ""
+        )
+        if stated_rating and stated_rating != rating:
+            raise ValueError(
+                f"the conclusion states '{stated_rating}' but proposes '{rating or 'none'}'"
+            )
+        if rating and not stated_rating:
+            body = f"**{rating.title()}.** {body}"
+        drafted[_CONCLUSION_SECTION_KEY] = body
 
     def key_findings() -> None:
         parsed = _model_json(

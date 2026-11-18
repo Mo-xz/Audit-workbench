@@ -780,6 +780,50 @@ def test_an_overstated_rating_is_rejected_and_flagged(monkeypatch, workspace_wit
         for issue in report.quality_checks(ws, "# Report\n\n**Rating: Satisfactory**")["issues"]
     }
     assert "report_rating_unsupported" in codes
+    # Written the way a drafted conclusion opens, with the stop inside the bold.
+    punctuated = {
+        issue["code"]
+        for issue in report.quality_checks(ws, "# Report\n\n**Satisfactory.** All is well.")["issues"]
+    }
+    assert "report_rating_unsupported" in punctuated
+
+
+def _drafted_conclusion(monkeypatch, ws, proposed: dict) -> tuple[dict, list]:
+    def fake_chat(messages, tools=None, temperature=0.0, profile="assistant"):
+        if "conclusion" in messages[0]["content"].splitlines()[0]:
+            return {"content": json.dumps(proposed)}
+        return {"content": json.dumps({"rows": []})}
+
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    band = report.rating_band({"preliminary": False, "rcm": [], "findings": [{"severity": "critical"}]})
+    return report._drafted_sections(ws, report.build_context(ws), band, run_id=None, model=None)
+
+
+def test_a_drafted_conclusion_always_states_the_rating_it_proposed(monkeypatch, workspace_with_data):
+    ws, *_ = linked_workspace(workspace_with_data)
+
+    drafted, _warnings = _drafted_conclusion(monkeypatch, ws, {
+        "rating": "unsatisfactory", "conclusion": "The control environment does not provide assurance.",
+    })
+    body = drafted[report._CONCLUSION_SECTION_KEY]
+    assert body.startswith("**Unsatisfactory.** ")
+    assert report._RATING_CLAIM.search(body).group(1).casefold() == "unsatisfactory"
+
+    kept, _warnings = _drafted_conclusion(monkeypatch, ws, {
+        "rating": "marginal", "conclusion": "**Marginal.** Controls need work.",
+    })
+    assert kept[report._CONCLUSION_SECTION_KEY] == "**Marginal.** Controls need work."
+
+
+def test_a_conclusion_stating_another_rating_than_it_proposed_is_refused(monkeypatch, workspace_with_data):
+    ws, *_ = linked_workspace(workspace_with_data)
+
+    drafted, warnings = _drafted_conclusion(monkeypatch, ws, {
+        "rating": "unsatisfactory", "conclusion": "**Marginal.** Controls need work.",
+    })
+
+    assert report._CONCLUSION_SECTION_KEY not in drafted
+    assert any("states 'marginal' but proposes 'unsatisfactory'" in warning for warning in warnings)
 
 
 def test_quality_checks_are_advisory_and_detect_traceability_arithmetic_and_exceptions(workspace_with_data):

@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import base64
+import ssl
 import threading
 import time
 from typing import Any
@@ -122,6 +123,18 @@ _rate_limit_not_before = 0.0
 
 class LLMError(RuntimeError):
     """A user-facing problem talking to the LLM (not configured, API error)."""
+
+
+class LLMUnreachableError(LLMError):
+    """The provider could not be reached at all, after every transport attempt.
+
+    A network fault rather than a request fault: no response came back, so
+    nothing about the request is wrong and nothing about it would change the
+    outcome. Kept distinct so a durable run can pause and wait for the
+    connection instead of failing every remaining unit against a dead link —
+    one outage once failed 34 units in a minute and left a report drafted from
+    nothing. Callers that cannot wait still see an :class:`LLMError`.
+    """
 
 
 @dataclass(frozen=True)
@@ -863,7 +876,15 @@ def chat(
                 _finish_attempt(attempt_record, attempt_started)
                 if call_id: debug_store.add_attempt(trace_workspace_id, call_id, attempt_record)
                 continue
-            terminal = LLMError(f"Could not reach the LLM endpoint: {error.reason}")
+            # A certificate the client refuses is configuration, not an
+            # outage: waiting for it to come back would wait forever.
+            terminal = (
+                LLMError(f"Could not reach the LLM endpoint: {error.reason}")
+                if isinstance(error.reason, ssl.SSLCertVerificationError)
+                else LLMUnreachableError(
+                    f"Could not reach the LLM endpoint: {error.reason}"
+                )
+            )
             _finish_attempt(attempt_record, attempt_started)
             if call_id:
                 debug_store.add_attempt(trace_workspace_id, call_id, attempt_record)
@@ -884,7 +905,14 @@ def chat(
                 _finish_attempt(attempt_record, attempt_started)
                 if call_id: debug_store.add_attempt(trace_workspace_id, call_id, attempt_record)
                 continue
-            terminal = LLMError(f"LLM request failed: {error}")
+            # A dropped connection is the network; a read timeout or an
+            # unparseable body may be this request, so only the first is
+            # reported as the provider being unreachable.
+            terminal = (
+                LLMUnreachableError(f"Could not reach the LLM endpoint: {error}")
+                if isinstance(error, ConnectionError)
+                else LLMError(f"LLM request failed: {error}")
+            )
             _finish_attempt(attempt_record, attempt_started)
             if call_id:
                 debug_store.add_attempt(trace_workspace_id, call_id, attempt_record)

@@ -329,6 +329,8 @@ class DefaultModelGateway:
         progress_readers: Mapping[str, Callable[[str], list[dict[str, Any]]]] | None = None,
         progress_sink: Callable[[str, list[dict[str, Any]], str], None] | None = None,
         heartbeat_sink: Callable[[str], None] | None = None,
+        provider_unreachable: Callable[..., None] | None = None,
+        release_model_turn: Callable[..., None] | None = None,
     ):
         self.workspace_id = workspace_id
         self.workspace_root = workspace_root
@@ -353,6 +355,11 @@ class DefaultModelGateway:
         # Optional one-shot "this is taking a while" note. Absent, a slow call
         # is silent until it settles, same as before this existed.
         self._heartbeat_sink = heartbeat_sink
+        # Optional outage handling. Present, an unreachable provider blocks
+        # the calling turn until the run is resumed and then sends it again;
+        # absent, the error reaches the caller as it always did.
+        self._provider_unreachable = provider_unreachable
+        self._release_model_turn = release_model_turn
         self.context = threading.local()
 
     def complete(
@@ -387,9 +394,17 @@ class DefaultModelGateway:
         so a run's spend still adds up. It carries the worker's own ``attempt``
         unchanged — the worker did not attempt anything twice, the provider
         did — and says so with ``retry_reason``.
+
+        An unreachable provider is the one transport failure handled here, and
+        only when the run can wait for it: the turn pauses the run, and once
+        the auditor resumes it the same request goes again. Nothing was
+        answered, so neither the unusable-completion retry nor the worker's
+        attempt is spent, and the reservation was already returned.
         """
         last = 1 + UNUSABLE_COMPLETION_RETRIES
-        for provider_try in range(1, last + 1):
+        provider_try = 1
+        while True:
+            call_started = time.monotonic()
             try:
                 return self._complete_once(
                     system,
@@ -405,9 +420,13 @@ class DefaultModelGateway:
                     retry_reason="unusable" if provider_try > 1 else None,
                 )
             except ModelResponseUnusable:
-                if provider_try == last:
+                if provider_try >= last:
                     raise
-        raise AssertionError("unreachable")  # pragma: no cover
+                provider_try += 1
+            except llm.LLMUnreachableError as error:
+                if self._provider_unreachable is None:
+                    raise
+                self._provider_unreachable(error, call_started=call_started)
 
     def _complete_once(
         self,
@@ -619,12 +638,34 @@ class DefaultModelGateway:
                         finally:
                             if stream is not None:
                                 stream.flush()
+                    except llm.LLMUnreachableError:
+                        # No response came back, so it says nothing about the
+                        # images; it is an outage, not a refusal of vision.
+                        raise
                     except llm.LLMError as error:
                         if handles:
                             raise VisionRequestRejected(
                                 f"vision_request_rejected: {error}"
                             ) from error
                         raise
+        except llm.LLMUnreachableError:
+            # The turn is about to be sent again once the run resumes, and
+            # reserved again then; a charge for an unanswered request would
+            # count it twice.
+            if (
+                self._provider_unreachable is not None
+                and self._release_model_turn is not None
+            ):
+                self._release_model_turn(
+                    request_characters=request_characters,
+                    estimated_input_tokens=estimated_input_tokens,
+                    text_token_estimate=text_token_estimate,
+                    image_token_estimate=image_token_estimate,
+                    image_count=len(handles),
+                    prepared_bytes=media_bytes,
+                    prepared_pixels=media_pixels,
+                )
+            raise
         finally:
             if heartbeat_timer is not None:
                 heartbeat_timer.cancel()

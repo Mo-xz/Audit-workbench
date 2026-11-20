@@ -190,6 +190,17 @@ class DefaultRunRuntime:
         self._limit_error = limit_error
         self._cancelled_error = cancelled_error
         self._deadline = self._monotonic() + max_runtime_seconds
+        # Provider-outage pause. Parallel units meet the same dead connection
+        # at once, so every one of them waits on the one pause and one resume
+        # releases them all: the generation is what tells a waiter its pause
+        # was already resumed by another thread.
+        self._outage_lock = threading.Lock()
+        self._outage_generation = 0
+        self._outage_since: float | None = None
+        self._last_resumed_at: float | None = None
+        # A record paused for an outage and relaunched after a restart is no
+        # longer waiting on anything; the next save drops the stale marker.
+        self.run.pop("provider_outage", None)
         self._interactions = InteractionTransitions(
             workspace=self.workspace,
             run=self.run,
@@ -612,6 +623,125 @@ class DefaultRunRuntime:
         (drain_inbox or self.drain_inbox)()
         if self._monotonic() > self._deadline:
             raise self._limit_error("run time limit reached")
+
+    def wait_for_provider(
+        self,
+        error: BaseException,
+        *,
+        call_started: float | None = None,
+        on_pause: Callable[[BaseException], None] | None = None,
+    ) -> None:
+        """Pause the run after the provider could not be reached, until resumed.
+
+        Returns once the auditor resumes the run, so the caller can send the
+        same request again; raises the cancellation error if the run is stopped
+        instead. The unit in flight stays in flight: it has not failed, and its
+        attempt is not spent, because no part of it was answered.
+
+        ``call_started`` is the monotonic time the failed call began. A call
+        that began before the most recent resume failed against the outage that
+        resume already answered, so it retries at once rather than pausing the
+        run a second time for the same outage.
+
+        ``on_pause`` is called once per outage, by the thread that opens it,
+        so a host can say why the run stopped without saying it per unit.
+
+        Without a live handle there is no one to resume the run, so the error
+        is raised as it was.
+        """
+        if self.handle is None:
+            raise error
+        with self._outage_lock:
+            if (
+                call_started is not None
+                and self._outage_since is None
+                and self._last_resumed_at is not None
+                and call_started < self._last_resumed_at
+            ):
+                return
+            generation = self._outage_generation
+            opening = self._outage_since is None
+            if opening:
+                self._outage_since = self._monotonic()
+        if opening:
+            with self._state_lock:
+                self.run["provider_outage"] = {
+                    "since": self.utcnow(),
+                    "error": str(error),
+                }
+                self.save()
+            self.emit("provider_unreachable", {"error": str(error)})
+            if on_pause is not None:
+                on_pause(error)
+            self.set_status("paused")
+        while True:
+            if self.handle.cancel.is_set():
+                raise self._cancelled_error()
+            resumed = self.handle.resume.wait(0.2)
+            if self.handle.cancel.is_set():
+                raise self._cancelled_error()
+            with self._outage_lock:
+                if self._outage_generation != generation:
+                    return
+                if not resumed:
+                    continue
+                now = self._monotonic()
+                waited = now - (self._outage_since or now)
+                self._outage_generation += 1
+                self._outage_since = None
+                self._last_resumed_at = now
+                self.handle.resume.clear()
+                self.handle.pause_requested.clear()
+            break
+        self._extend_deadline(waited)
+        with self._state_lock:
+            outage = self.run.pop("provider_outage", None)
+            if outage:
+                self.run.setdefault("provider_outages", []).append(
+                    {**outage, "resumed_at": self.utcnow()}
+                )
+            self.save()
+        self.emit("provider_resumed", {})
+        self.set_status("executing")
+
+    def release_model_turn(
+        self,
+        *,
+        request_characters: int,
+        estimated_input_tokens: int,
+        text_token_estimate: int | None = None,
+        image_token_estimate: int = 0,
+        image_count: int = 0,
+        prepared_bytes: int = 0,
+        prepared_pixels: int = 0,
+    ) -> None:
+        """Return a reservation for a request the provider never received.
+
+        Only for an unreachable provider: nothing was sent, nothing was spent,
+        and the same request is about to be reserved again once the run
+        resumes. Left charged, every outage would cost a resumed run one turn
+        per unit that was in flight, and a tightly sized budget would end it.
+        """
+        with self._state_lock:
+            usage = self.run.setdefault("usage", {})
+
+            def take(key: str, amount: int) -> None:
+                usage[key] = max(0, int(usage.get(key) or 0) - int(amount))
+
+            take("llm_turns", 1)
+            take("estimated_prompt_tokens", estimated_input_tokens)
+            take(
+                "estimated_text_tokens",
+                text_token_estimate
+                if text_token_estimate is not None
+                else max(1, request_characters // 4),
+            )
+            take("estimated_image_tokens", image_token_estimate)
+            take("image_count", image_count)
+            take("prepared_image_bytes", prepared_bytes)
+            take("prepared_image_pixels", prepared_pixels)
+            take("request_characters", request_characters)
+            self.save()
 
     def drain_inbox(self, *, queue_commands: bool = False) -> None:
         """Move pending steering or follow-up commands into durable run state."""

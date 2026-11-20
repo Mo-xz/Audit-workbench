@@ -173,6 +173,33 @@ class BaseRunner:
             progress_readers=PROGRESS_READERS,
             progress_sink=self._emit_model_progress,
             heartbeat_sink=self._emit_model_wait_heartbeat,
+            provider_unreachable=self._wait_for_provider,
+            release_model_turn=getattr(self.runtime, "release_model_turn", None),
+        )
+
+    def _wait_for_provider(
+        self, error: BaseException, *, call_started: float | None = None
+    ) -> None:
+        """Pause on an unreachable provider instead of failing the unit.
+
+        A run that kept going through an outage failed every unit after the
+        first in about a second each, then ran the stages downstream of them
+        over nothing and reported them done. Waiting keeps the work where it
+        stopped; resuming sends the same request again. A runtime that cannot
+        wait (an injected test double without the method) raises as before.
+        """
+        wait = getattr(self.runtime, "wait_for_provider", None)
+        if wait is None:
+            raise error
+        wait(error, call_started=call_started, on_pause=self._say_provider_paused)
+
+    def _say_provider_paused(self, error: BaseException) -> None:
+        narration.say(
+            self.run,
+            self.emit,
+            "I can't reach the model provider, so I've paused the run — nothing "
+            "has failed. Resume it once the connection is back and it will "
+            f"carry on from where it stopped. ({error})",
         )
 
     def _emit_model_progress(

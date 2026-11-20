@@ -77,6 +77,13 @@ class InputWorkspace(Workspace):
     """Read-only local view; saving it would leak proposed joins into the record."""
     def __init__(self, workspace: Workspace, recipes=(), *, validated=False):
         self.__dict__.update(workspace.__dict__)
+        # Hydration bookkeeping is per instance. Shared, an artifact this view
+        # hydrated was recorded as loaded on the workspace it came from, which
+        # never received the value: its next read of that artifact raised
+        # KeyError (``'rcm'``, when a promotion of an aligned analysis was the
+        # first to name the matrix).
+        self._loaded = set(getattr(workspace, "_loaded", ()))
+        self._artifact_snapshot = dict(getattr(workspace, "_artifact_snapshot", {}))
         self._table_signature_cache = {}
         self._input_frames = {}
         self._input_profiles = {}

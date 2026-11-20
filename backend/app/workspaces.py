@@ -73,19 +73,34 @@ def write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:6]}.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    # Windows can briefly deny a replace while antivirus/indexing software or
-    # a concurrent API read has the destination open. Retrying preserves the
-    # atomic-write guarantee without surfacing a spurious engagement error.
-    for attempt in range(6):
+    try:
+        replace_with_retry(tmp, path)
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        raise
+    _record_atomic_artifact_transition(path, before_meta, payload)
+
+
+#: How long a replace waits out a sharing lock, in growing steps (~4 s in all).
+#: The former 0.3 s lost a unit's commit to a lock held longer than that.
+REPLACE_RETRY_DELAYS = (0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.5)
+
+
+def replace_with_retry(source: Path, target: Path) -> None:
+    """``os.replace``, waiting out a brief Windows sharing lock.
+
+    Windows denies a replace while antivirus, indexing or sync software, or a
+    concurrent read, has the destination open. Retrying keeps the atomic-write
+    guarantee without surfacing a spurious engagement error.
+    """
+    for delay in (*REPLACE_RETRY_DELAYS, None):
         try:
-            os.replace(tmp, path)
-            _record_atomic_artifact_transition(path, before_meta, payload)
+            os.replace(source, target)
             return
         except PermissionError:
-            if attempt == 5:
-                tmp.unlink(missing_ok=True)
+            if delay is None:
                 raise
-            time.sleep(0.02 * (attempt + 1))
+            time.sleep(delay)
 
 
 def _debug_artifact_meta(path: Path, payload: object, raw: bytes | None = None) -> dict:
@@ -442,7 +457,7 @@ def _write_planning_artifact(root: Path, planning: dict) -> None:
     apm_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = apm_path.with_name(f".{apm_path.name}.{uuid.uuid4().hex[:6]}.tmp")
     tmp.write_text(str(planning.get("apm_markdown") or ""), encoding="utf-8")
-    os.replace(tmp, apm_path)
+    replace_with_retry(tmp, apm_path)
 
 
 # Every artifact hydrated on first access rather than at construction.  See

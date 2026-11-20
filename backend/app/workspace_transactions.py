@@ -64,7 +64,9 @@ def _write_text_atomic(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex[:6]}.tmp")
     temporary.write_text(value, encoding="utf-8")
-    os.replace(temporary, path)
+    from .workspaces import replace_with_retry
+
+    replace_with_retry(temporary, path)
 
 
 def prepare_artifact_writes(

@@ -24,8 +24,9 @@ Only answers the run *kept* are ever served
 - A completed call whose answer was empty, or cut off at the output limit, was
   retried with the same request; the retry is the recording.
 - A completed call whose answer a validator rejected was followed by a repair
-  turn: the same request with "…could not be used: <reason>" appended to its
-  last message. The original request is answered with the *last* answer of
+  turn: the same request with the rejection appended to its last message, or
+  with the rejected answer and a correction added as two more turns. The
+  original request is answered with the *last* answer of
   that chain, so a replayed unit passes validation on its first turn and the
   rejected draft is never shown, never revalidated, never repaired again.
 
@@ -43,7 +44,11 @@ How a request is matched
    the translation. The recorded answer is served with every identifier the
    pairing knows rewritten to today's, and the pairing is remembered for the
    steps that follow. Hashes, run ids and timestamps are read the same way,
-   because they move with the identifiers they summarise.
+   because they move with the identifiers they summarise; so are the
+   workspace's own id, and its name and revision where code states them.
+   Where that strict reading finds nothing, it is tried once more with every
+   list of records sorted by its content (``reordered``): a prompt that lists
+   rows by id lists them in another order once the ids are new.
 3. ``same_step`` — the calls recorded for the same stage over the same
    artifact refs (translated through the remembered pairings), from the most
    recent run that made them, served in their recorded order across the
@@ -79,9 +84,11 @@ from . import debug_store
 ENV_VAR = "LLM_REPLAY"
 SOURCE_ENV_VAR = "LLM_REPLAY_SOURCE"
 _ON = {"1", "on", "true", "yes"}
-#: How every repair turn in the codebase tells the model its answer was
-#: rejected; the suffix a repair request adds to the request it repairs.
-REPAIR_MARKER = "could not be used"
+#: How repair turns that append to the request tell the model its answer was
+#: rejected: "...could not be used: <reason>" in most workers, "Repair the
+#: prior response: <reason>" in analysis promotion, "...could not be parsed"
+#: where the answer was not even JSON.
+REPAIR_MARKERS = ("could not be used", "Repair the prior response", "could not be parsed")
 #: What reads as an identifier. Broad on purpose: a token that is the same on
 #: both sides — a constant, an amount, a date in the data — pairs with itself
 #: and changes nothing, while one this misses makes two requests that name the
@@ -91,10 +98,25 @@ IDENTIFIER = re.compile(
     r"(?<![A-Za-z0-9_])(?:"
     r"\d{8}-\d{6}-[0-9a-f]{6}"
     r"|(?:chat|msg|call|cmd|ckpt)_[0-9a-z_]{6,40}"
+    r"|ws_[0-9a-f]{16,32}"
     r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
-    r"|[A-Z]{1,6}-[0-9A-Z]{4,16}"
+    r"|[A-Z]{1,6}-[0-9A-Z]{4,40}"
     r"|[0-9a-f]{8,64}"
     r")(?![A-Za-z0-9_])"
+)
+
+#: Where code states the calling workspace's own name or revision in a
+#: prompt: the assistant's workspace manifest, the report's workspace block,
+#: and the report overview's ``engagement``. A rebuilt engagement is named
+#: differently and saved a different number of times, so these read as
+#: placeholders. Only these keyed values: a department or a document that
+#: happens to share the workspace's name is data, and stays as it is.
+WORKSPACE_IDENTITY = (
+    re.compile(
+        r'("workspace":\s*\{\s*"id":\s*"ws_[0-9a-f]+",\s*"name":\s*)"(?:[^"\\]|\\.)*"'
+        r'(?:(,\s*"revision":\s*)\d+)?'
+    ),
+    re.compile(r'("engagement":\s*)"(?:[^"\\]|\\.)*"'),
 )
 
 _lock = threading.Lock()
@@ -153,7 +175,65 @@ def canonical(text: str) -> tuple[str, list[str]]:
     return IDENTIFIER.sub(placeholder, text), list(order)
 
 
-def _canonical_sha(request: Any) -> tuple[str, list[str]]:
+def _without_workspace_identity(value: Any) -> Any:
+    """``value`` with the calling workspace's own name and revision, where
+    code states them, read as placeholders."""
+    if isinstance(value, str):
+        def placeholder(match: re.Match) -> str:
+            revision = match.group(2) if match.re.groups >= 2 else None
+            named = f'{match.group(1)}"⟨workspace⟩"'
+            return named + (f"{revision}⟨revision⟩" if revision else "")
+        for pattern in WORKSPACE_IDENTITY:
+            value = pattern.sub(placeholder, value)
+        return value
+    if isinstance(value, dict):
+        return {key: _without_workspace_identity(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_without_workspace_identity(item) for item in value]
+    return value
+
+
+def _order_free(value: Any) -> Any:
+    """``value`` with every list of records put in an order their content
+    decides, not their identifiers. A prompt that lists matrix rows or tests
+    sorted by id lists the same rows in another order once the ids are new;
+    sorting each list by its records with identifiers blanked puts both in
+    one order, so the identifiers then pair by what the records say. A
+    message that is JSON text is read as JSON first."""
+    if isinstance(value, dict):
+        return {key: _order_free(item) for key, item in value.items()}
+    if isinstance(value, list):
+        items = [_order_free(item) for item in value]
+        if items and all(isinstance(item, dict) for item in items):
+            items.sort(key=lambda item: IDENTIFIER.sub(
+                "⟨⟩", json.dumps(item, sort_keys=True)
+            ))
+        return items
+    if isinstance(value, str) and value.lstrip()[:1] in ("{", "["):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return value
+        return json.dumps(_order_free(parsed), indent=1)
+    return value
+
+
+def _order_free_request(request: Mapping) -> dict:
+    """The request with each message's content order-free; the messages
+    themselves keep their order, since a conversation is a sequence."""
+    result = dict(request)
+    result["messages"] = [
+        {**message, "content": _order_free(message.get("content"))}
+        if isinstance(message, Mapping) else message
+        for message in request.get("messages") or []
+    ]
+    return result
+
+
+def _canonical_sha(request: Any, *, order_free: bool = False) -> tuple[str, list[str]]:
+    request = _without_workspace_identity(request)
+    if order_free and isinstance(request, Mapping):
+        request = _order_free_request(request)
     text, tokens = canonical(json.dumps(request))
     return hashlib.sha256(text.encode("utf-8")).hexdigest(), tokens
 
@@ -212,14 +292,24 @@ def _usable(record: Mapping) -> bool:
 def _repairs(earlier: Mapping, later: Mapping) -> bool:
     """True when ``later`` is a repair turn for ``earlier``'s request.
 
-    The same messages, except that the last one carries the original text with
-    a rejection appended. Every repair path builds its turn from the original
-    request rather than from the previous repair, so a chain of repairs all
-    extend the first request.
+    Repairs take one of two shapes, and every repair path builds its turn from
+    the original request rather than from the previous repair, so a chain of
+    repairs all extend the first request:
+
+    - the same messages, the last one carrying the original text with a
+      rejection appended (:data:`REPAIR_MARKERS`);
+    - the original messages unchanged, then two more turns: the rejected
+      answer as the assistant's, and the correction as the user's. A tool
+      conversation also grows, but by an assistant turn and a tool result,
+      never a user turn, so it is not read as a repair.
     """
     first = (earlier.get("request") or {}).get("messages") or []
     second = (later.get("request") or {}).get("messages") or []
-    if not first or len(first) != len(second) or first[:-1] != second[:-1]:
+    if not first:
+        return False
+    if len(second) == len(first) + 2 and second[: len(first)] == first:
+        return [message.get("role") for message in second[len(first):]] == ["assistant", "user"]
+    if len(first) != len(second) or first[:-1] != second[:-1]:
         return False
     head, tail = first[-1], second[-1]
     if head.get("role") != tail.get("role"):
@@ -227,10 +317,11 @@ def _repairs(earlier: Mapping, later: Mapping) -> bool:
     original, repaired = head.get("content"), tail.get("content")
     if not isinstance(original, str) or not isinstance(repaired, str):
         return False
+    appended = repaired[len(original):]
     return (
         len(repaired) > len(original)
         and repaired.startswith(original)
-        and REPAIR_MARKER in repaired[len(original):]
+        and any(marker in appended for marker in REPAIR_MARKERS)
     )
 
 
@@ -335,9 +426,10 @@ def _exact(handle, body: Mapping) -> Recording | None:
     return None
 
 
-def _canonical_index(handle, key: str) -> dict[str, list[str]]:
+def _canonical_index(handle, key: str, *, order_free: bool = False) -> dict[str, list[str]]:
     """Canonical request hash -> recorded call ids, newest first, rebuilt only
     when the recordings change."""
+    key = f"{key}|order_free" if order_free else key
     signature = tuple(handle.execute(
         "SELECT count(*), max(started_at) FROM llm_calls"
         " WHERE status = 'completed' AND json_extract(record, '$.replay') IS NULL"
@@ -353,7 +445,7 @@ def _canonical_index(handle, key: str) -> dict[str, list[str]]:
         " ORDER BY started_at DESC"
     ):
         record = json.loads(row["record"])
-        digest, _tokens = _canonical_sha(record.get("request") or {})
+        digest, _tokens = _canonical_sha(record.get("request") or {}, order_free=order_free)
         index.setdefault(digest, []).append(str(row["id"]))
     with _lock:
         _indexes[key] = (signature, index)
@@ -375,19 +467,60 @@ def _known(workspace_id: str) -> tuple[dict[str, str], dict[str, str]]:
         return dict(_aliases.get(workspace_id) or {}), dict(_reverse.get(workspace_id) or {})
 
 
-def _translated(handle, key: str, body: Mapping, workspace_id: str) -> Recording | None:
-    digest, tokens = _canonical_sha(debug_store.sanitize(dict(body)))
-    for call_id in _canonical_index(handle, key).get(digest, []):
-        record = _load(handle, call_id)
-        if record is None or not _usable(record):
-            continue
-        _recorded_digest, recorded_tokens = _canonical_sha(record.get("request") or {})
-        if len(recorded_tokens) != len(tokens):
-            continue
-        pairs = dict(zip(recorded_tokens, tokens))
-        _remember(workspace_id, pairs)
-        forward, _backward = _known(workspace_id)
-        return _recording(handle, record, "translated", {**forward, **pairs})
+def _recorded_refs(current: tuple[str, ...], backward: Mapping[str, str]) -> set[str]:
+    """Today's step refs, written with the recorded identifiers known so far."""
+    return {
+        f"{kind}:{backward.get(value, value)}" if sep else backward.get(ref, ref)
+        for ref in current
+        for kind, sep, value in [ref.partition(":")]
+    }
+
+
+def _by_step(handle, call_ids: list[str], context: Mapping, workspace_id: str) -> list[str]:
+    """Candidates for one question, the one recorded for this step first.
+
+    A run can ask the same question several times over different records —
+    three document tests vouching the same transaction under three matrix
+    rows — and the answers differ. Each goes back to the step it was recorded
+    for: the candidate whose refs share the most with today's, read through the
+    pairings learned so far. Otherwise the newest stays first.
+    """
+    if len(call_ids) < 2:
+        return call_ids
+    _forward, backward = _known(workspace_id)
+    wanted = _recorded_refs(_refs(context), backward)
+    if not wanted:
+        return call_ids
+    scored = []
+    for position, call_id in enumerate(call_ids):
+        row = handle.execute("SELECT correlation FROM llm_calls WHERE id = ?", (call_id,)).fetchone()
+        refs = set(_refs(json.loads(row["correlation"] or "{}"))) if row else set()
+        scored.append((-len(wanted & refs), position, call_id))
+    return [call_id for _score, _position, call_id in sorted(scored)]
+
+
+def _translated(
+    handle, key: str, body: Mapping, workspace_id: str, context: Mapping,
+) -> Recording | None:
+    """The same question with other identifiers: strictly first, then with
+    lists of records compared in an order their content decides."""
+    request = debug_store.sanitize(dict(body))
+    for order_free, match in ((False, "translated"), (True, "reordered")):
+        digest, tokens = _canonical_sha(request, order_free=order_free)
+        candidates = _canonical_index(handle, key, order_free=order_free).get(digest, [])
+        for call_id in _by_step(handle, candidates, context, workspace_id):
+            record = _load(handle, call_id)
+            if record is None or not _usable(record):
+                continue
+            _recorded_digest, recorded_tokens = _canonical_sha(
+                record.get("request") or {}, order_free=order_free,
+            )
+            if len(recorded_tokens) != len(tokens):
+                continue
+            pairs = dict(zip(recorded_tokens, tokens))
+            _remember(workspace_id, pairs)
+            forward, _backward = _known(workspace_id)
+            return _recording(handle, record, match, {**forward, **pairs})
     return None
 
 
@@ -397,11 +530,7 @@ def _same_step(handle, context: Mapping, workspace_id: str) -> Recording | None:
     if not stage or not current_refs:
         return None
     forward, backward = _known(workspace_id)
-    refs = tuple(sorted(
-        f"{kind}:{backward.get(value, value)}" if sep else backward.get(ref, ref)
-        for ref in current_refs
-        for kind, sep, value in [ref.partition(":")]
-    ))
+    refs = tuple(sorted(_recorded_refs(current_refs, backward)))
     rows = handle.execute(
         "SELECT id, run_id, correlation FROM llm_calls"
         " WHERE status = 'completed' AND stage = ?"
@@ -460,7 +589,7 @@ def find(body: Mapping, context: Mapping) -> Recording | None:
     try:
         return (
             _exact(handle, body)
-            or _translated(handle, key, body, workspace_id)
+            or _translated(handle, key, body, workspace_id, context)
             or _same_step(handle, context, workspace_id)
         )
     finally:
@@ -479,7 +608,7 @@ def _reset_for_tests() -> None:
 __all__ = [
     "ENV_VAR",
     "IDENTIFIER",
-    "REPAIR_MARKER",
+    "REPAIR_MARKERS",
     "Recording",
     "SOURCE_ENV_VAR",
     "canonical",

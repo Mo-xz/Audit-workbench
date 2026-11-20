@@ -267,3 +267,118 @@ def test_a_missing_source_fails_plainly(workspace_with_data, monkeypatch, tmp_pa
     monkeypatch.setenv(llm_replay.SOURCE_ENV_VAR, str(tmp_path / "absent" / "telemetry.db"))
     with pytest.raises(llm.LLMError, match="names no telemetry database"):
         _replay(workspace_with_data, monkeypatch, "anything")
+
+
+def test_the_workspace_s_own_identity_does_not_block_a_rebuild(workspace_with_data, monkeypatch):
+    """The assistant's manifest names the workspace, its id and its revision;
+    a rebuild is named and saved differently, and still asks the same thing.
+    A department that shares the workspace's name stays data."""
+    ws = workspace_with_data
+    recorded = (
+        'Workspace manifest:\n{\n "workspace": {\n  "id": "ws_1a1ece863b2e70942eff5db",\n'
+        '  "name": "Procurement",\n  "revision": 129\n }\n}\n'
+        '{"engagement": "Procurement", "department": "Procurement"}'
+    )
+    rebuilt = (
+        recorded.replace("ws_1a1ece863b2e70942eff5db", "ws_1a1ed5c4062eb57963a0db4")
+        .replace('"name": "Procurement"', '"name": "Procurement2"')
+        .replace('"engagement": "Procurement"', '"engagement": "Procurement2"')
+        .replace("129", "57")
+    )
+    _record(ws, monkeypatch, [(recorded, "Start the RCM revision.", "stop")], run_id="rec", refs=())
+
+    assert _replay(ws, monkeypatch, rebuilt, refs=())["content"] == "Start the RCM revision."
+    with pytest.raises(llm.LLMError, match="no recorded model response"):
+        _replay(ws, monkeypatch, rebuilt.replace('"department": "Procurement"', '"department": "Finance"'),
+                refs=())
+
+
+def test_rows_listed_in_id_order_pair_by_what_they_say(workspace_with_data, monkeypatch):
+    """A prompt that lists records sorted by their (random) ids lists them in
+    another order once the ids are new; each must still pair with the record
+    that says the same thing, so the recorded decision lands on the right row."""
+    ws = workspace_with_data
+
+    def prompt(rows):
+        return json.dumps({"instruction": "shorten the matrix", "ROWS": [
+            {"id": row_id, "risk": risk} for row_id, risk in sorted(rows)
+        ]})
+
+    recorded = prompt([("RCM-111111", "Split requisitions"), ("RCM-999999", "Duplicate payment")])
+    answer = '{"decisions": [{"id": "RCM-111111", "decision": "keep"}, {"id": "RCM-999999", "decision": "retire"}]}'
+    _record(ws, monkeypatch, [(recorded, answer, "stop")], run_id="rec", refs=())
+    # Today the duplicate-payment row has the smaller id, so it is listed first.
+    rebuilt = prompt([("RCM-AAAAAA", "Duplicate payment"), ("RCM-BBBBBB", "Split requisitions")])
+
+    message = _replay(ws, monkeypatch, rebuilt, refs=())
+
+    decisions = {item["id"]: item["decision"] for item in json.loads(message["content"])["decisions"]}
+    assert decisions == {"RCM-BBBBBB": "keep", "RCM-AAAAAA": "retire"}
+    assert _replayed_records(ws)[-1]["replay"]["match"] == "reordered"
+
+
+def test_one_question_asked_for_several_rows_answers_each_row_its_own(workspace_with_data, monkeypatch):
+    """A run that asks the same question over three matrix rows recorded
+    three answers; each rebuilt call gets the answer recorded for its row,
+    found through the row pairings learned earlier in the rebuild."""
+    ws = workspace_with_data
+    rows = '{"rows": [{"id": "RCM-111111", "risk": "Split"}, {"id": "RCM-999999", "risk": "Duplicate"}]}'
+    _record(ws, monkeypatch, [(rows, "noted", "stop")], run_id="rec", refs=())
+    vouch = "Vouch item ITEM-{item} against goods receipt GRN2024004."
+    _record(ws, monkeypatch, [(vouch.format(item="A" * 24), "verdict for split", "stop")],
+            run_id="rec", stage="agent:cycle_vouch", refs=("rcm:RCM-111111",))
+    _record(ws, monkeypatch, [(vouch.format(item="B" * 24), "verdict for duplicate", "stop")],
+            run_id="rec", stage="agent:cycle_vouch", refs=("rcm:RCM-999999",))
+
+    _replay(ws, monkeypatch, rows.replace("RCM-111111", "RCM-CCCCCC").replace("RCM-999999", "RCM-DDDDDD"), refs=())
+    duplicate = _replay(ws, monkeypatch, vouch.format(item="C" * 24), stage="agent:cycle_vouch", refs=("rcm:RCM-DDDDDD",))
+    split = _replay(ws, monkeypatch, vouch.format(item="D" * 24), stage="agent:cycle_vouch", refs=("rcm:RCM-CCCCCC",))
+
+    assert duplicate["content"] == "verdict for duplicate"
+    assert split["content"] == "verdict for split"
+
+
+def _record_messages(ws, monkeypatch, conversations, *, run_id="rec", stage="agent:test", refs=("finding:F-1",)):
+    """Live calls whose requests are whole message lists, for repair shapes."""
+    monkeypatch.setenv("GROQ_API_KEY", "live-key")
+    for messages, content in conversations:
+        monkeypatch.setattr(llm.urllib.request, "urlopen",
+                            lambda request, timeout, c=content: FakeResponse(c))
+        with debug_store.trace_context(workspace_id=ws.id, workspace_root=str(ws.root),
+                                       run_id=run_id, stage=stage, artifact_refs=list(refs)):
+            llm.chat(messages, profile="agent")
+
+
+def test_a_repair_sent_as_two_more_turns_is_skipped_too(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    question = _messages("generate the tests for RCM-1")
+    _record_messages(ws, monkeypatch, [
+        (question, "not json"),
+        (question + [{"role": "assistant", "content": "not json"},
+                     {"role": "user", "content": "The preceding JSON response could not be used: no tests array."}],
+         '{"tests": []}'),
+    ])
+
+    assert _replay(ws, monkeypatch, "generate the tests for RCM-1")["content"] == '{"tests": []}'
+    assert len(_replayed_records(ws)[-1]["replay"]["skipped"]) == 1
+
+
+def test_a_repair_worded_as_repair_the_prior_response_is_skipped(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    _record(ws, monkeypatch, [
+        ("place analysis A-1", '{"code": "import polars as pl"}', "stop"),
+        ("place analysis A-1\nRepair the prior response: Imports are not allowed.", '{"code": "df"}', "stop"),
+    ], run_id="rec")
+
+    assert _replay(ws, monkeypatch, "place analysis A-1")["content"] == '{"code": "df"}'
+
+
+def test_a_tool_conversation_is_not_mistaken_for_a_repair(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    first = _messages("shorten the matrix")
+    second = first + [{"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "type": "function",
+                       "function": {"name": "start_command", "arguments": "{}"}}]},
+                      {"role": "tool", "tool_call_id": "t1", "content": "started"}]
+    _record_messages(ws, monkeypatch, [(first, "calling a tool"), (second, "Started the revision.")], refs=())
+
+    assert _replay(ws, monkeypatch, "shorten the matrix", refs=())["content"] == "calling a tool"

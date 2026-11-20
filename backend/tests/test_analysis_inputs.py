@@ -347,3 +347,17 @@ def test_definition_reconciliation_checks_every_recipe_source(mixed):
     reconciled = executors.reconcile_analysis_definitions(request, target)
     assert reconciled.disposition == "conflict"
     assert "table:requisitions" in reconciled.reason
+
+
+def test_an_input_view_hydrating_an_artifact_leaves_its_source_able_to_read_it(mixed):
+    """The view copies its workspace's attributes; its hydration bookkeeping
+    must not be shared, or an artifact the view reads first is recorded as
+    loaded on the source without ever reaching it (KeyError on next read)."""
+    ws = mixed.reload()
+    ws.rcm.append({"id": "RCM-1", "risk": "Invoices exceed order"})
+    ws.save()
+    source = ws.reload()
+    view = InputWorkspace(source)
+
+    assert [row["id"] for row in view.rcm] == ["RCM-1"]
+    assert [row["id"] for row in source.rcm] == ["RCM-1"]

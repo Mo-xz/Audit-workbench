@@ -548,7 +548,9 @@ def ungroup_observation(workspace: Workspace, observation_id: str) -> dict:
         raise WorkspaceError(f"Observation '{observation_id}' not found.")
     if not is_member(observation):
         raise WorkspaceError(f"Observation '{observation_id}' is not grouped into another.")
-    lead_id = str((observation.get("consolidation") or {}).get("into") or "")
+    from . import findings
+
+    lead_id =str((observation.get("consolidation") or {}).get("into") or "")
     lead = by_id.get(lead_id)
     now = workspace._updated_now()
     if lead is not None and str((lead.get("consolidation") or {}).get("role") or "") == "lead":
@@ -569,7 +571,7 @@ def ungroup_observation(workspace: Workspace, observation_id: str) -> dict:
             item["consolidation"] = {**consolidation, "observations": observations}
         else:
             item.pop("consolidation", None)
-        item["auditor_confirmed"] = False
+        findings.clear_confirmation(item)
         item["updated"] = now
     observation.pop("consolidation", None)
     observation["updated"] = now

@@ -635,6 +635,8 @@ def add(workspace: Workspace, payload: dict, *, source: str = "manual") -> dict:
             raise WorkspaceError(
                 "A finding cannot be auditor-confirmed: " + "; ".join(issues) + "."
             )
+        item["confirmed_by_kind"] = "auditor"
+        item["confirmed_at"] = created
     workspace.findings.append(item)
     workspace.save()
     return item
@@ -703,6 +705,7 @@ def update(workspace: Workspace, finding_id: str, changes: dict) -> dict:
             raise WorkspaceError(
                 "A finding cannot be auditor-confirmed: " + "; ".join(issues) + "."
             )
+    was_confirmed = bool(item.get("auditor_confirmed"))
     for key, value in changes.items():
         if key in (
             "rcm_refs", "rcm_semantic_refs", "procedure_refs", "test_refs",
@@ -713,10 +716,72 @@ def update(workspace: Workspace, finding_id: str, changes: dict) -> dict:
             item[key] = bool(value)
         else:
             item[key] = str(value or "")
+    if "auditor_confirmed" in changes:
+        if not item["auditor_confirmed"]:
+            clear_confirmation(item)
+        elif not was_confirmed or item.get("confirmed_by_kind") == "agent":
+            # Saving a finding with the box ticked is the auditor's own
+            # confirmation, and it replaces a run's: a finding a run confirmed
+            # in auto mode is reviewed exactly when a person confirms it again.
+            item["confirmed_by_kind"] = "auditor"
+            item["confirmed_by"] = None
+            item["confirmed_at"] = _now(workspace)
     if item.get("created_by") == "agent":
         item["created_by"] = "user"
     item["updated"] = _now(workspace)
     workspace.save()
+    return item
+
+
+#: Who a confirmation came from. A finding the auditor confirmed and one an
+#: auto-mode run confirmed reach the report the same way; the record keeps
+#: which it was so the report and the record can say so.
+CONFIRMATION_KINDS = ("auditor", "agent")
+_CONFIRMATION_FIELDS = ("confirmed_by", "confirmed_by_kind", "confirmed_at")
+
+
+def clear_confirmation(item: dict) -> None:
+    item["auditor_confirmed"] = False
+    for key in _CONFIRMATION_FIELDS:
+        item.pop(key, None)
+
+
+def confirm(
+    workspace: Workspace,
+    finding_id: str,
+    *,
+    confirmed_by: str,
+    confirmed_by_kind: str,
+    persist: bool = True,
+) -> dict:
+    """Confirm one finding for reporting on behalf of ``confirmed_by``.
+
+    The run's path to confirmation. Unlike :func:`update` it changes nothing
+    but the confirmation: a run confirming a finding has not authored it, so
+    ``created_by`` keeps saying who wrote it. The same deterministic checks
+    hold — an absorbed finding is reported through its lead, and a finding
+    with support issues is a draft whoever confirms it.
+    """
+    if confirmed_by_kind not in CONFIRMATION_KINDS:
+        raise WorkspaceError("Finding confirmation kind is not supported.")
+    item = _record(workspace, finding_id)
+    if str((item.get("consolidation") or {}).get("role") or "") == "absorbed":
+        raise WorkspaceError(
+            f"Finding '{finding_id}' is absorbed into "
+            f"'{item['consolidation'].get('into')}' and is reported there."
+        )
+    issues = support_issues(workspace, item)
+    if issues:
+        raise WorkspaceError(
+            "A finding cannot be confirmed: " + "; ".join(issues) + "."
+        )
+    item["auditor_confirmed"] = True
+    item["confirmed_by"] = str(confirmed_by or "") or None
+    item["confirmed_by_kind"] = confirmed_by_kind
+    item["confirmed_at"] = _now(workspace)
+    item["updated"] = item["confirmed_at"]
+    if persist:
+        workspace.save()
     return item
 
 
@@ -963,11 +1028,11 @@ def consolidate(
         # observation, its narrative is still the one draft's.
         "narrative_pending": True,
     }
-    lead["auditor_confirmed"] = False
+    clear_confirmation(lead)
     lead["updated"] = now
     for item in absorbed:
         item["consolidation"] = {**decision, "role": "absorbed", "into": lead_id}
-        item["auditor_confirmed"] = False
+        clear_confirmation(item)
         item["updated"] = now
     workspace.save()
     return lead
@@ -1000,7 +1065,7 @@ def unconsolidate(workspace: Workspace, finding_id: str) -> dict:
             lead.pop("consolidation", None)
         lead["updated"] = now
     item.pop("consolidation", None)
-    item["auditor_confirmed"] = False
+    clear_confirmation(item)
     item["updated"] = now
     workspace.save()
     return item

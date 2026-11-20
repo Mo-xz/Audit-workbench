@@ -59,6 +59,7 @@ from .capabilities.documents import (
     resolve_document_scope,
 )
 from .capabilities import planning as planning_capabilities
+from .capabilities import reporting as reporting_capabilities
 from .capabilities import tests as test_capabilities
 from .capabilities._shared import (
     named_observation_ids,
@@ -2991,8 +2992,18 @@ class AuditWorkflowExecution(ActionExecution):
         ``awaiting_confirmation`` records. On success the binder emits the
         ``workspace_changed`` report signal the generic deterministic path does
         not.
+
+        In auto mode the binder first confirms the findings the report may
+        carry. The report takes only confirmed findings, and confirmation was
+        otherwise an auditor's act no stage performed, so an auto run drafted
+        every finding and then wrote a report stating none had been found.
+        Confirming here, immediately before assembly, is what makes the draft
+        carry them; the authority came from the auditor choosing auto mode, so
+        each record names the agent, not a person.
         """
         self.ws = subject
+        if workflow_scope(self.run).get("permission_mode") is False:
+            self._auto_confirm_findings()
         ref, requires_reconcile = generate_report_draft(
             self.ws,
             run_id=self.run["id"],
@@ -3009,6 +3020,43 @@ class AuditWorkflowExecution(ActionExecution):
                 "Auditor-edited report preserved; reconcile the generated candidate.",
             )
         return DeterministicUnitResult("succeeded", (ref,))
+
+    def _auto_confirm_findings(self) -> None:
+        """Confirm, on the run's authority, every finding the report may carry.
+
+        The checks are :func:`reporting_capabilities.auto_confirmation`'s —
+        the same support checks an auditor's confirmation must pass — and a
+        finding they hold back is named on the run with its reason, so what
+        the report leaves out is legible rather than silent.
+        """
+
+        confirmable, held = reporting_capabilities.auto_confirmation(self.ws)
+        confirmed: list[str] = []
+        for item in confirmable:
+            try:
+                findings_module.confirm(
+                    self.ws,
+                    str(item["id"]),
+                    confirmed_by=reporting_capabilities.AGENT_CONFIRMER,
+                    confirmed_by_kind="agent",
+                    persist=False,
+                )
+            except WorkspaceError as error:
+                held.append((item, str(error)))
+                continue
+            confirmed.append(str(item["id"]))
+        if confirmed:
+            self.ws.save()
+            for finding_id in confirmed:
+                self.emit(
+                    "workspace_changed",
+                    {"kind": "finding", "id": finding_id, "action": "confirmed"},
+                )
+        for item, reason in held:
+            self.warn(
+                f"Finding '{item.get('title') or item.get('id')}' was not confirmed "
+                f"in auto mode and is left out of the report: {reason}"
+            )
 
     def _bind_unreachable(
         self,

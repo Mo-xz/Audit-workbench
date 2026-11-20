@@ -392,6 +392,9 @@ def _commit_lead_redraft(
             "Finding draft failed support validation: " + "; ".join(issues)
         )
     lead.update(candidate)
+    # A redrafted narrative is a new statement nobody has confirmed, whoever
+    # confirmed the old one.
+    findings.clear_confirmation(lead)
     lead["created_by"] = "agent"
     lead["source"] = "agent"
     lead["updated"] = fresh._updated_now()
@@ -487,6 +490,7 @@ def execute_finding(request: ExecutorRequest, raw_target: object) -> ExecutorRes
         # Keep the stable finding identity and creation record while replacing
         # the agent-authored draft from the current observation and evidence.
         existing.update(item)
+        findings.clear_confirmation(existing)
         existing["created_by"] = "agent"
         existing["source"] = "agent"
         existing["updated"] = fresh._updated_now()

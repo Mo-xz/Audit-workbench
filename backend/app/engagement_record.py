@@ -1365,6 +1365,7 @@ _OPEN_RANK = {
     "conclusions_await_auditor": 15,
     "tests_without_conclusion": 16,
     "unconfirmed_findings": 20,
+    "run_confirmed_findings": 21,
     "draft_rcm": 30,
 }
 
@@ -1485,6 +1486,25 @@ def _open_points(workspace: Workspace) -> list[dict]:
                    else " and will be left out of the report.")
             ),
             "action": "Confirm findings",
+            "destination": "findings",
+        })
+
+    # A finding an auto-mode run confirmed reaches the report, but nobody has
+    # read it yet. That is the delegation working, not a defect, and it stays
+    # a debt until a person confirms the finding for themselves.
+    delegated = [
+        item for item in reportable
+        if item.get("auditor_confirmed") and item.get("confirmed_by_kind") == "agent"
+    ]
+    if delegated:
+        points.append({
+            "key": "run_confirmed_findings",
+            "capability": "findings.drafted",
+            "message": (
+                f"{len(delegated)} of {len(reportable)} findings were confirmed "
+                "by an auto-mode run and await an auditor's review"
+            ),
+            "action": "Review findings",
             "destination": "findings",
         })
 

@@ -1714,6 +1714,13 @@ export interface AuditFinding {
   evidence_warnings?: string[]
   cause_pending: boolean
   auditor_confirmed: boolean
+  /**
+   * Who confirmed it, when it is confirmed. `agent` is an auto-mode run
+   * confirming for the report; an auditor confirming it again replaces that.
+   */
+  confirmed_by_kind?: 'auditor' | 'agent' | null
+  confirmed_by?: string | null
+  confirmed_at?: string | null
   source: 'agent' | 'manual' | 'promoted'
   /** Present once the finding has been consolidated with others, either way. */
   consolidation?: FindingConsolidation | null

@@ -161,7 +161,7 @@ def _safe_finding(item: dict, workspace: Workspace | None = None) -> dict:
         for key in (
             "id", "title", "severity", "narrative", "management_response",
             "rcm_refs", "rcm_semantic_refs", "test_refs", "execution_refs",
-            "cause_pending", "auditor_confirmed", "source",
+            "cause_pending", "auditor_confirmed", "confirmed_by_kind", "source",
         )
     } | {
         "evidence": [
@@ -1036,8 +1036,16 @@ def _detailed_findings(context: dict) -> str:
             f"### {numbers[str(item['id'])]}. {item.get('title') or item['id']}",
             f"**Severity:** {str(item.get('severity') or 'medium').title()} · "
             f"**Reference:** {_finding_link(context['workspace']['id'], item)}",
-            _finding_narrative(item),
         ]
+        if item.get("confirmed_by_kind") == "agent":
+            # Confirmed on an auto-mode run's authority, not a reviewer's. The
+            # report says so beside the finding it applies to, so a reader
+            # never takes a delegated confirmation for a reviewed one.
+            parts.append(
+                "**Confirmation:** confirmed by an auto-mode run; "
+                "not yet reviewed by an auditor."
+            )
+        parts.append(_finding_narrative(item))
         supporting = list(item.get("supporting_procedures") or [])
         if supporting:
             # A consolidated finding names the procedures it absorbed, so the

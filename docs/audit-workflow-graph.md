@@ -1389,6 +1389,7 @@ existed.
 | Units | one (`report`) |
 | Binding | **deterministic** (`reporting.report_draft`) — no worker. The introduction and scope, the conclusion, and the key-findings table are drafted through the run's gateway, one bounded turn each (`report.DRAFTING_TURNS`, counted in the audit budget); a rejected response keeps that section's deterministic draft |
 | Output | the assembled draft. An auditor-edited draft is preserved and its regenerated candidate left for reconciliation, recorded as `awaiting_confirmation`. Absorbed findings are excluded; a lead lists them under "Supporting procedures". Quality checks add `unreviewed_consolidation` (advisory) and `absorbed_finding_confirmed` (blocking). |
+| Auto mode | The report carries only confirmed findings, so in `auto` mode the binding first confirms every finding it may carry (`reporting.auto_confirmation`): not absorbed, passing `support_issues`, and not in an undecided suggested consolidation. Each is recorded `confirmed_by_kind: "agent"`, `confirmed_by: "agent:auto-mode"`, prints a **Confirmation** line under its heading, and stays a `run_confirmed_findings` debt on the record until an auditor confirms it themselves. A finding held back is named in a run warning. Readiness is `missing` in auto mode while any finding is confirmable, so an existing report written before confirmation is redone rather than reused. Permission mode and calls outside a run never confirm. |
 
 ### `audit.verified` — Audit verification
 

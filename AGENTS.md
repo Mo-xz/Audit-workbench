@@ -1206,6 +1206,17 @@ npm run build
   always been able to proceed without a cycle by writing document-question tests
   instead, and making an unapproved ruleset withhold every test in the
   engagement would break permission-mode runs to serve auto-mode ones.
+- **Auto mode confirms the findings its report carries.** The report takes
+  only `auditor_confirmed` findings, and no stage confirmed one, so an auto
+  Full audit wrote a report stating no findings over a register of drafts.
+  `report.working_draft`'s binding now confirms, in `auto` mode only and
+  immediately before assembly, every finding passing `support_issues` that is
+  not absorbed and not in an undecided consolidation, recording
+  `confirmed_by_kind: "agent"`. The report prints that beside the finding, the
+  record keeps it as a `run_confirmed_findings` debt until an auditor confirms
+  it themselves, and the stage's readiness is `missing` in auto mode while a
+  finding is confirmable so an earlier empty report is not reused. It is the
+  same delegation `tests.cycle_ruleset_approved` exercises.
 - Dashboard curation is no longer a workflow stage. Arranging tiles over results
   the roll-up already produced changes how an engagement is *read*, not what it
   establishes: nothing downstream ever took it as an input, and it was already

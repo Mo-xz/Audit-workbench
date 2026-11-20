@@ -12,7 +12,14 @@ declared context. The dependency edges come from the authoritative graph in
 
 from __future__ import annotations
 
-from ... import finding_consolidation, findings, rcm_execution, report, working_papers
+from ... import (
+    doc_tests,
+    finding_consolidation,
+    findings,
+    rcm_execution,
+    report,
+    working_papers,
+)
 from ...text import counted, verb
 from ...workspaces import Workspace
 from ..workflow import (
@@ -273,7 +280,63 @@ def _working_papers_generated() -> Capability:
 # --------------------------------------------------------------------------- #
 # report.working_draft (P7K)
 # --------------------------------------------------------------------------- #
-def _report_ready(workspace: Workspace, _scope: dict) -> Readiness:
+#: The identity an auto-mode run records when it confirms findings for the
+#: report. The same agent identity the cycle-rule approval records.
+AGENT_CONFIRMER = "agent:auto-mode"
+
+
+def _auto_mode(scope: dict) -> bool:
+    """Whether this run may confirm findings for the report.
+
+    Absent means *permission*, as for the cycle-rule gate: outside a run there
+    is no delegation in force, so an unconfirmed finding is waiting for an
+    auditor, not work for anyone to do.
+    """
+
+    return scope.get("permission_mode") is False
+
+
+def auto_confirmation(workspace: Workspace) -> tuple[list[dict], list[tuple[dict, str]]]:
+    """The findings an auto-mode report may confirm, and those it must leave.
+
+    Only a finding the report could carry is considered — not yet confirmed and
+    not absorbed into a lead. Of those, a run confirms the ones that pass the
+    same deterministic support checks an auditor's confirmation must pass, and
+    leaves two kinds for the auditor, each with the reason:
+
+    - a finding with support issues, which is a draft whoever confirms it;
+    - a finding whose observation sits in a suggested consolidation nobody has
+      decided. Auto mode leaves shared-cause groups to the auditor, and
+      confirming their members would make accepting the group later refuse
+      them (``include_confirmed``).
+    """
+
+    suggestion = finding_consolidation.load(
+        workspace, finding_consolidation.basis_sha1(workspace)
+    )
+    undecided = {
+        str(value)
+        for group in finding_consolidation.undecided_groups(suggestion)
+        for value in group.get("observation_ids") or []
+    }
+    confirmable: list[dict] = []
+    held: list[tuple[dict, str]] = []
+    with doc_tests.request_cache_scope():
+        for item in workspace.findings:
+            if item.get("auditor_confirmed") or finding_consolidation.is_absorbed(item):
+                continue
+            if str(item.get("source_observation_id") or "") in undecided:
+                held.append((item, "it is in a suggested consolidation awaiting a decision"))
+                continue
+            issues = findings.support_issues(workspace, item)
+            if issues:
+                held.append((item, "; ".join(issues)))
+                continue
+            confirmable.append(item)
+    return confirmable, held
+
+
+def _report_ready(workspace: Workspace, scope: dict) -> Readiness:
     current = report.hydrate(workspace)
     if not str(current.get("generated_markdown") or current.get("markdown") or "").strip():
         return Readiness("missing", ("the report working draft is empty",))
@@ -282,6 +345,21 @@ def _report_ready(workspace: Workspace, _scope: dict) -> Readiness:
             "review_required",
             ("an auditor-edited report has a generated candidate awaiting reconciliation",),
         )
+    if _auto_mode(scope):
+        # In auto mode the report stage confirms what the report may carry
+        # before it assembles the draft, so a draft written before those
+        # findings were confirmed — the empty report of an earlier run — is
+        # work this run can do, not a report to reuse.
+        confirmable, _held = auto_confirmation(workspace)
+        if confirmable:
+            return Readiness(
+                "missing",
+                (
+                    f"{counted(len(confirmable), 'finding')} "
+                    f"{verb(len(confirmable), 'awaits', 'await')} confirmation for the report",
+                ),
+                details={"confirmable": len(confirmable)},
+            )
     # A non-empty, reconciled report working draft exists; whether it predates
     # current planning/results/findings is currency and is not assessed here.
     preliminary = any(

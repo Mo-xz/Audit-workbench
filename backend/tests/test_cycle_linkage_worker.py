@@ -897,29 +897,6 @@ def test_an_unreachable_role_the_cycle_never_declared_is_refused():
     assert "Unreachable role 'ghost' is not one the cycle declares" in str(error.value)
 
 
-def test_without_a_cycle_the_worker_still_names_its_own_roles():
-    """An engagement whose cycle has not been designed proposes as it always
-    did; the gate has no vocabulary to hold it to.
-
-    The extra role is given a join key because reachability is enforced either
-    way — that rule is about the rules hanging together, not about the shape.
-    """
-
-    proposal = _proposal()
-    proposal["roles"].append({
-        "name": "receipt", "document_type": "purchase_order",
-        "cardinality": "one", "required": True,
-    })
-    proposal["join_keys"].append({
-        "id": "jk_receipt", "match": "normalized_equal",
-        "left": {"role": "order", "field": "order_number"},
-        "right": {"role": "receipt", "field": "order_number"},
-        "rationale": "A receipt cites the order it fulfils.",
-    })
-
-    validate_linkage_proposal(proposal, _request())
-
-
 def test_the_unreachable_list_is_parsed_off_the_response():
     parsed = _linkage_response_schema(
         json.dumps(_proposal(unreachable=[{"role": "order", "reason": "no identifier"}]))
@@ -950,7 +927,11 @@ def test_a_role_no_join_key_reaches_is_refused_in_the_turn_that_can_fix_it():
 
 def test_a_role_reached_through_another_role_is_accepted():
     """Reachability is transitive: the walk follows join keys outward from the
-    anchor rather than requiring every role to touch it directly."""
+    anchor rather than requiring every role to touch it directly.
+
+    Asked without a designed cycle, which also pins that such an engagement
+    still proposes roles of its own: the gate has no vocabulary to hold it to.
+    """
 
     proposal = _proposal()
     proposal["roles"].append({

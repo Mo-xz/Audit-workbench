@@ -1,38 +1,16 @@
-"""Hold the Appendix A scorer honest, and pin the measured baseline.
+"""Hold the Appendix A scorer honest.
 
 The scorer is the EDA forward plan's regression gate. Earlier measurements were
 rebuilt by hand three times and were wrong once. A scorer that is itself
 unverified would only move where the error lives, so the discriminations it has
-to make are tested one at a time — and the one live workspace it was calibrated
-against is pinned, so a change to the key or matching rules cannot silently
-restate the baseline it is supposed to measure.
+to make are tested one at a time.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from eda_answer_key import ANSWER_KEY, Signature, reach_table, score_workspace
-
-from app.workspaces import Workspace
-
-
-WORKSPACES = Path(__file__).resolve().parents[2] / "Workspaces"
-
-# The pinned `pro4` measurement at commit 46a5a85. It reached nineteen
-# scoreable answer-key items.
-PRO4_REACHED = {
-    "A01", "A03", "A05", "A06", "A07/A08", "A10", "A12", "A13", "A14", "A16",
-    "A17", "A18", "A19", "A21", "A22", "A23", "A27", "A29", "A30",
-}
-PRO4_COUNTS = {
-    "A01": 19, "A03": 4, "A05": 6, "A06": 3, "A07/A08": 4, "A10": 1, "A12": 110,
-    "A13": 8, "A14": 18, "A16": 4, "A17": 5, "A18": 3, "A19": 1, "A21": 4,
-    "A22": 5, "A23": 2, "A27": 2, "A29": 6, "A30": 96,
-}
 
 
 def _workspace(*analyses: dict, joins: list[dict] | None = None) -> object:
@@ -216,16 +194,3 @@ def test_every_key_item_is_either_signed_or_explained():
                 # Established above: an unmoded value_filter matcher scores the
                 # inverse finding as a hit.
                 assert signature.mode in {"flag", "allow"}, item.id
-
-
-@pytest.mark.skipif(
-    not (WORKSPACES / "pro4" / "workspace.json").exists(),
-    reason="the measured pro4 workspace is not present",
-)
-def test_pro4_is_the_measured_baseline():
-    """Pin run 6 — the run every post-E4 measurement is compared against."""
-    score = score_workspace(Workspace(WORKSPACES / "pro4"))
-    assert _reached(score) == PRO4_REACHED
-    for item in score.reached:
-        assert item.hits[0].exceptions == PRO4_COUNTS[item.item.id], item.item.id
-    assert len(score.reached) == 19

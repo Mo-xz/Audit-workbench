@@ -389,24 +389,12 @@ def _image_only_run(mode: str, monkeypatch):
     return ws, document, finished, units, fake
 
 
-def test_permission_mode_settles_an_image_only_document_for_review(monkeypatch):
-    ws, document, finished, units, fake = _image_only_run("permission", monkeypatch)
-
-    assert finished["status"] == "completed_with_open_items"
-    assert any(
-        unit["status"] == "awaiting_confirmation"
-        and unit["error"] == document_executors.DOCUMENT_REQUIRES_VISION
-        for unit in units
-    )
-    assert document_analysis.generated_record(
-        workspaces.load_workspace(ws.id), document["id"]
-    ) is None
-    assert fake.calls == []
-
-
-def test_auto_mode_leaves_an_image_only_document_open_without_vision(monkeypatch):
-    """Known lack of vision is an explicit, provider-free open item."""
-    ws, document, finished, units, fake = _image_only_run("auto", monkeypatch)
+@pytest.mark.parametrize("mode", ["permission", "auto"])
+def test_an_image_only_document_without_vision_is_left_for_review(mode, monkeypatch):
+    """Known lack of vision is an explicit, provider-free open item -- in
+    either mode. Auto mode has no approval to delegate here: there is nothing
+    a run could approve, only a document nobody configured a model to read."""
+    ws, document, finished, units, fake = _image_only_run(mode, monkeypatch)
 
     assert finished["status"] == "completed_with_open_items"
     assert any(

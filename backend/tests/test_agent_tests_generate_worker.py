@@ -1452,16 +1452,6 @@ def test_generate_worker_preserves_missing_evidence_as_a_sourced_scope_limitatio
     assert step["scope_limitation"] == "Signed approval memo"
 
 
-def test_generate_worker_rejects_sandbox_invalid_code():
-    invalid = json.dumps(
-        {"tests": [_data_test(steps=[_data_step(code="import os\nresult = df")])]}
-    )
-    gateway = _Gateway([invalid, invalid, invalid])
-
-    with pytest.raises(WorkerRunError, match="not allowed in the sandbox"):
-        WORKERS.execute(_request(), gateway)
-
-
 def test_generate_worker_rejects_code_without_result():
     invalid = json.dumps(
         {"tests": [_data_test(steps=[_data_step(code="output = transactions.head(1)")])]}

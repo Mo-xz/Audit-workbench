@@ -387,7 +387,7 @@ def test_document_inventory_and_search_api():
     inventory = client.get(f"{base}/documents").json()["items"][0]
     assert inventory["analysis_coverage_state"] == "none"
     assert inventory["search_index_state"] in {"indexing", "ready"}
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         status = client.get(f"{base}/documents/indexing-status").json()
         if status["state"] == "idle":

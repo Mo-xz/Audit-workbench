@@ -323,7 +323,7 @@ def test_permission_mode_review_is_an_editable_approval_batch(fake_agent_llm):
     fake_agent_llm.overrides["agent:file_classification"] = _classification(item_id)
 
     run = _start(ws, source, batch, mode="permission")
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 60
     approval = None
     while time.monotonic() < deadline:
         current = store.load_run(ws, run["id"])

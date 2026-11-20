@@ -207,7 +207,13 @@ def test_the_cycle_evaluates_end_to_end(engagement):
     assert evaluated["status"] == "review_required"
 
 
-def test_a_verdict_carries_the_rules_it_was_produced_under(engagement):
+def test_a_judged_verdict_carries_its_rules_pages_and_reason(engagement):
+    """What a reviewer reads off one evaluated item: the rules it was produced
+    under, the document pages it read, and the reason the judgment gave.
+
+    One evaluation, read three ways. These were three tests that each built
+    the same engagement and evaluated it again to read one field.
+    """
     ws, row = engagement
     ruleset = approved(ws)
     test = build(ws, row)
@@ -218,17 +224,12 @@ def test_a_verdict_carries_the_rules_it_was_produced_under(engagement):
     assert result["ruleset_hash"] == ruleset["ruleset_hash"]
     assert result["result_sha1"]
 
-
-def test_a_comparison_cites_the_pages_it_read(engagement):
-    ws, row = engagement
-    approved(ws)
-    test = build(ws, row)
-
-    evaluated = evaluate(ws, test)
     matched = next(item for item in evaluated["items"] if item["label"] == "INV-1")
-
     assert matched["evidence_refs"]
     assert all(anchor["source_kind"] == "document" for anchor in matched["evidence_refs"])
+    judged = matched["result_by_assertion"]["as_total"]
+    assert judged["verdict"] == "match"
+    assert judged["reason"] == "Supplied by the fixture."
 
 
 def test_a_date_that_will_not_type_is_invalid_evidence_not_a_mismatch(engagement):
@@ -459,19 +460,6 @@ def test_a_resolution_failure_is_never_put_to_the_reader(engagement):
     unbound = next(item for item in evaluated["items"] if item["label"] == "INV-3")
 
     assert unbound["result_by_assertion"]["as_total"]["verdict"] == "missing_evidence"
-
-
-def test_a_judged_verdict_carries_the_reason_it_was_reached(engagement):
-    ws, row = engagement
-    approved(ws)
-    test = build(ws, row)
-
-    evaluated = evaluate(ws, test)
-    matched = next(item for item in evaluated["items"] if item["label"] == "INV-1")
-    result = matched["result_by_assertion"]["as_total"]
-
-    assert result["verdict"] == "match"
-    assert result["reason"] == "Supplied by the fixture."
 
 
 def test_the_request_carries_what_the_documents_printed(engagement):

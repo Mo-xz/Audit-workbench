@@ -2571,6 +2571,9 @@ def test_missing_document_evidence_blocks_only_execution_branch(monkeypatch):
 
 
 def test_permission_mode_exceptions_proceed_directly_to_finding_batch(monkeypatch):
+    """An exception directly reaches the normal finding-approval batch: no
+    observation checkpoint pauses the run first, and the approved draft is
+    still not a confirmed finding."""
     ws = _planning_workspace("Permission dispositions")
     ws.add_table(
         "transactions.csv",
@@ -2642,89 +2645,6 @@ def test_permission_mode_exceptions_proceed_directly_to_finding_batch(monkeypatc
     assert refreshed.observations[0]["outcome"] == "exception"
     assert refreshed.findings[0]["source_observation_id"] == observation["id"]
     assert refreshed.findings[0]["auditor_confirmed"] is False
-
-
-def test_observation_exceptions_do_not_create_a_checkpoint(monkeypatch):
-    """An exception directly reaches the normal finding-approval batch."""
-    ws = _planning_workspace("Checkpoint pause/resume")
-    ws.add_table(
-        "transactions.csv",
-        pl.DataFrame({"invoice": [1, 1], "amount": [10.0, 10.0]}).write_csv().encode(),
-    )
-    row = ws.rcm[0]
-    test = data_tests.create(
-        ws,
-        {
-            "title": "Duplicate invoices",
-            "objective": "Identify duplicates",
-            "engine": "analytics",
-            "table_refs": ["transactions"],
-            "spec": {"test_id": "duplicates", "params": {"columns": ["invoice"]}},
-            "rcm_id": row["id"],
-                    },
-    )
-    data_tests.run(ws, test["id"])
-    rcm_execution.rollup(ws)
-    observation = ws.observations[0]
-    fake = FakeAgentLLM(
-        {
-            "agent:finding": {
-                "finding": FINDING_DRAFT
-            }
-        }
-    )
-    monkeypatch.setattr(llm, "chat", fake)
-    monkeypatch.setattr(
-        llm,
-        "agent_status",
-        lambda: {"configured": True, "backend": "fake", "provider": "fake", "model": "fake"},
-    )
-
-    started = runner.start_command_run(
-        ws,
-        "permission",
-        {
-            "source": "tab_button",
-            "text": "Draft eligible findings",
-            "requested_outcomes": ["findings.drafted"],
-        },
-    )
-
-    def _await(predicate, *, timeout=5.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            current = store.load_run(ws, started["id"])
-            if predicate(current):
-                return current
-            time.sleep(0.02)
-        raise AssertionError("Timed out waiting on run condition.")
-
-    # No observation interaction pauses the run. The model exception is
-    # immediately eligible for the ordinary finding approval batch.
-    resolved = _await(
-        lambda run: any(
-            item.get("kind") == "finding_drafts" and item.get("status") == "pending"
-            for item in run.get("approvals") or []
-        )
-    )
-    approval = next(
-        item
-        for item in resolved["approvals"]
-        if item.get("kind") == "finding_drafts" and item.get("status") == "pending"
-    )
-    runner.resolve_approval(
-        ws,
-        started["id"],
-        approval["id"],
-        [{"item_id": item["id"], "action": "approve"} for item in approval["items"]],
-    )
-    completed = wait_run(ws, started["id"])
-    refreshed = workspaces.load_workspace(ws.id)
-
-    assert completed["status"] == "completed"
-    assert not any(item.get("type") == "observation_disposition" for item in completed.get("interactions") or [])
-    assert refreshed.observations[0]["outcome"] == "exception"
-    assert refreshed.findings[0]["source_observation_id"] == observation["id"]
 
 
 def test_full_workflow_runs_capability_closure_and_records_exception_observations(monkeypatch):
@@ -2816,10 +2736,15 @@ def test_full_workflow_runs_capability_closure_and_records_exception_observation
     completed = wait_run(ws, started["id"])
     current = workspaces.load_workspace(ws.id)
 
-    # The generated finding remains a draft until an auditor confirms it, so
-    # report-quality verification correctly leaves the run open. Auto mode
-    # records the model exception directly and drafts the finding.
-    assert completed["status"] == "completed_with_open_items"
+    # Auto mode records the model exception directly, drafts the finding, and
+    # confirms it for the report on the run's authority — so the report
+    # carries it and verification closes the run. Before the report stage
+    # confirmed findings, this run wrote a report stating none had been found.
+    assert completed["status"] == "completed"
+    (finding,) = [item for item in current.findings if not item.get("consolidation")]
+    assert finding["auditor_confirmed"] is True
+    assert finding["confirmed_by_kind"] == "agent"
+    assert finding["title"] in current.report["markdown"]
     assert "agent:command_interpreter" not in {call["tag"] for call in fake.calls}
     assert {call["tag"] for call in fake.calls} >= {
         "agent:apm", "agent:rcm", "agent:test_generate",

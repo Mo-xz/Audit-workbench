@@ -393,9 +393,13 @@ def save_run(workspace: Workspace, run: dict) -> None:
 
 def load_run(workspace: Workspace, run_id: str) -> dict:
     path = run_dir(workspace, run_id) / "run.json"
-    if not path.exists():
-        raise WorkspaceError(f"Agent run '{run_id}' not found.")
     with _run_lock(path):
+        # Asked under the lock ``save_run`` holds. On Windows ``exists`` is
+        # False for any failed stat, including the moment ``os.replace`` is
+        # swapping in a new record, so asked outside it a run being saved by its
+        # own worker thread could read as "not found" to a poller.
+        if not path.exists():
+            raise WorkspaceError(f"Agent run '{run_id}' not found.")
         for attempt in range(10):
             try:
                 run = json.loads(path.read_text(encoding="utf-8"))

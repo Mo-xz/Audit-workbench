@@ -389,7 +389,7 @@ def test_intake_run_needs_no_table_or_configured_model(monkeypatch):
         {"batch_id": batch["id"], "source_id": source["id"]},
         kind="intake",
     )
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         current = store.load_run(ws, run["id"])
         if current["status"] in store.TERMINAL_STATUSES:
@@ -431,7 +431,7 @@ def test_intake_run_uses_model_file_classification(fake_agent_llm):
         {"batch_id": batch["id"], "source_id": source["id"]},
         kind="intake",
     )
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         current = store.load_run(ws, run["id"])
         if current["status"] in store.TERMINAL_STATUSES:

@@ -1115,9 +1115,15 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
 uv venv .venv
 uv pip install -r backend/requirements-dev.txt
 
-# Backend tests
+# Backend tests -- the whole suite, in parallel (about 4 min; 11.5 serial).
+# 8 workers measured faster than -n auto's 12 on this suite's disk-bound tests.
 cd backend
-uv run --no-project pytest
+uv run --no-project pytest -n 8
+
+# Backend tests while iterating -- only tests whose code you changed
+# (first run builds .testmondata at full serial cost; not combinable with -n)
+cd backend
+uv run --no-project pytest --testmon
 
 # API dev server
 uv run --no-project uvicorn app.main:app --app-dir backend --reload

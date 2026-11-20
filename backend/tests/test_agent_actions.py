@@ -667,7 +667,7 @@ def test_a_destructive_action_runs_without_confirmation_in_auto_mode(
     )
 
     started = _start_loop(workspace_with_data, f"remove finding {finding['id']}")
-    completed = wait_run(workspace_with_data, started["id"], timeout=30)
+    completed = wait_run(workspace_with_data, started["id"])
 
     assert completed["status"] == "completed"
     assert completed["interactions"] == []
@@ -695,7 +695,7 @@ def test_a_destructive_action_still_waits_for_confirmation_in_permission_mode(
     started = _start_loop(
         workspace_with_data, f"remove finding {finding['id']}", mode="permission"
     )
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 60
     pending = None
     while time.monotonic() < deadline:
         state = store.load_run(workspace_with_data, started["id"])
@@ -714,7 +714,7 @@ def test_a_destructive_action_still_waits_for_confirmation_in_permission_mode(
     runner.resolve_interaction(
         workspace_with_data, started["id"], pending["id"], {"decision": "approve"}
     )
-    completed = wait_run(workspace_with_data, started["id"], timeout=30)
+    completed = wait_run(workspace_with_data, started["id"])
 
     assert completed["status"] == "completed"
     assert not workspaces.load_workspace(workspace_with_data.id).findings
@@ -742,7 +742,7 @@ def test_a_reversible_edit_can_still_be_undone(monkeypatch, workspace_with_data)
     )
     # The undo names the action the loop just ran, which it reads off the
     # result the tool returned; the script has to be told the generated id.
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 60
     edit_id = None
     while time.monotonic() < deadline and edit_id is None:
         state = store.load_run(workspace_with_data, started["id"])
@@ -754,7 +754,7 @@ def test_a_reversible_edit_can_still_be_undone(monkeypatch, workspace_with_data)
         time.sleep(0.02)
     assert edit_id, "the edit never committed"
 
-    completed = wait_run(workspace_with_data, started["id"], timeout=30)
+    completed = wait_run(workspace_with_data, started["id"])
     severity = workspaces.load_workspace(workspace_with_data.id).findings[0]["severity"]
     # Either the undo ran against the real id, or it failed on the placeholder
     # and said so; what must not happen is a silent half-application.

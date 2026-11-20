@@ -230,6 +230,9 @@ def isolated_workspaces(tmp_path, monkeypatch):
     accounts.ensure_local_user()
     for provider in assistant_settings.PROVIDERS:
         monkeypatch.delenv(f"{provider.upper()}_MODEL", raising=False)
+        # An endpoint override in a developer's .env (a hosted LM Studio, say)
+        # would otherwise replace the catalog URL the provider tests assert.
+        monkeypatch.delenv(f"{provider.upper()}_BASE_URL", raising=False)
     # Sampling is configuration now, and it overrides the stored document, so a
     # developer's own export would otherwise decide what the suite asserts.
     monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
@@ -247,12 +250,46 @@ def isolated_workspaces(tmp_path, monkeypatch):
     # Left on, every save would wake the background refresher mid-test.
     monkeypatch.setattr(stage_status, "ENABLED", False)
     yield
+    _stop_leftover_runs()
     db.close_all()
     telemetry_db.close_all()
     registry.forget_reconciled()
     usage.forget_owners()
     workspaces.clear_artifact_cache()
 
+
+
+def _stop_leftover_runs(timeout: float = 10.0) -> None:
+    """Stop any agent run a test left running, before the next test starts.
+
+    Runs execute on daemon threads registered process-wide in
+    ``runner._HANDLES``, and every test acts as the same local user. A run that
+    outlived its test -- usually one ``wait_run`` gave up on under load --
+    stayed registered as that user's live run, so the next test on the same
+    process failed with ``AgentBusyError`` or "run not found" for reasons that
+    had nothing to do with it. Each such failure looked like a new flake.
+
+    Every event a run can block on is set, so a run waiting for an approval,
+    an interaction or a resume sees the cancel instead of sleeping through it.
+    """
+    with agent_runner._HANDLES_LOCK:
+        handles = list(agent_runner._HANDLES.values())
+    for handle in handles:
+        handle.cancel.set()
+        for event in (
+            handle.resume,
+            handle.approval_resolved,
+            handle.interaction_resolved,
+            handle.command_queued,
+        ):
+            event.set()
+    deadline = time.monotonic() + timeout
+    for handle in handles:
+        thread = handle.thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    with agent_runner._HANDLES_LOCK:
+        agent_runner._HANDLES.clear()
 
 
 def stamp_planning_cycle(workspace, *, steps=None):
@@ -646,8 +683,14 @@ def fake_agent_llm(monkeypatch) -> FakeAgentLLM:
     return fake
 
 
-def wait_run(workspace, run_id, statuses=agent_store.TERMINAL_STATUSES, timeout=15.0):
-    """Poll until the run reaches one of ``statuses``; join its worker."""
+def wait_run(workspace, run_id, statuses=agent_store.TERMINAL_STATUSES, timeout=60.0):
+    """Poll until the run reaches one of ``statuses``; join its worker.
+
+    The timeout is a hang detector, not a performance budget: a passing run
+    returns the moment it settles, so a generous limit costs nothing. Fifteen
+    seconds held on a quiet machine and failed runs that were still working
+    when the suite ran in parallel or under coverage.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         run = agent_store.load_run(workspace, run_id)

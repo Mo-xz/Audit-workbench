@@ -7,6 +7,7 @@ while the production audit workflow remains on the current runner.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -702,22 +703,37 @@ def test_all_settled_fans_out_in_parallel_and_returns_semantic_order():
             registry, lambda _stage, _unit: DeterministicUnitResult("succeeded")
         ),
     )
-    delays = {
-        "catalog-record:alpha": 0.03,
-        "catalog-record:beta": 0.01,
-        "catalog-record:gamma": 0.0,
+    # Each unit finishes only after the one named before it has, so the
+    # completion order is the reverse of the semantic order by construction
+    # rather than by sleeps a loaded machine is free to reorder. A scheduler
+    # that ran the units one at a time in ID order would leave alpha waiting
+    # on a unit that has not started, and the order below would not hold.
+    finished = {unit_id: threading.Event() for unit_id in (
+        "catalog-record:alpha", "catalog-record:beta", "catalog-record:gamma",
+    )}
+    waits_for = {
+        "catalog-record:alpha": "catalog-record:beta",
+        "catalog-record:beta": "catalog-record:gamma",
+        "catalog-record:gamma": None,
     }
-    units = [{"id": unit_id} for unit_id in sorted(delays)]
+    units = [{"id": unit_id} for unit_id in sorted(finished)]
 
     def generate(unit: dict) -> str:
-        time.sleep(delays[unit["id"]])
+        before = waits_for[unit["id"]]
+        if before is not None:
+            finished[before].wait(timeout=10)
         completion_order.append(unit["id"])
+        finished[unit["id"]].set()
         return unit["id"]
 
     settled = runner.stable_all_settled(units, generate)
 
-    # The quickest unit finished first, but the results are semantic-ID ordered.
-    assert completion_order[0] == "catalog-record:gamma"
+    # The units finished in reverse, but the results are semantic-ID ordered.
+    assert completion_order == [
+        "catalog-record:gamma",
+        "catalog-record:beta",
+        "catalog-record:alpha",
+    ]
     assert [unit["id"] for unit, _value, _error in settled] == [
         "catalog-record:alpha",
         "catalog-record:beta",

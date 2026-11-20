@@ -2,3 +2,5 @@
 pytest>=8.0
 httpx2>=0.1
 trio>=0.30
+pytest-xdist>=3.6
+pytest-testmon>=2.1

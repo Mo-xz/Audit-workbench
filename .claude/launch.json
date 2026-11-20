@@ -137,6 +137,7 @@
       ],
       "env": {
         "LLM_REPLAY": "on",
+        "LLM_REPLAY_SOURCE": "Workspaces/recordings/procurement.db",
         "GROQ_API_KEY": "",
         "OPENROUTER_API_KEY": "",
         "MISTRAL_API_KEY": "",

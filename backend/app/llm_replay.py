@@ -2,12 +2,23 @@
 
 A demonstration on a machine with no route to a model provider can still show
 a step the model performs, provided that step was performed once before with
-one. Every call :func:`llm.chat` makes is already recorded whole in the
+one. Every call :func:`llm.chat` makes is already recorded whole in a
 workspace's telemetry database — the request it sent and the message it got
 back — so with ``LLM_REPLAY=on`` the transport looks the request up there and
 returns the recorded message without opening a connection.
 
-Only answers the run *kept* are ever served:
+Where the recordings come from
+------------------------------
+
+By default, the calling workspace's own telemetry. ``LLM_REPLAY_SOURCE``
+names another one instead — a ``telemetry.db`` file, or a workspace folder
+holding one — opened read-only. That is how an engagement is rebuilt from
+nothing: a new, empty workspace takes the same steps a recorded one took, and
+every answer comes from the recording, which replaying never writes to and so
+never prunes.
+
+Only answers the run *kept* are ever served
+-------------------------------------------
 
 - A call that failed at the transport never completed, and is not a recording.
 - A completed call whose answer was empty, or cut off at the output limit, was
@@ -18,24 +29,36 @@ Only answers the run *kept* are ever served:
   that chain, so a replayed unit passes validation on its first turn and the
   rejected draft is never shown, never revalidated, never repaired again.
 
-Two matches, tried in order:
+How a request is matched
+------------------------
 
 1. ``exact`` — a recorded call whose request bytes hash to the same sha256.
-   The same workspace state, code and settings ask the same question.
-2. ``same_step`` — the calls recorded for the same stage over the same
-   artifact refs, from the most recent run that made them, served in their
-   recorded order across the successive calls of one run. This survives a
-   prompt that moved by a byte; the answer still has to pass today's
-   validators, or the unit fails exactly as it would have live. A call with no
-   artifact refs has no step identity, and only an exact match answers it.
+2. ``translated`` — a recorded call whose request is the same once every
+   identifier is read as a placeholder. The app mints its own identifiers —
+   a document at import, a matrix row, a test, an observation, evidence, a
+   finding — at random, and a rebuilt engagement mints different ones for
+   the same things, so its prompts differ from the recording only there. Each
+   identifier is replaced by its order of first appearance; two requests that
+   then agree name the same things, position for position, and the pairing is
+   the translation. The recorded answer is served with every identifier the
+   pairing knows rewritten to today's, and the pairing is remembered for the
+   steps that follow. Hashes, run ids and timestamps are read the same way,
+   because they move with the identifiers they summarise.
+3. ``same_step`` — the calls recorded for the same stage over the same
+   artifact refs (translated through the remembered pairings), from the most
+   recent run that made them, served in their recorded order across the
+   successive calls of one run. This survives a prompt whose wording moved;
+   the answer still has to pass today's validators, or the unit fails exactly
+   as it would have live. A call with no artifact refs has no step identity,
+   and only the first two matches answer it.
 
-Nothing else answers. A request neither match covers fails with a plain
-error: replay repeats what was recorded, it never reaches the network and
-never improvises. Where one request was recorded more than once, the newest
+Nothing else answers. A request no match covers fails with a plain error:
+replay repeats what was recorded, it never reaches the network and never
+improvises. Where one request was recorded more than once, the newest
 recording wins, so performing a step again with a live model is how a
-recording is replaced. Replayed calls are recorded too, marked with the call
-they were answered from, so the debug console shows what was replayed; they
-are never matched themselves.
+recording is replaced. Replayed calls are recorded in the calling workspace,
+marked with the call they were answered from, so the debug console shows what
+was replayed; they are never matched themselves.
 """
 
 from __future__ import annotations
@@ -45,23 +68,58 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+from pathlib import Path
+import re
+import sqlite3
 import threading
+from typing import Any
 
 from . import debug_store
 
 ENV_VAR = "LLM_REPLAY"
+SOURCE_ENV_VAR = "LLM_REPLAY_SOURCE"
 _ON = {"1", "on", "true", "yes"}
 #: How every repair turn in the codebase tells the model its answer was
 #: rejected; the suffix a repair request adds to the request it repairs.
 REPAIR_MARKER = "could not be used"
+#: What reads as an identifier. Broad on purpose: a token that is the same on
+#: both sides — a constant, an amount, a date in the data — pairs with itself
+#: and changes nothing, while one this misses makes two requests that name the
+#: same things look different. Longer shapes come first so a run id is not
+#: read as the hex run of digits at its head.
+IDENTIFIER = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"\d{8}-\d{6}-[0-9a-f]{6}"
+    r"|(?:chat|msg|call|cmd|ckpt)_[0-9a-z_]{6,40}"
+    r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
+    r"|[A-Z]{1,6}-[0-9A-Z]{4,16}"
+    r"|[0-9a-f]{8,64}"
+    r")(?![A-Za-z0-9_])"
+)
 
+_lock = threading.Lock()
 _counters: dict[tuple, int] = {}
-_counters_lock = threading.Lock()
+#: Per calling workspace: recorded identifier -> today's, and back.
+_aliases: dict[str, dict[str, str]] = {}
+_reverse: dict[str, dict[str, str]] = {}
+#: Per recording source: (signature, canonical hash -> call ids newest first).
+_indexes: dict[str, tuple[tuple, dict[str, list[str]]]] = {}
 
 
 def enabled() -> bool:
     """True when model calls are answered from recordings, read per call."""
     return str(os.environ.get(ENV_VAR) or "").strip().lower() in _ON
+
+
+def source_path() -> Path | None:
+    """The recording named by ``LLM_REPLAY_SOURCE``, if one is."""
+    value = str(os.environ.get(SOURCE_ENV_VAR) or "").strip().strip('"')
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if path.is_dir():
+        path = path / "telemetry.db"
+    return path.resolve()
 
 
 @dataclass(frozen=True)
@@ -72,11 +130,69 @@ class Recording:
     payload: dict | None
     #: The calls whose answers were rejected on the way to this one, if any.
     superseded: tuple[str, ...] = ()
+    #: How many identifiers in the answer were rewritten to today's.
+    translated: int = 0
 
 
 def request_sha256(body: Mapping) -> str:
     """The hash the live transport records for the bytes it sends."""
     return hashlib.sha256(json.dumps(body).encode("utf-8")).hexdigest()
+
+
+def canonical(text: str) -> tuple[str, list[str]]:
+    """``text`` with each identifier replaced by its order of first
+    appearance, and the identifiers in that order."""
+    order: dict[str, int] = {}
+
+    def placeholder(match: re.Match) -> str:
+        token = match.group(0)
+        if token not in order:
+            order[token] = len(order)
+        return f"⟨{order[token]}⟩"
+
+    return IDENTIFIER.sub(placeholder, text), list(order)
+
+
+def _canonical_sha(request: Any) -> tuple[str, list[str]]:
+    text, tokens = canonical(json.dumps(request))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest(), tokens
+
+
+def translate(value: Any, mapping: Mapping[str, str]) -> tuple[Any, int]:
+    """``value`` with every identifier ``mapping`` knows rewritten, and how
+    many were. Walks strings inside dicts and lists, so a tool call's JSON
+    arguments are translated as text."""
+    if not mapping:
+        return value, 0
+    if isinstance(value, str):
+        count = 0
+
+        def swap(match: re.Match) -> str:
+            nonlocal count
+            token = match.group(0)
+            replacement = mapping.get(token)
+            if replacement is None or replacement == token:
+                return token
+            count += 1
+            return replacement
+
+        return IDENTIFIER.sub(swap, value), count
+    if isinstance(value, dict):
+        total = 0
+        result = {}
+        for key, item in value.items():
+            result[key], count = translate(item, mapping)
+            total += count
+        return result, total
+    if isinstance(value, list):
+        total = 0
+        result = []
+        for item in value:
+            translated, count = translate(item, mapping)
+            result.append(translated)
+            total += count
+        return result, total
+    return value, 0
 
 
 def _refs(context: Mapping) -> tuple[str, ...]:
@@ -116,6 +232,21 @@ def _repairs(earlier: Mapping, later: Mapping) -> bool:
         and repaired.startswith(original)
         and REPAIR_MARKER in repaired[len(original):]
     )
+
+
+def _connect(context: Mapping) -> tuple[sqlite3.Connection | None, str]:
+    """The recording to read and a key naming it; the source never written."""
+    path = source_path()
+    if path is not None:
+        if not path.is_file():
+            raise FileNotFoundError(f"{SOURCE_ENV_VAR} names no telemetry database: {path}")
+        handle = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        handle.row_factory = sqlite3.Row
+        return handle, f"file:{path}"
+    workspace_id = str(context.get("workspace_id") or "")
+    if not workspace_id:
+        return None, ""
+    return debug_store.connection(workspace_id), f"workspace:{workspace_id}"
 
 
 def _load(handle, call_id: str) -> dict | None:
@@ -162,15 +293,25 @@ def _kept(handle, record: dict) -> tuple[dict, tuple[str, ...]]:
     return final, replaced
 
 
-def _recording(handle, record: dict, match: str) -> Recording:
+def _recording(
+    handle, record: dict, match: str, mapping: Mapping[str, str] | None = None,
+) -> Recording:
     final, replaced = _kept(handle, record)
+    message, count = translate(dict(final["normalized_message"]), mapping or {})
     payload = final.get("raw_response")
+    payload = dict(payload) if isinstance(payload, dict) else None
+    if payload is not None and count:
+        choices = [dict(choice) for choice in payload.get("choices") or []]
+        if choices:
+            choices[0]["message"] = message
+        payload["choices"] = choices
     return Recording(
         call_id=str(final["id"]),
         match=match,
-        message=dict(final["normalized_message"]),
-        payload=dict(payload) if isinstance(payload, dict) else None,
+        message=message,
+        payload=payload,
         superseded=replaced,
+        translated=count,
     )
 
 
@@ -194,11 +335,73 @@ def _exact(handle, body: Mapping) -> Recording | None:
     return None
 
 
+def _canonical_index(handle, key: str) -> dict[str, list[str]]:
+    """Canonical request hash -> recorded call ids, newest first, rebuilt only
+    when the recordings change."""
+    signature = tuple(handle.execute(
+        "SELECT count(*), max(started_at) FROM llm_calls"
+        " WHERE status = 'completed' AND json_extract(record, '$.replay') IS NULL"
+    ).fetchone())
+    with _lock:
+        cached = _indexes.get(key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+    index: dict[str, list[str]] = {}
+    for row in handle.execute(
+        "SELECT id, record FROM llm_calls"
+        " WHERE status = 'completed' AND json_extract(record, '$.replay') IS NULL"
+        " ORDER BY started_at DESC"
+    ):
+        record = json.loads(row["record"])
+        digest, _tokens = _canonical_sha(record.get("request") or {})
+        index.setdefault(digest, []).append(str(row["id"]))
+    with _lock:
+        _indexes[key] = (signature, index)
+    return index
+
+
+def _remember(workspace_id: str, pairs: Mapping[str, str]) -> None:
+    with _lock:
+        forward = _aliases.setdefault(workspace_id, {})
+        backward = _reverse.setdefault(workspace_id, {})
+        for recorded, current in pairs.items():
+            if recorded != current:
+                forward[recorded] = current
+                backward[current] = recorded
+
+
+def _known(workspace_id: str) -> tuple[dict[str, str], dict[str, str]]:
+    with _lock:
+        return dict(_aliases.get(workspace_id) or {}), dict(_reverse.get(workspace_id) or {})
+
+
+def _translated(handle, key: str, body: Mapping, workspace_id: str) -> Recording | None:
+    digest, tokens = _canonical_sha(debug_store.sanitize(dict(body)))
+    for call_id in _canonical_index(handle, key).get(digest, []):
+        record = _load(handle, call_id)
+        if record is None or not _usable(record):
+            continue
+        _recorded_digest, recorded_tokens = _canonical_sha(record.get("request") or {})
+        if len(recorded_tokens) != len(tokens):
+            continue
+        pairs = dict(zip(recorded_tokens, tokens))
+        _remember(workspace_id, pairs)
+        forward, _backward = _known(workspace_id)
+        return _recording(handle, record, "translated", {**forward, **pairs})
+    return None
+
+
 def _same_step(handle, context: Mapping, workspace_id: str) -> Recording | None:
     stage = str(context.get("stage") or "")
-    refs = _refs(context)
-    if not stage or not refs:
+    current_refs = _refs(context)
+    if not stage or not current_refs:
         return None
+    forward, backward = _known(workspace_id)
+    refs = tuple(sorted(
+        f"{kind}:{backward.get(value, value)}" if sep else backward.get(ref, ref)
+        for ref in current_refs
+        for kind, sep, value in [ref.partition(":")]
+    ))
     rows = handle.execute(
         "SELECT id, run_id, correlation FROM llm_calls"
         " WHERE status = 'completed' AND stage = ?"
@@ -230,10 +433,10 @@ def _same_step(handle, context: Mapping, workspace_id: str) -> Recording | None:
         )
     ]
     owner = str(context.get("run_id") or context.get("chat_id") or "")
-    key = (workspace_id, owner, stage, refs)
-    with _counters_lock:
-        position = _counters.get(key, 0)
-        _counters[key] = position + 1
+    counter = (workspace_id, owner, stage, current_refs)
+    with _lock:
+        position = _counters.get(counter, 0)
+        _counters[counter] = position + 1
     question = questions[min(position, len(questions) - 1)]
     answer = next(
         (
@@ -243,21 +446,46 @@ def _same_step(handle, context: Mapping, workspace_id: str) -> Recording | None:
         ),
         None,
     )
-    return _recording(handle, answer, "same_step") if answer is not None else None
+    if answer is None:
+        return None
+    return _recording(handle, answer, "same_step", forward)
 
 
 def find(body: Mapping, context: Mapping) -> Recording | None:
-    """The answer kept for this request in the calling workspace, or None."""
+    """The answer kept for this request in the recordings, or None."""
     workspace_id = str(context.get("workspace_id") or "")
-    if not workspace_id:
+    handle, key = _connect(context)
+    if handle is None:
         return None
-    handle = debug_store.connection(workspace_id)
-    return _exact(handle, body) or _same_step(handle, context, workspace_id)
+    try:
+        return (
+            _exact(handle, body)
+            or _translated(handle, key, body, workspace_id)
+            or _same_step(handle, context, workspace_id)
+        )
+    finally:
+        if key.startswith("file:"):
+            handle.close()
 
 
 def _reset_for_tests() -> None:
-    with _counters_lock:
+    with _lock:
         _counters.clear()
+        _aliases.clear()
+        _reverse.clear()
+        _indexes.clear()
 
 
-__all__ = ["ENV_VAR", "REPAIR_MARKER", "Recording", "enabled", "find", "request_sha256"]
+__all__ = [
+    "ENV_VAR",
+    "IDENTIFIER",
+    "REPAIR_MARKER",
+    "Recording",
+    "SOURCE_ENV_VAR",
+    "canonical",
+    "enabled",
+    "find",
+    "request_sha256",
+    "source_path",
+    "translate",
+]

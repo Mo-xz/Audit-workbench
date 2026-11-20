@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app import assistant_settings, debug_service, debug_store, engagement, llm, llm_replay
+from app import assistant_settings, debug_service, debug_store, engagement, llm, llm_replay, workspaces
 
 
 class FakeResponse:
@@ -115,7 +115,9 @@ def test_replay_serves_the_kept_answer_not_the_rejected_one(workspace_with_data,
 
     assert message["content"] == "# Finding one\n## Condition"
     [record] = _replayed_records(ws)
-    assert record["replay"] == {"call_id": kept, "match": "exact", "skipped": [rejected]}
+    assert record["replay"] == {
+        "call_id": kept, "match": "exact", "skipped": [rejected], "translated": 0,
+    }
 
 
 def test_replay_skips_empty_and_cut_off_answers(workspace_with_data, monkeypatch):
@@ -181,3 +183,87 @@ def test_replay_reports_the_agent_configured_and_local_without_a_key(monkeypatch
     destination = engagement.destination()
     assert destination["local"] is True
     assert "Nothing leaves this machine" in destination["summary"]
+
+
+# ---------------------------------------------------------------- identifiers
+RECORDED_PROMPT = (
+    "Draft the finding for observation OBS-019DFE5622 on row RCM-15F60B, "
+    "read from document 3ec281275e (sha1 6639c7dae9663d98448081db6d12dc60efbedb9b)."
+)
+REBUILT_PROMPT = (
+    "Draft the finding for observation OBS-7C1E0A9B33 on row RCM-A0B1C2, "
+    "read from document 9f8e7d6c5b (sha1 0123456789abcdef0123456789abcdef01234567)."
+)
+RECORDED_ANSWER = "# Over limit\n## Condition\nRow RCM-15F60B flagged OBS-019DFE5622 twice."
+
+
+def test_canonical_reads_each_identifier_as_its_first_appearance():
+    text, tokens = llm_replay.canonical("RCM-15F60B then OBS-019DFE5622 then RCM-15F60B, 2024-06-04")
+    assert text == "⟨0⟩ then ⟨1⟩ then ⟨0⟩, 2024-06-04"
+    assert tokens == ["RCM-15F60B", "OBS-019DFE5622"]
+
+
+def test_a_rebuilt_engagement_is_answered_with_its_own_identifiers(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    [original] = _record(
+        ws, monkeypatch, [(RECORDED_PROMPT, RECORDED_ANSWER, "stop")], run_id="rec",
+        refs=("observation:OBS-019DFE5622",),
+    )
+
+    message = _replay(ws, monkeypatch, REBUILT_PROMPT, refs=("observation:OBS-7C1E0A9B33",))
+
+    assert message["content"] == (
+        "# Over limit\n## Condition\nRow RCM-A0B1C2 flagged OBS-7C1E0A9B33 twice."
+    )
+    [record] = _replayed_records(ws)
+    assert record["replay"]["call_id"] == original
+    assert record["replay"]["match"] == "translated"
+    assert record["replay"]["translated"] == 2
+
+
+def test_a_learned_pairing_carries_to_a_later_step(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    _record(ws, monkeypatch, [(RECORDED_PROMPT, RECORDED_ANSWER, "stop")], run_id="rec",
+            refs=("observation:OBS-019DFE5622",))
+    _record(ws, monkeypatch, [("Old wording of the report section", "Cites RCM-15F60B.", "stop")],
+            run_id="rec", stage="agent:report", refs=("rcm:RCM-15F60B",))
+
+    _replay(ws, monkeypatch, REBUILT_PROMPT, refs=("observation:OBS-7C1E0A9B33",))
+    later = _replay(ws, monkeypatch, "New wording of the report section",
+                    stage="agent:report", refs=("rcm:RCM-A0B1C2",))
+
+    assert later["content"] == "Cites RCM-A0B1C2."
+    assert _replayed_records(ws)[-1]["replay"]["match"] == "same_step"
+
+
+def test_identifiers_alone_never_make_a_different_question_the_same(workspace_with_data, monkeypatch):
+    ws = workspace_with_data
+    _record(ws, monkeypatch, [(RECORDED_PROMPT, RECORDED_ANSWER, "stop")], run_id="rec",
+            refs=("observation:OBS-019DFE5622",))
+
+    with pytest.raises(llm.LLMError, match="no recorded model response"):
+        _replay(ws, monkeypatch, REBUILT_PROMPT.replace("Draft the finding", "Retire the finding"),
+                refs=())
+
+
+def test_a_named_source_is_read_and_never_written(workspace_with_data, monkeypatch):
+    recorded = workspace_with_data
+    _record(recorded, monkeypatch, [(RECORDED_PROMPT, RECORDED_ANSWER, "stop")], run_id="rec",
+            refs=("observation:OBS-019DFE5622",))
+    source = recorded.root / "telemetry.db"
+    calls_before = len(debug_service.list_calls(recorded)["items"])
+    rebuilt = workspaces.create_workspace("Rebuilt Engagement")
+    monkeypatch.setenv(llm_replay.SOURCE_ENV_VAR, str(source))
+
+    message = _replay(rebuilt, monkeypatch, REBUILT_PROMPT, refs=("observation:OBS-7C1E0A9B33",))
+
+    assert "RCM-A0B1C2" in message["content"]
+    assert len(debug_service.list_calls(recorded)["items"]) == calls_before
+    [record] = _replayed_records(rebuilt)
+    assert record["replay"]["match"] == "translated"
+
+
+def test_a_missing_source_fails_plainly(workspace_with_data, monkeypatch, tmp_path):
+    monkeypatch.setenv(llm_replay.SOURCE_ENV_VAR, str(tmp_path / "absent" / "telemetry.db"))
+    with pytest.raises(llm.LLMError, match="names no telemetry database"):
+        _replay(workspace_with_data, monkeypatch, "anything")

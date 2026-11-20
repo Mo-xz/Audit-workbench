@@ -1037,6 +1037,8 @@ def _replay(
                 "match": recording.match,
                 # Rejected answers skipped on the way to the one the run kept.
                 "skipped": list(recording.superseded),
+                # Identifiers in the answer rewritten to this workspace's own.
+                "translated": recording.translated,
             }
         debug_store.update_call(workspace_id, call_id, mark)
         debug_store.finish_call(

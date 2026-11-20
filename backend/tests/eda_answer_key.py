@@ -1,9 +1,17 @@
-"""The Appendix A regression fixture (``S6``) for the exploratory EDA pipeline.
+"""The procurement sample's answer key, scored against a workspace's analyses.
 
-The EDA forward plan names this scorer as the regression gate. Earlier
-run-by-run tables were rebuilt by hand three times and were wrong once. This
-module is the rebuild, once, in code: an answer key of *computations*, a scorer
-over a workspace's saved analyses, and a rendering of the same reach table.
+The key is the Class 1 table (P-01 to P-14) of
+``docs/sample-procurement/FACILITATOR_GUIDE.md``: the exceptions visible in the
+pack's six workbooks. Earlier run-by-run tables were rebuilt by hand three times
+and were wrong once. This module is the rebuild, once, in code: an answer key of
+*computations*, a scorer over a workspace's saved analyses, and a rendering of
+the same reach table.
+
+It scores the exploratory analyses only. Whether a run carried an item on into
+a finding and the report is the guide's own scoring, made against the findings;
+the guide's document-only and judgement items (``OUT_OF_SCOPE``) are never
+reachable by an analysis at all. It replaces an earlier A01-A33 key, written for
+a larger edition of the same data whose records this pack does not hold.
 
 Two rules govern scoring and are intentionally enforced here rather than left to
 documentation:
@@ -15,25 +23,23 @@ documentation:
 * **A saturated hit is not a hit.** A result flagging its whole population
   establishes nothing about any row in it, and the application already says so
   — so the scorer asks ``analysis_results.uninformative_reason`` rather than
-  keeping a second opinion. That function exempts ``referential`` deliberately:
-  A30 is a legitimate 96-of-96 finding and a blanket rule would delete it.
+  keeping a second opinion. That function exempts ``referential`` deliberately,
+  since a reference that resolves nowhere can legitimately fail every row.
 
 Where an item's population matters the key names a ``root`` — the base table the
-frame's rows are rows *of*. That is what separates A03 (four invoices whose own
-payment status is Rejected) from A03r (four rejected requisitions), and A21
-(vendors sharing a bank account) from A29 (staff sharing one). It is the same
-distinction ``analysis_semantic_id`` draws, for the same reason.
+frame's rows are rows *of*. ``PO_NUMBER`` blank on a requisition is P-04, an
+approved requisition never ordered; the same column read through another table's
+rows is not. It is the same distinction ``analysis_semantic_id`` draws, for the
+same reason.
 
-Three key items carry no signature. A25 is a confirmed negative, A26 needs a
-windowed pairing no library test expresses, and A33 is the absence of a column
-rather than a property of one. They are reported as unscoreable rather than
-silently counted absent, because "no procedure can express this" and "no
-procedure was written" are different failures.
+P-11 carries no signature: it needs a unit price derived within each item, which
+no library test computes. It is reported as unscoreable rather than silently
+counted absent, because "no procedure can express this" and "no procedure was
+written" are different failures.
 
 Run it directly to score a workspace::
 
-    .venv/bin/python backend/tests/eda_answer_key.py Workspaces/pro4
-    .venv/bin/python backend/tests/eda_answer_key.py Workspaces/pro4 Workspaces/pro5
+    .venv\\Scripts\\python.exe backend\\tests\\eda_answer_key.py Workspaces\\Users\\local\\Workspaces\\procurement
 """
 
 from __future__ import annotations
@@ -130,14 +136,6 @@ def _compare(*columns: str) -> Signature:
     return Signature("compare_columns", frozenset(columns))
 
 
-def _referential(column: str, table: str, key: str) -> Signature:
-    return Signature("referential", frozenset({column}), lookup=(table, key))
-
-
-def _duplicates(*columns: str) -> Signature:
-    return Signature("duplicates", frozenset(columns))
-
-
 def _flags(column: str, *values: str) -> Signature:
     """A ``value_filter`` that flags the rows holding one of ``values``."""
     return Signature(
@@ -152,145 +150,42 @@ def _allows(column: str, *values: str) -> Signature:
     )
 
 
-# The key. Item text is Appendix A of ``docs/procurement-pipeline-review.md``;
-# the signatures are the computations verified against the six workbooks.
+# The key. Item text is the Class 1 table of
+# ``docs/sample-procurement/FACILITATOR_GUIDE.md``; each signature is a
+# computation verified against the six workbooks in ``docs/sample-procurement/data``.
 ANSWER_KEY: tuple[KeyItem, ...] = (
     KeyItem(
-        "A01",
-        "invoice PO link that is not a PO",
-        (_referential("PO_NUMBER_LINK", "po_data", "PO_NUMBER"),),
-    ),
-    KeyItem(
-        "A02",
-        "invoice paid with no vendor, no PO, no GRN",
-        (
-            Signature("completeness", frozenset({"PO_NUMBER_LINK"})),
-            Signature("completeness", frozenset({"GRN_ID_LINK"})),
-            Signature("completeness", frozenset({"VENDOR_ID"})),
-        ),
-        root="invoice_data",
-    ),
-    KeyItem(
-        "A03",
-        "invoices against Rejected requisitions (invoice side)",
-        (_flags("PAYMENT_STATUS", "Rejected"),),
-        root="invoice_data",
-    ),
-    KeyItem(
-        "A03r",
-        "Rejected requisitions (requisition side)",
-        (_flags("REQUISITION_STATUS", "Rejected"),),
+        "P-01",
+        "requisition verified by its own requester",
+        (_compare("REQUESTER_ID", "VERIFIED_BY_ID"),),
         root="requisitions",
     ),
     KeyItem(
-        "A04",
-        "a rejected requisition re-raised for the identical amount",
-        (_duplicates("PO_NUMBER_LINK", "INVOICE_AMOUNT"),),
-        root="invoice_data",
-    ),
-    KeyItem(
-        "A05",
-        "VINSUSP re-billing",
-        (Signature("format_anomaly", frozenset({"VENDOR_INVOICE_NUMBER"})),),
-    ),
-    KeyItem(
-        "A06",
-        "invoice exceeds its PO total",
-        (
-            _compare("INVOICE_AMOUNT", "PO_LINE_TOTAL"),
-            _compare("INVOICE_AMOUNT", "PO_TOTAL_AMOUNT"),
-        ),
-    ),
-    KeyItem(
-        "A07/A08",
-        "duplicate vendor invoice number",
-        (_duplicates("VENDOR_INVOICE_NUMBER"),),
-    ),
-    KeyItem(
-        "A09",
-        "same vendor, identical amount, both paid",
-        (_duplicates("VENDOR_ID", "INVOICE_AMOUNT"),),
-    ),
-    KeyItem(
-        "A10",
-        "requisition approved above the limit",
+        "P-02",
+        "requisition approved above the approver's limit",
         (_compare("MAX_APPROVAL_AMOUNT", "ESTIMATED_TOTAL_COST"),),
+        root="requisitions",
     ),
     KeyItem(
-        "A11",
-        "invoice approved beyond delegated authority",
-        (_compare("INVOICE_AMOUNT", "MAX_APPROVAL_AMOUNT"),),
-    ),
-    KeyItem(
-        "A12",
-        "approver title absent from the matrix",
-        (_referential("JOB_TITLE", "financial_approval_matrix", "JOB_TITLE"),),
-    ),
-    KeyItem(
-        "A13",
-        "requester also verifies or approves",
+        "P-03",
+        "procurement approval not recorded",
         (
-            _compare("REQUESTER_ID", "VERIFIED_BY_ID"),
-            _compare("REQUESTER_ID", "FIN_APPROVED_BY_ID"),
-            _compare("REQUESTER_ID", "APPROVED_BY_ID"),
+            Signature("completeness", frozenset({"APPROVED_BY_ID"})),
+            Signature("completeness", frozenset({"APPROVAL_DATE"})),
         ),
+        root="requisitions",
     ),
     KeyItem(
-        "A14",
-        "approval outside the verifier's chain",
-        (
-            _compare("VERIFIED_BY_ID", "SUPERVISOR_APPROVAL_ID"),
-            _compare("SUPERVISOR_APPROVAL_ID", "SUPERVISOR_ID"),
-        ),
+        "P-04",
+        "approved requisition neither ordered nor withdrawn",
+        (Signature("completeness", frozenset({"PO_NUMBER"})),),
+        root="requisitions",
     ),
     KeyItem(
-        "A15",
-        "invoice approver is also the requisition approver",
-        (
-            _compare("SUPERVISOR_APPROVAL_ID", "APPROVED_BY_ID"),
-            _compare("SUPERVISOR_APPROVAL_ID", "FIN_APPROVED_BY_ID"),
-        ),
-    ),
-    KeyItem("A16", "invoice dated before its PO", (_compare("INVOICE_DATE", "PO_DATE"),)),
-    KeyItem(
-        "A17",
-        "receipt dated before the GRN",
-        (_compare("DATE_RECEIVED", "GRN_DATE"),),
-    ),
-    KeyItem(
-        "A18",
-        "payment before goods receipt",
-        (_compare("PAYMENT_DATE", "GRN_DATE"),),
-    ),
-    KeyItem(
-        "A19",
-        "payment before the invoice arrived",
-        (
-            _compare("DATE_RECEIVED", "PAYMENT_DATE"),
-            _compare("INVOICE_DATE", "PAYMENT_DATE"),
-        ),
-    ),
-    KeyItem(
-        "A20",
-        "invoices with no GRN link",
-        (Signature("completeness", frozenset({"GRN_ID_LINK"})),),
-        root="invoice_data",
-    ),
-    KeyItem(
-        "A21",
-        "vendors sharing a bank account",
-        (_duplicates("BANK_ACCOUNT_NUMBER"),),
-        root="vendor_master_file",
-    ),
-    KeyItem(
-        "A22",
-        "vendor created and approved by one person",
-        (_compare("UPDATED_BY", "APPROVED_BY"),),
-        root="vendor_master_file",
-    ),
-    KeyItem(
-        "A23",
-        "payment to a vendor that is not Active",
+        "P-05",
+        "vendor not Active, yet ordered from and paid",
+        # Unrooted on purpose: the status is a property of the vendor, and a
+        # filter on the master names the same two vendors the chain reaches.
         (
             _allows("VENDOR_STATUS", "Active"),
             _flags("VENDOR_STATUS", "Inactive", "Under Review"),
@@ -299,69 +194,64 @@ ANSWER_KEY: tuple[KeyItem, ...] = (
         ),
     ),
     KeyItem(
-        "A24",
-        "vendor approved the same day it was added",
-        (_compare("DATE_ADDED", "APPROVED_DATE"),),
-        root="vendor_master_file",
+        "P-06",
+        "invoice settled with no goods receipt reference",
+        (Signature("completeness", frozenset({"GRN_ID_LINK"})),),
+        root="invoice_data",
     ),
     KeyItem(
-        "A25",
-        "no vendor approved from outside Procurement",
-        unscoreable=(
-            "a confirmed negative — the finding is that no row breaches it, "
-            "which no exception count distinguishes from a test never written"
-        ),
+        "P-07",
+        "invoice amount above the PO total",
+        (_compare("INVOICE_AMOUNT", "PO_TOTAL_AMOUNT"),),
     ),
     KeyItem(
-        "A26",
-        "same-vendor requisition pairs within 30 days",
-        unscoreable=(
-            "needs a windowed self-pairing; no library test expresses it and a "
-            "python spec's identity is its code, which no signature can match"
-        ),
-    ),
-    KeyItem(
-        "A27",
-        "same item at wildly different unit prices",
+        "P-08",
+        "invoice paid with no approval recorded",
         (
-            _compare("UNIT_PRICE", "ESTIMATED_TOTAL_COST"),
-            _compare("UNIT_PRICE", "ESTIMATED_UNIT_COST"),
+            Signature("completeness", frozenset({"SUPERVISOR_APPROVAL_ID"})),
+            Signature("completeness", frozenset({"SUPERVISOR_APPROVAL_DATE"})),
+        ),
+        root="invoice_data",
+    ),
+    KeyItem(
+        "P-09",
+        "invoice approved above the approver's limit",
+        (_compare("INVOICE_AMOUNT", "MAX_APPROVAL_AMOUNT"),),
+        root="invoice_data",
+    ),
+    KeyItem(
+        "P-10",
+        "payment released before the goods receipt",
+        (_compare("PAYMENT_DATE", "GRN_DATE"),),
+    ),
+    KeyItem(
+        "P-11",
+        "unit price far above every other order for the same item",
+        unscoreable=(
+            "needs a unit price derived as PO total over quantity and compared "
+            "within each item; no library test computes the ratio, and a python "
+            "spec's identity is its code, which no signature can match"
         ),
     ),
+    KeyItem("P-12", "invoice dated before its PO", (_compare("INVOICE_DATE", "PO_DATE"),)),
     KeyItem(
-        "A28",
-        "requisition department contradicts the HR master",
-        (_compare("REQUESTER_DEPARTMENT", "DEPARTMENT"),),
+        "P-13",
+        "invoice received before its own invoice date",
+        (_compare("DATE_RECEIVED", "INVOICE_DATE"),),
     ),
     KeyItem(
-        "A29",
-        "staff sharing a bank account",
-        (_duplicates("BANK_ACCOUNT_NUMBER"),),
-        root="staff_details",
-    ),
-    KeyItem(
-        "A30",
-        "BUYER_ID resolves to no staff record",
-        # Deliberately unconstrained on the lookup. These buyer codes resolve in
-        # *no* imported master, so every candidate fails at exactly the same
-        # rate and which one a spec names is decided by nothing the data
-        # establishes — alphabetical order among the tables outside the frame's
-        # lineage, in practice. Requiring ``staff_details`` here would score the
-        # identical 96-row finding as reached or absent depending on that.
-        (Signature("referential", frozenset({"BUYER_ID"})),),
-    ),
-    KeyItem(
-        "A33",
-        "no field anywhere records competitive bidding",
-        unscoreable=(
-            "negative space over the whole column inventory; it is a statement "
-            "the memo makes, not a procedure any frame runs"
+        "P-14",
+        "invoice dated or received before the goods receipt",
+        (
+            _compare("INVOICE_DATE", "GRN_DATE"),
+            _compare("DATE_RECEIVED", "GRN_DATE"),
         ),
     ),
 )
 
-# Document-side items, outside the EDA's scope entirely (§6.2).
-OUT_OF_SCOPE = ("A31", "A32")
+# Document-only and judgement items (Classes 2 and 3 of the guide), outside the
+# EDA's scope entirely: no table carries them.
+OUT_OF_SCOPE = ("D-01", "D-02", "D-03", "D-04", "J-01", "J-02", "J-03")
 
 
 @dataclass(frozen=True)
@@ -401,7 +291,7 @@ class Score:
     run_id: str | None
     items: tuple[ItemScore, ...]
     analyses: int
-    #: Key items whose signature no run can express (A25, A26, A33).
+    #: Key items whose signature no run can express (P-11).
     unscoreable: tuple[KeyItem, ...] = field(default=())
 
     @property

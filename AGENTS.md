@@ -1029,8 +1029,11 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   That is what makes one turn over the whole engagement safe to depend on: its
   worst case is the floor it was handed, so a reading that fails after its
   repair attempt settles as `skipped` and the commit unit writes what was
-  measured. Measured on the procurement engagement, the floor alone reaches 18
-  of 28 scoreable answer-key items with no model turn at all.
+  measured. Measured on the larger edition of the procurement data against the
+  retired A01-A33 key, the floor alone reached 18 of 28 scoreable items with no
+  model turn at all. The key is now the P-items of
+  `docs/sample-procurement/FACILITATOR_GUIDE.md`, scored by
+  `backend/tests/eda_answer_key.py`.
   The capability carries two units of different kinds — `analysis_reading`
   (proposal-only) then `analysis_register` (deterministic commit) — ordered by
   the sequential barrier's sorted-unit-ID rule. Neither unit id names the frames

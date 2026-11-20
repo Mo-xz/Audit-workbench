@@ -943,7 +943,7 @@ embed directives already flattened to citations.
 | | |
 | --- | --- |
 | Depends on | `planning.apm_ready`, `sources.imported` (partial), `documents.types_classified` |
-| Readiness | **the one planning capability that assesses currency**: a cycle whose `apm_sha1` no longer matches the memorandum is `missing`. The shape is a reading *of* the memorandum's process flow, and the matrix downstream takes its `process` vocabulary from it. An auditor's edit keeps the hash it was drafted against, so edits survive until the memorandum itself moves. |
+| Readiness | existence. The cycle records the memorandum it was read out of (`apm_sha1`, `workflow_parents["planning:apm"]`) as provenance, but is **not** held stale against it: the memorandum is a live document, and editing it must not invalidate the audit (`LIVE_PARENTS`). A run that redrafts the memorandum still reschedules the cycle through `invalidate_on`; at rest, re-reading it is the auditor's request. The matrix is held stale against the cycle, not the memorandum. |
 | Units | one (`cycle`), parent `planning:apm` |
 | Binding | pipeline — worker `planning.cycle`, executor `planning.cycle` |
 | Context | `planning.cycle` (26 / 86k) — planning context, the **whole** memorandum (60k), table metadata. Names and shapes only. |

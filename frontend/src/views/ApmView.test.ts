@@ -144,10 +144,10 @@ describe('ApmView', () => {
     expect((await mountView()).find('.feeds').text()).toContain('derived from this version')
   })
 
-  it('warns on the card it feeds when the cycle came from an earlier version', async () => {
+  it('notes, without warning, that the cycle came from an earlier version', async () => {
     const wrapper = await mountView({ cycle: { steps: [{}], apm_sha1: 'older' } })
 
-    expect(wrapper.find('.feeds').text()).toContain('derived from an earlier version')
-    expect(wrapper.find('.feeds').attributes('data-tone')).toBe('warn')
+    expect(wrapper.find('.feeds').text()).toContain('drafted from an earlier version')
+    expect(wrapper.find('.feeds').attributes('data-tone')).toBe('neutral')
   })
 })

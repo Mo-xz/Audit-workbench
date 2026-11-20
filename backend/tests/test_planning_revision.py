@@ -329,14 +329,26 @@ def test_a_revision_is_refused_while_the_matrix_is_out_of_date(workspace_with_da
     assert capability.readiness(ws, scope).state == "missing"
     assert capability.readiness(ws, {"target_refs": ["workspace:current"]}).state == "blocked"
 
-    # Stamp the rows against this memorandum, then move the memorandum.
+    # Stamp the rows against this memorandum and cycle, then move the
+    # memorandum. The memorandum is a live document: editing it leaves the
+    # matrix current, and revising the matrix to follow it is exactly the
+    # request this capability answers.
     from app.workspace_transactions import parent_hashes
 
-    stamps = parent_hashes(ws, ["planning:apm"])
+    stamps = parent_hashes(ws, ["planning:apm", "planning:cycle"])
     for row in ws.rcm:
         ws.update_rcm(row["id"], {"workflow_parents": stamps}, agent=True)
     ws = ws.reload()
     ws.update_planning({"apm_markdown": COMPLETE_APM + "\nA new paragraph."})
+    assert capability.readiness(ws.reload(), scope).state == "missing"
+
+    # Reshaping the cycle is what leaves rows naming steps it no longer has.
+    ws = ws.reload()
+    ws.update_planning({"cycle": {
+        "name": "Procure-to-pay",
+        "steps": [{"name": "Purchase order", "roles": [], "populations": [], "themes": []}],
+        "cross_cutting": None,
+    }})
 
     readiness = capability.readiness(ws.reload(), scope)
     assert readiness.state == "blocked"

@@ -1189,10 +1189,15 @@ npm run build
   `process` is chosen from. `tests.cycle_ruleset_proposed` is then the only
   stage that sees the matrix's requirements, the cycle's roles, and the induced
   field vocabulary at once, which is why the evidence contract is authored
-  there. It is the one planning artifact whose readiness assesses *currency*: a
-  cycle whose `apm_sha1` no longer matches the memorandum is `missing`, because
-  the shape is a reading *of* that memorandum. An auditor's edit keeps the hash
-  it was drafted against, so edits survive until the memorandum itself moves.
+  there. **The memorandum is a live document**: the cycle and every matrix row
+  record which memorandum they were drafted from (`apm_sha1`, and
+  `planning:apm` in `workflow_parents`), but readiness never holds them stale
+  against it (`capabilities.planning.LIVE_PARENTS`). An auditor editing the
+  memorandum used to mark the cycle, the matrix and everything tested against
+  them out of date. Bringing the plan into line with an edited memorandum is a
+  request (`planning.rcm_revised`, `planning.change_assessed`); a run that
+  itself redrafts the memorandum still reschedules them through
+  `invalidate_on`. A reshaped cycle still stales the matrix.
 - `tests.cycle_ruleset_approved` is a gate, and the two run modes part there. In
   `permission` mode it expands no unit: the stage reports from its own readiness
   and the run carries on without a cycle. In `auto` mode the auditor has

@@ -2171,7 +2171,11 @@ def test_an_imported_document_leaves_settled_planning_alone():
     )
 
 
-def test_a_memorandum_edit_stales_the_cycle_and_matrix_and_an_import_does_not():
+def test_neither_a_memorandum_edit_nor_an_import_stales_the_cycle_or_matrix():
+    """The memorandum is a live document. An auditor editing it is not a
+    statement that the cycle, the matrix and everything tested against them
+    are wrong, so it moves no currency either artifact is held to."""
+
     ws = _stamp_planning_parents(_planning_workspace("Memorandum currency"))
 
     for capability_id in PLANNING_CAPABILITIES:
@@ -2187,28 +2191,58 @@ def test_a_memorandum_edit_stales_the_cycle_and_matrix_and_an_import_does_not():
     for capability_id in PLANNING_CAPABILITIES:
         assert _readiness(ws, capability_id).state == "satisfied", capability_id
 
-    # The auditor rewrites the memorandum. Now both artifacts read *out of* it
-    # say so, and name what moved.
+    # The auditor rewrites the memorandum. The cycle and the matrix still
+    # record which memorandum they were drafted from, and stay current.
     ws.update_planning(
         {"apm_markdown": "# A different memorandum\n\n## Scope\nPayroll."}
     )
     ws = workspaces.load_workspace(ws.id)
+    for capability_id in PLANNING_CAPABILITIES:
+        assert _readiness(ws, capability_id).state == "satisfied", capability_id
+    assert "planning:apm" in ws.planning["cycle"]["workflow_parents"]
 
-    cycle = _readiness(ws, "planning.cycle_ready")
-    matrix = _readiness(ws, "planning.rcm_ready")
-    assert cycle.state == "stale"
-    assert cycle.details["moved"] == ["planning:apm"]
-    assert matrix.state == "stale"
-    assert matrix.details["moved"] == ["planning:apm"]
-    # The memorandum itself is what the auditor wrote, and stays.
-    assert _readiness(ws, "planning.apm_ready").state == "satisfied"
-
-
-def test_a_stale_cycle_and_matrix_are_scheduled_and_the_memorandum_is_reused():
-    ws = _stamp_planning_parents(_planning_workspace("Stale scheduling"))
-    ws.update_planning(
-        {"apm_markdown": "# A different memorandum\n\n## Scope\nPayroll."}
+    plan = workflow.materialize(
+        audit_capabilities.REGISTRY,
+        ws,
+        ["tests.specified"],
+        {"target_refs": ["workspace:current"]},
     )
+    assert not {
+        stage["capability"]
+        for stage in plan.stages
+        if stage["capability"].startswith("planning.")
+    }
+
+
+def test_a_reshaped_cycle_still_stales_the_matrix():
+    """The cycle is the matrix's structural parent: rows name its steps."""
+
+    ws = _stamp_planning_parents(_planning_workspace("Cycle currency"))
+    cycle = dict(ws.planning["cycle"])
+    ws.update_planning(
+        {
+            "cycle": {
+                **cycle,
+                "steps": [
+                    *cycle["steps"],
+                    {"name": "Goods receipt", "roles": [], "populations": [], "themes": []},
+                ],
+            }
+        }
+    )
+    ws = workspaces.load_workspace(ws.id)
+
+    matrix = _readiness(ws, "planning.rcm_ready")
+    assert matrix.state == "stale"
+    assert matrix.details["moved"] == ["planning:cycle"]
+
+
+def test_a_run_that_redrafts_the_memorandum_reschedules_what_reads_it():
+    """In-run invalidation is unchanged: a memorandum this run is rewriting
+    will not be the one the cycle and the matrix were drafted from."""
+
+    ws = _stamp_planning_parents(_planning_workspace("In-run redraft"))
+    ws.update_planning({"context": {"objective": "A different objective"}})
     ws = workspaces.load_workspace(ws.id)
 
     plan = workflow.materialize(
@@ -2217,28 +2251,12 @@ def test_a_stale_cycle_and_matrix_are_scheduled_and_the_memorandum_is_reused():
         ["tests.specified"],
         {"target_refs": ["workspace:current"]},
     )
-
     scheduled = {
         stage["capability"]: stage.get("scheduled_because") for stage in plan.stages
     }
-    assert scheduled["planning.cycle_ready"] == "stale"
-    # The matrix is stale in its own right, and would have been scheduled by the
-    # cycle anyway; the reason recorded is the stronger one.
-    assert scheduled["planning.rcm_ready"] == "stale"
-    assert "planning.apm_ready" in plan.reused
-    assert "planning.context_ready" in plan.reused
-
-    explanation = routing._explanation(
-        audit_capabilities.REGISTRY,
-        plan.resolved,
-        plan.stages,
-        plan.reused,
-        ["tests.specified"],
-    )
-    assert (
-        "were drafted against an earlier audit planning memorandum, so I'll "
-        "redraft them" in explanation
-    )
+    assert "planning.apm_ready" in scheduled
+    assert "planning.cycle_ready" in scheduled
+    assert "planning.rcm_ready" in scheduled
 
 
 def test_forcing_the_memorandum_still_redrafts_the_whole_closure():

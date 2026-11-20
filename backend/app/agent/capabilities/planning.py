@@ -14,19 +14,24 @@ restates them.
 Readiness in this group is existence, structural usability, *and* currency —
 alone among the capability groups, because alone among them these artifacts
 carry a ``workflow_parents`` stamp written by their executors inside the guarded
-commit. A memorandum that has been rewritten leaves the shape and the matrix
-read out of it describing a process the engagement no longer says it audits, and
-that is a thing a stamp can prove rather than a thing to guess at. What still
-never makes them stale is a *source*: a table or a document arriving is the
-auditor's act, nothing in the graph produces it, and no planning artifact
-declares it as a parent.
+commit. Two things never make them stale. A *source*: a table or a document
+arriving is the auditor's act, nothing in the graph produces it, and no planning
+artifact declares it as a parent. And the *memorandum*: it is a live document
+the auditor keeps editing through the engagement, and an edit to it is not a
+statement that the cycle, the matrix and everything tested against them are
+wrong. The stamp still records which memorandum they were drafted from — the
+provenance, and the guard an in-flight commit is checked against — but currency
+is read over the other parents only. A run that itself redrafts the memorandum
+still reschedules what reads it through ``invalidate_on``; at rest, bringing the
+plan into line with an edited memorandum is a request (``planning.rcm_revised``,
+``planning.change_assessed``), never an inference.
 """
 
 from __future__ import annotations
 
 from ... import planning_delta, planning_revision
 from ...text import counted, verb
-from ...workspaces import Workspace, planning_apm_sha1
+from ...workspaces import Workspace
 from ..workflow import Capability, Readiness, UnitSpec
 from ..workflows import audit as audit_workflow
 from ._shared import Currency
@@ -34,6 +39,22 @@ from ._shared import currency as _currency
 from ._shared import rows as _rows
 from ._shared import single_unit as _single
 from ._shared import with_currency as _with_currency
+
+#: Parents an artifact records but is never held stale against at rest. The
+#: memorandum is a live document: editing it must not invalidate the audit
+#: drafted from it.
+LIVE_PARENTS: frozenset[str] = frozenset({"planning:apm"})
+
+
+def _held_parents(stamp: dict | None) -> dict:
+    """The part of a parent stamp that currency is assessed against."""
+
+    return {
+        ref: value
+        for ref, value in dict(stamp or {}).items()
+        if str(ref) not in LIVE_PARENTS
+    }
+
 
 CAPABILITY_IDS: tuple[str, ...] = (
     "planning.context_ready",
@@ -136,48 +157,25 @@ def _planning_apm_ready() -> Capability:
 # planning.cycle_ready
 # --------------------------------------------------------------------------- #
 def _cycle_ready(workspace: Workspace, _scope: dict) -> Readiness:
-    """Whether a cycle shape exists for the memorandum currently in the file.
+    """Whether a cycle shape exists.
 
-    Currency is assessed here, unlike every other planning capability, and for
-    a reason that is particular to this artifact: the shape is a reading *of*
-    the memorandum's process flow, so a memorandum that has been rewritten has
-    left the shape describing a process the engagement no longer says it audits
-    — and the matrix downstream takes its ``process`` vocabulary from it.
-
-    An auditor's edit is the confirmation and keeps the hash it was drafted
-    against, so edits survive until the memorandum itself moves. Nothing waits
-    on a review that may never come.
-
-    It reports ``stale`` rather than ``missing``, which it used to: a shape
-    that exists and describes the wrong process is not an absent shape, and the
-    scheduler now has a state that says exactly that.
+    The shape is read out of the memorandum's process flow, and it used to go
+    stale whenever the memorandum moved. It no longer does: the memorandum is a
+    live document, and an auditor editing it had every artifact from the cycle
+    to the report declared out of date. Its only stamped parent is the
+    memorandum, so a cycle that exists is current; re-reading it is the
+    auditor's request.
     """
     cycle = workspace.planning.get("cycle") or {}
     steps = cycle.get("steps") or []
     if not steps:
         return Readiness("missing", ("no cycle has been designed",))
-    reason = "the cycle was designed against an earlier memorandum"
-    state = _currency(workspace, cycle.get("workflow_parents"))
+    state = _currency(workspace, _held_parents(cycle.get("workflow_parents")))
     if state.stale:
         return Readiness(
             "stale",
-            (reason,),
+            ("the cycle was designed against earlier planning",),
             details={"artifact_count": len(steps), **state.details},
-        )
-    # A shape committed before parents were stamped still has the memorandum
-    # text hash it was drafted against, so it can answer the same question —
-    # narrowly, and only for itself.
-    if state.state == "unstamped" and str(
-        cycle.get("apm_sha1") or ""
-    ) != planning_apm_sha1(workspace):
-        return Readiness(
-            "stale",
-            (reason,),
-            details={
-                "artifact_count": len(steps),
-                "currency": "stale",
-                "moved": ["planning:apm"],
-            },
         )
     return _with_currency(
         Readiness("satisfied", details={"artifact_count": len(steps)}), state
@@ -228,7 +226,13 @@ def _rcm_ready(workspace: Workspace, scope: dict) -> Readiness:
     # executor reconciles per row. Readiness is whole-matrix — one stale row
     # schedules the stage — and the stage then redrafts the matrix, preserving
     # every auditor-owned row exactly as it does today.
-    states = [_currency(workspace, row.get("workflow_parents")) for row in rows]
+    # The memorandum is not among the parents read: editing it is not a reason
+    # to call the matrix wrong. The cycle is — a reshaped cycle leaves rows
+    # naming steps it no longer has.
+    states = [
+        _currency(workspace, _held_parents(row.get("workflow_parents")))
+        for row in rows
+    ]
     outdated = [row["id"] for row, state in zip(rows, states) if state.stale]
     if outdated:
         return Readiness(
@@ -398,8 +402,8 @@ def _rcm_revised(workspace: Workspace, scope: dict) -> Readiness:
 
     Not "is the matrix good": a revision is a requested outcome, and the only
     question its readiness can answer is whether *this* request has been carried
-    out against the rows as they stand. A matrix out of date with its memorandum
-    is refused rather than redrafted first — a revision that quietly triggers a
+    out against the rows as they stand. A matrix out of date with its cycle is
+    refused rather than redrafted first — a revision that quietly triggers a
     regeneration has done something nobody asked for.
     """
 
@@ -421,7 +425,7 @@ def _rcm_revised(workspace: Workspace, scope: dict) -> Readiness:
         return Readiness(
             "blocked",
             (
-                "the matrix is out of date with its memorandum; redraft it "
+                "the matrix is out of date with its cycle; redraft it "
                 "(planning.rcm_ready) before revising it",
             ),
         )

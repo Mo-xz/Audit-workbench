@@ -123,12 +123,14 @@ const omissions = computed(() => {
 })
 
 /**
- * Whether the cycle still describes the memorandum as it now reads.
+ * Whether the memorandum has been edited since the cycle was read out of it.
  *
  * Two hashes compared as strings — the backend computes both, because it owns
- * what the identity of a memorandum covers.
+ * what the identity of a memorandum covers. A note, not a warning: the
+ * memorandum is a live document, and editing it does not make the cycle, the
+ * matrix or anything tested against them out of date.
  */
-const cycleStale = computed(() => {
+const cycleFromEarlierVersion = computed(() => {
   const cycle = planning.value?.cycle
   const current = planning.value?.apm_sha1
   return Boolean(cycle && current && cycle.apm_sha1 && cycle.apm_sha1 !== current)
@@ -261,7 +263,6 @@ const cover = computed<DocumentCover>(() => {
       label: 'Feeds',
       value: `${plural(planning.value.cycle.steps.length, 'step')} in the cycle`,
       note: `${plural(rcmCount.value, 'risk')} in the matrix`,
-      tone: cycleStale.value ? 'warn' : undefined,
     })
   }
   return { eyebrow: `Internal audit · ${props.workspace.name}`, fields }
@@ -436,11 +437,11 @@ const exportItems = computed(() => [
 
           <section class="card">
             <h3 class="aw-label">What this feeds</h3>
-            <button type="button" class="feeds" :data-tone="cycleStale ? 'warn' : 'ok'" @click="nav.push('cycle')">
+            <button type="button" class="feeds" :data-tone="cycleFromEarlierVersion ? 'neutral' : 'ok'" @click="nav.push('cycle')">
               <span class="name">{{ planning?.cycle ? `${plural(planning.cycle.steps.length, 'step')}` : 'No cycle yet' }}</span>
               <span class="note">{{ planning?.cycle
-                ? (cycleStale
-                  ? 'derived from an earlier version — regenerate it, or the risks are planned against text that no longer exists'
+                ? (cycleFromEarlierVersion
+                  ? 'drafted from an earlier version of this memorandum — ask the assistant to revise the matrix if your edit changes the plan'
                   : 'derived from this version')
                 : 'the cycle is drafted from this memorandum' }}</span>
             </button>

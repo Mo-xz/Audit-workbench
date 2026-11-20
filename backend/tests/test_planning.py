@@ -1328,14 +1328,10 @@ def test_the_matrix_takes_its_process_names_from_the_cycle(monkeypatch):
     )
 
 
-def test_a_cycle_current_with_the_memorandum_is_not_redesigned(monkeypatch):
-    """The shape is a reading *of* the memorandum, so it is stale exactly when
-    the memorandum has moved and current otherwise.
-
-    This cycle carries no ``workflow_parents`` — it was written straight to the
-    workspace, as every cycle committed before parents were stamped was — so
-    the answer comes from the ``apm_sha1`` fallback, which is the whole point
-    of keeping it."""
+def test_a_cycle_is_not_redesigned_because_the_memorandum_moved(monkeypatch):
+    """The memorandum is a live document. The cycle keeps the hash of the
+    memorandum it was read out of, as provenance, and is not held stale
+    against it — an auditor's edit or an agent's revision alike."""
 
     from app.agent.capabilities.planning import _cycle_ready
 
@@ -1347,6 +1343,7 @@ def test_a_cycle_current_with_the_memorandum_is_not_redesigned(monkeypatch):
         "cross_cutting": None,
         "agent_run_id": "run-1",
     }}, agent=True)
+    drafted_from = workspaces.load_workspace(ws.id).planning["cycle"]["apm_sha1"]
 
     assert _cycle_ready(workspaces.load_workspace(ws.id), {}).state == "satisfied"
 
@@ -1360,10 +1357,7 @@ def test_a_cycle_current_with_the_memorandum_is_not_redesigned(monkeypatch):
     assert _cycle_ready(workspaces.load_workspace(ws.id), {}).state == "satisfied"
 
     ws = workspaces.load_workspace(ws.id)
-    ws.update_planning({"apm_markdown": "# A different memorandum"}, agent=True)
-    outdated = _cycle_ready(workspaces.load_workspace(ws.id), {})
-    # ``stale``, not ``missing``: a shape describing the wrong process is not an
-    # absent shape, and the scheduler now has a state that says so and redraws
-    # it for that reason.
-    assert outdated.state == "stale"
-    assert outdated.details["moved"] == ["planning:apm"]
+    ws.update_planning({"apm_markdown": "# A different memorandum"})
+    ws = workspaces.load_workspace(ws.id)
+    assert _cycle_ready(ws, {}).state == "satisfied"
+    assert ws.planning["cycle"]["apm_sha1"] == drafted_from

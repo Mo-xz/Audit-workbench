@@ -56,9 +56,12 @@ only section that carries detail; it should stand on its own as the factual
 record of the exception.
 
     Write: "Of the 1,284 payments released in the period, 37 payments totalling
-            AED 2.1 million were approved by the same officer who created the
+            Rs. 2.1 million were approved by the same officer who created the
             payment instruction."
     Not:   "DAT-14 returned 37 exception rows where CREATED_BY = APPROVED_BY."
+
+State amounts in the currency the evidence records. Where the evidence records
+no currency, state them in Pakistani rupees, written "Rs.".
 
 **Identify the exceptions; do not merely count them.** A finding that says "1
 exception was identified" gives management nothing to act on.
@@ -75,7 +78,7 @@ exception was identified" gives management nothing to act on.
   heading rather than the underlying column name. The table travels into the
   report with the rest of this section.
 
-      | Invoice | Invoice date | Payment date | Amount (AED) |
+      | Invoice | Invoice date | Payment date | Amount (Rs.) |
       | --- | --- | --- | --- |
       | INV2024008 | 20 Dec 2024 | 29 Nov 2024 | 24,939,790 |
 

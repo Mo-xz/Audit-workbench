@@ -4,7 +4,7 @@ Everything below is the answer key. Nothing in the data files or the documents
 marks an exception: there are no flag columns and no hints in filenames.
 
 Every exception was established independently from the six Excel files and the
-eight documents, against the rules in the Procurement SOP extract and the
+thirteen documents, against the rules in the Procurement SOP extract and the
 Financial Approval Matrix. Each one was then recomputed in Polars, so every
 record, count and value below can be reproduced from `data/`.
 
@@ -25,10 +25,13 @@ procure-to-pay cycle.
 - Population: 55 requisitions (PKR 645,372,000), 52 purchase orders
   (PKR 609,982,000) and 52 invoices (PKR 622,535,800), all paid.
 - Masters: 20 staff, 12 vendors, and a 4-row financial approval matrix.
-- Documents: the SOP extract, the approval matrix, the planning minutes, and one
-  sample pack for REQ2024009 / PO2024004 / INV2024004, holding the
-  requisition, PO, goods receipt note, vendor invoice and payment voucher as
-  five PDFs.
+- Documents: the SOP extract, the approval matrix, the planning minutes, and two
+  sample packs, each holding the requisition, PO, goods receipt note, vendor
+  invoice and payment voucher for one transaction as five PDFs:
+  - pack 01, REQ2024009 / PO2024004 / INV2024004, whose GRN and voucher are
+    scans with handwritten signatures;
+  - pack 02, REQ2024105 / PO2024105 / INV2024105, whose five documents are all
+    native PDFs, signatures included.
 - Currency: PKR throughout. The source documents say so, and no figure in this
   pack is in any other currency.
 
@@ -87,19 +90,23 @@ Three classes. A ▸ marks a record that also has documents in the sample pack.
 
 ### Class 2 - visible only in the documents
 
-The sample pack is for REQ2024009 → PO2024004 → GRN2024004 → INV2024004.
+Pack 01 is REQ2024009 → PO2024004 → GRN2024004 → INV2024004. Pack 02 is
+REQ2024105 → PO2024105 → GRN2024105 → INV2024105.
 
 | Ref | Exception | SOP | Severity | Document |
 | --- | --- | --- | --- | --- |
-| D-01 | Goods receipt signed "Received and inspected by **Vendor representative**" | §4 | High | GRN2024004_Signed_Receipt.pdf |
-| D-02 | Payment authorisations read only "Signed Signed": no name, no designation, no date | §5 | Moderate | INV2024004_Signed_Payment_Voucher.pdf |
+| D-01 | Goods received and inspected by **Ethan Smith (1041)**, the Requisition & PO Associate who raised the requisition | §3, §4 | Moderate | GRN2024004_Signed_Receipt.pdf |
+| D-02 | Payment authorised by **Olivia Smith (1010)**, the invoice verifier, and **Max Baker (1023)**, a Sourcing Manager with no financial authority; the recorded approver did not sign, and neither signature is dated | §5 | High | INV2024004_Signed_Payment_Voucher.pdf |
 | D-03 | Requisition names the requesting department as Finance; the requester, Ethan Smith (1041), is a Procurement associate whose other nine requisitions all say Procurement | §2 | Low | REQ2024009_Purchase_Requisition.pdf |
-| D-04 | PO records buyer "B001", which matches no staff record; the buyer cannot be identified | §3 | Low | PO2024004_Purchase_Order.pdf |
+| D-04 | POs record buyer "B001", which matches no staff record; the buyer cannot be identified | §3 | Low | PO2024004_Purchase_Order.pdf, PO2024105_Purchase_Order.pdf |
+| D-05 | Goods receipt records **17** laptops received against **20** ordered; the invoice billed and the voucher paid for all 20, so PKR 435,000 was paid for 3 laptops never received | §4, §5 | High | GRN2024105_Signed_Receipt.pdf, against the PO, invoice and voucher |
 
-- **D-01** is the document-only exception that matters most. The GRN table records a normal receipt, and only the signed form shows that the vendor certified its own delivery. The extraction is noisy: the signature line reads as `A~ K./tVl.lll t` above "Received and inspected by Vendor representative". A run that reads only the extracted fields will miss it.
-- **D-02:** Who released PKR 2,000,000, and when, cannot be established from the voucher.
+- **The signatures are handwriting on scanned pages.** The GRN and the payment voucher are scans that Adobe Acrobat's Paper Capture turned into searchable PDFs. Their OCR text layer drops "Ethan Smith (1041)" entirely, renders "Ahmed Khan" as `A~ K./tVl.lll t`, and runs the two captions together on one line. Read as text, the GRN appears to be signed only by the vendor's representative and the voucher reads "Signed Signed". Both are wrong. A run that reads these pages as text cannot reach D-01 or D-02; it needs to look at the page image.
+- **D-01:** Ahmed Khan, the vendor's contact on the PO, signs only to acknowledge delivery, which is normal. The receipt itself was certified by the person who raised the requisition, a Requisition & PO Associate on the ordering side of Procurement. SOP §4 gives inspection and receipt to the requisitioning department and §3 gives ordering to Procurement, so ordering and receiving were not segregated. The requisition also names Finance as the requesting department (D-03), so who should have received the goods is itself unclear.
+- **D-02:** The invoice table records INV2024004 as verified by 1010 and approved by 1003, Daniel Reed, the Financial Controller. The voucher that released PKR 2,000,000 carries Olivia Smith (the verifier) and Max Baker, the Sourcing Manager who gave procurement approval on the requisition. Max Baker has no limit in the approval matrix, and the recorded approver's signature is absent. When either signature was given cannot be established.
 - **D-03** is the one requisition in the file whose department contradicts the requester's other records. The requisition table carries the same "Finance" value.
-- **D-04:** The tables have no buyer field at all, so this can only be seen on the document.
+- **D-04:** The tables have no buyer field at all, so this can only be seen on the documents. Both POs name the same code, so it is one matter.
+- **D-05** is the one exception in pack 02, and the one document exception a run reading text alone can reach. The PO table records the GRN's number, date and status ("Received") but no received quantity, so nothing in `data/` shows the shortfall. Only the GRN states 17. The PO and the requisition say 20; the invoice bills, and the voucher pays, PKR 2,900,000, which is 20 × 145,000. SOP §5 requires the invoice to be matched to the GRN before approval, and a match would have found 3 laptops (PKR 435,000) billed but not delivered. The inspection comment, "Laptops received and inspected.", does not mention the short delivery.
 
 ### Class 3 - judgement items
 
@@ -125,6 +132,8 @@ These were tested and are not exceptions. A run that reports them as findings ha
 - Invoice approvers mostly sit outside the verifier's reporting line. The SOP does not require approval within the verifier's line.
 - Vendor invoice number VINV001-202404 (INV2024004) has a different format from the other 51 (VINV1nn-2024). It is the sample-pack invoice, and the format is not an exception.
 - 16 of 20 staff job titles are not in the approval matrix. Only financial approvers need to be, and all four that approve are (see J-03).
+- Pack 02 agrees with the tables in every other field: dates, people, vendor, item, ordered quantity, unit price and amounts. Its GRN was received and inspected by Hina Raza (1056), the requester in the requisitioning department, as SOP §4 requires. Its voucher is signed by Omar Farooq (1013) and Daniel Reed (1003), the invoice's recorded verifier and approver, and Daniel Reed's PKR 5,000,000 limit covers PKR 2,900,000.
+- In both packs the vendor, references, item, unit price and amounts agree across the requisition, PO, invoice and voucher, apart from D-05's quantity.
 
 ## The headline finding
 
@@ -154,7 +163,7 @@ the report), not on its analyses or planning memorandum alone.
 | Missed | Absent from every artifact |
 | False positive | A "tested and clean" item reported as a finding |
 
-There are 14 table items and 4 document items, 18 in all, plus 3 judgement items
+There are 14 table items and 5 document items, 19 in all, plus 3 judgement items
 that are scored as raised or not raised. Values overlap across items (the
 127 chain appears three times), so do not sum the value column.
 

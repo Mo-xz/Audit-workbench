@@ -5,8 +5,8 @@ requisitions raised in calendar 2024 and the orders, receipts and payments that
 settle them.
 
 It is deliberately small: 55 requisitions, 52 purchase orders and 52 invoices,
-with staff, vendor and approval-matrix masters and one fully documented
-transaction. It is meant for a fast end-to-end demonstration and for scoring a
+with staff, vendor and approval-matrix masters and two fully documented
+transactions. It is meant for a fast end-to-end demonstration and for scoring a
 run against a known answer key.
 
 ## Fast demo setup
@@ -14,9 +14,8 @@ run against a known answer key.
 1. Create a workspace named **Procurement Audit - 2024**.
 2. Import each Excel file from `data/` as a separate table.
 3. Add the three DOCX files from `documents/planning/` to the document
-   inventory. Then stage the folder
-   `documents/samples/01_REQ2024009_PO2024004_INV2024004/`, which holds one
-   sampled transaction. Each PDF in it is one document.
+   inventory. Then stage the two folders under `documents/samples/`. Each
+   holds one sampled transaction, and each PDF in it is one document.
 4. In auto mode, use this command:
 
    `Perform a risk-based internal audit of the procure-to-pay cycle for 2024,
@@ -43,9 +42,13 @@ run against a known answer key.
 - `documents/planning/Financial Approval Matrix.docx`: the approved limits, in PKR.
 - `documents/planning/Minutes of Meeting - Procurement Planning.docx`: the
   planning meeting of 22 July 2025, including management's own admissions.
-- `documents/samples/01_REQ2024009_PO2024004_INV2024004/`: the requisition,
+- `documents/samples/01_REQ2024009_PO2024004_INV2024004/` and
+  `documents/samples/02_REQ2024105_PO2024105_INV2024105/`: the requisition,
   purchase order, signed goods receipt note, vendor invoice and signed payment
-  voucher for one transaction, as five single-page PDFs.
+  voucher for one transaction each, as five single-page PDFs. Pack 01's goods
+  receipt and voucher are scans; pack 02's five documents are native PDFs.
+- `generator/gen_pack.py`: rebuilds pack 02 (and pack 01's purchase order) from
+  the values in the tables, printing HTML to PDF with Microsoft Edge.
 - `FACILITATOR_GUIDE.md`: the answer key, recommended controls, and how to
   score a run.
 
@@ -70,9 +73,14 @@ Exceptions fall into three classes, and the split is deliberate:
    over-billed invoices, payment before receipt, and one wildly overpriced
    order. The analytics find them without any document. Several need two joins
    to see: an approver's limit is only reachable through the staff file.
-2. **Visible only in the documents.** A goods receipt signed by the vendor's
-   own representative, payment authorisations with no name or date, a buyer
-   code that matches no staff record. These need the sample pack.
+2. **Visible only in the documents.** A goods receipt short by three laptops
+   that were invoiced and paid in full, goods received by the same associate
+   who raised the requisition, a payment authorised by someone with no
+   financial authority, and a buyer code that matches no staff record. These
+   need the sample packs. Pack 01's signed documents are scans whose
+   handwritten signatures are missing from the OCR text layer, so they can only
+   be read from the page image. Pack 02 is entirely text, so its short receipt
+   can be found by reading alone.
 3. **Judgement.** Matters that need inquiry, not a conclusion, such as the
    same branch fit-out ordered three times from different vendors.
 

@@ -251,7 +251,7 @@ ANSWER_KEY: tuple[KeyItem, ...] = (
 
 # Document-only and judgement items (Classes 2 and 3 of the guide), outside the
 # EDA's scope entirely: no table carries them.
-OUT_OF_SCOPE = ("D-01", "D-02", "D-03", "D-04", "J-01", "J-02", "J-03")
+OUT_OF_SCOPE = ("D-01", "D-02", "D-03", "D-04", "D-05", "J-01", "J-02", "J-03")
 
 
 @dataclass(frozen=True)

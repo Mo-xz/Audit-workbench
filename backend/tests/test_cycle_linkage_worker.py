@@ -96,7 +96,8 @@ def _covered(**overrides) -> dict:
     entry = {
         "rcm_id": "RCM-1",
         "control_attribute": "invoice_match",
-        "assertion_id": "as_total",
+        "reads": ["invoice", "order"],
+        "assertion_ids": ["as_total"],
     }
     entry.update(overrides)
     return entry
@@ -159,16 +160,22 @@ def test_coverage_parses_into_both_of_its_two_shapes():
     )
 
     answered, unsupported = parsed["coverage"]
-    assert answered["assertion_id"] == "as_total"
-    assert "assertion_id" not in unsupported
+    assert answered["assertion_ids"] == ["as_total"]
+    assert answered["reads"] == ["invoice", "order"]
+    assert "assertion_ids" not in unsupported
     assert unsupported["reason"] == "No induced type states a delivery quantity."
 
 
 def test_a_cycle_that_tests_nothing_is_refused():
-    """A cycle with no assertion links documents and concludes nothing."""
+    """A cycle with no assertion links documents and concludes nothing.
 
+    Refused after the field-pair floor rather than at parse time: a response
+    that writes no rule of its own and keeps the supplied pairs is complete.
+    """
+
+    parsed = _linkage_response_schema(json.dumps(_proposal(assertions=[])))
     with pytest.raises(WorkerResponseValidationError, match="not a cycle"):
-        _linkage_response_schema(json.dumps(_proposal(assertions=[])))
+        validate_linkage_proposal(parsed, _request())
 
 
 def test_a_proposal_without_roles_is_refused():
@@ -234,7 +241,11 @@ def test_the_anchor_is_checked_like_any_other_operand():
 
 def test_a_valid_proposal_passes_both_gates():
     parsed = _linkage_response_schema(json.dumps(_proposal()))
-    assert validate_linkage_proposal(parsed, _request()) is parsed
+    # Equal rather than the same object: the validator returns the proposal
+    # with the field-pair floor applied, which without a cycle adds nothing.
+    validated = validate_linkage_proposal(parsed, _request())
+    assert validated["assertions"] == parsed["assertions"]
+    assert validated["declined_pairs"] == []
 
 
 def test_two_roles_may_share_a_document_type():
@@ -615,7 +626,7 @@ def test_coverage_naming_an_assertion_that_does_not_exist_is_refused():
 
     with pytest.raises(WorkerResponseValidationError, match="does not contain"):
         validate_linkage_proposal(
-            _proposal(coverage=[_covered(assertion_id="as_invented")]),
+            _proposal(coverage=[_covered(assertion_ids=["as_invented"])]),
             _request(requirements=[_requirement()]),
         )
 
@@ -697,6 +708,272 @@ def test_one_requirement_answered_twice_is_refused():
         )
 
 
+# ------------------------------------- a requirement is held to what it reads
+#
+# Each shape below is one an approved ruleset actually took. A procurement
+# proposal answered a three-way match with a rule that the voucher is signed,
+# so a short delivery only the receipt states was never compared; a treasury
+# one answered a five-term confirmation match with its rate alone. Neither is
+# about procurement or treasury: both are a coverage entry naming rules that do
+# not read the records its requirement is about.
+MATCH_SCHEMAS = SCHEMAS + [
+    {
+        "document_type": "goods_receipt",
+        "fields": [
+            {"name": "receipt_number", "role": "identifier", "value_type": "identifier"},
+            {"name": "order_number", "role": "identifier", "value_type": "identifier"},
+            {"name": "quantity_received", "role": "attribute", "value_type": "number"},
+        ],
+    },
+    {
+        "document_type": "payment_voucher",
+        "fields": [
+            {"name": "invoice_number", "role": "identifier", "value_type": "identifier"},
+            {"name": "signature", "role": "control", "value_type": "text"},
+        ],
+    },
+]
+# The order carries a quantity only in this vocabulary, so the receipt has
+# something of the order's to agree with.
+MATCH_SCHEMAS[1] = {
+    "document_type": "purchase_order",
+    "fields": [
+        {"name": "order_number", "role": "identifier", "value_type": "identifier"},
+        {"name": "total_amount", "role": "attribute", "value_type": "number"},
+        {"name": "quantity", "role": "attribute", "value_type": "number"},
+    ],
+}
+
+
+def _match_proposal(*, extra_assertions=(), coverage=(), **overrides) -> dict:
+    proposal = _proposal(
+        roles=[
+            {"name": "invoice", "document_type": "vendor_invoice",
+             "cardinality": "one", "required": True},
+            {"name": "order", "document_type": "purchase_order",
+             "cardinality": "one", "required": True},
+            {"name": "receipt", "document_type": "goods_receipt",
+             "cardinality": "one", "required": True},
+            {"name": "payment", "document_type": "payment_voucher",
+             "cardinality": "one", "required": True},
+        ],
+        join_keys=[
+            {"id": "jk_order", "match": "normalized_equal",
+             "left": {"role": "invoice", "field": "order_number"},
+             "right": {"role": "order", "field": "order_number"},
+             "rationale": "An invoice cites the order it bills against."},
+            {"id": "jk_receipt", "match": "normalized_equal",
+             "left": {"role": "order", "field": "order_number"},
+             "right": {"role": "receipt", "field": "order_number"},
+             "rationale": "A receipt records the order it fulfils."},
+            {"id": "jk_payment", "match": "normalized_equal",
+             "left": {"role": "invoice", "field": "invoice_number"},
+             "right": {"role": "payment", "field": "invoice_number"},
+             "rationale": "A voucher records the invoice it settles."},
+        ],
+        assertions=[
+            {"id": "as_total", "label": "Totals agree",
+             "left": {"role": "invoice", "field": "total_amount"},
+             "right": {"role": "order", "field": "total_amount"},
+             "requirement": "The amount billed is the amount ordered.",
+             "rationale": "An invoice bills what was ordered."},
+            {"id": "as_signed", "label": "Voucher signed",
+             "left": {"role": "payment", "field": "signature"}, "right": None,
+             "requirement": "The voucher carries a signature.",
+             "rationale": "A signature shows the payment was authorised."},
+            *extra_assertions,
+        ],
+        coverage=list(coverage),
+        **overrides,
+    )
+    return proposal
+
+
+RECEIPT_QUANTITY = {
+    "id": "as_received", "label": "Received quantity agrees with order",
+    "left": {"role": "receipt", "field": "quantity_received"},
+    "right": {"role": "order", "field": "quantity"},
+    "requirement": "The quantity received is the quantity ordered.",
+    "rationale": "An order billed in full must have been received in full.",
+}
+
+
+def _match_request():
+    return _Request(
+        schemas=MATCH_SCHEMAS,
+        requirements=[_requirement(
+            requirement=(
+                "The invoice is matched to the purchase order and the goods "
+                "receipt before it is approved for payment."
+            ),
+        )],
+    )
+
+
+def test_a_requirement_answered_by_a_rule_over_another_record_is_refused():
+    with pytest.raises(WorkerResponseValidationError) as raised:
+        validate_linkage_proposal(
+            _match_proposal(coverage=[_covered(
+                reads=["invoice", "order", "receipt"],
+                assertion_ids=["as_signed"],
+            )]),
+            _match_request(),
+        )
+
+    message = str(raised.value)
+    assert "answers 0 of 1 supplied requirement" in message
+    assert "'as_signed', which reads payment" in message
+    for role in ("invoice", "order", "receipt"):
+        assert f"'{role}'" in message.split("is about ", 1)[1]
+
+
+def test_a_match_that_never_reads_one_of_its_records_is_refused():
+    """Invoice against order is a real comparison; it still says nothing of the
+    receipt the requirement also names."""
+
+    with pytest.raises(WorkerResponseValidationError) as raised:
+        validate_linkage_proposal(
+            _match_proposal(coverage=[_covered(
+                reads=["invoice", "order", "receipt"],
+                assertion_ids=["as_total"],
+            )]),
+            _match_request(),
+        )
+
+    message = str(raised.value)
+    assert "is about 'receipt', and none of its assertions (as_total)" in message
+    assert "not that what it states agrees" in message
+
+
+def test_a_match_reading_every_record_it_names_passes():
+    proposal = validate_linkage_proposal(
+        _match_proposal(
+            extra_assertions=[RECEIPT_QUANTITY],
+            coverage=[_covered(
+                reads=["invoice", "order", "receipt"],
+                assertion_ids=["as_total", "as_received"],
+            )],
+        ),
+        _match_request(),
+    )
+
+    assert proposal["coverage"][0]["assertion_ids"] == ["as_total", "as_received"]
+
+
+def test_a_part_no_field_pair_can_express_is_stated_as_a_gap():
+    proposal = validate_linkage_proposal(
+        _match_proposal(coverage=[_covered(
+            reads=["invoice", "order", "receipt"],
+            assertion_ids=["as_total"],
+            gaps=[{"role": "receipt",
+                   "reason": "The order states no quantity to compare against."}],
+        )]),
+        _match_request(),
+    )
+
+    assert proposal["coverage"][0]["gaps"][0]["role"] == "receipt"
+
+
+def test_a_gap_must_say_why():
+    with pytest.raises(WorkerResponseValidationError, match="with no reason"):
+        validate_linkage_proposal(
+            _match_proposal(coverage=[_covered(
+                reads=["invoice", "order", "receipt"],
+                assertion_ids=["as_total"],
+                gaps=[{"role": "receipt", "reason": ""}],
+            )]),
+            _match_request(),
+        )
+
+
+def test_a_gap_on_a_role_the_entry_does_not_read_is_refused():
+    with pytest.raises(WorkerResponseValidationError, match="does not list in reads"):
+        validate_linkage_proposal(
+            _match_proposal(coverage=[_covered(
+                reads=["invoice", "order"],
+                assertion_ids=["as_total"],
+                gaps=[{"role": "receipt", "reason": "No quantity on the order."}],
+            )]),
+            _match_request(),
+        )
+
+
+def test_a_requirement_about_one_record_is_answered_by_a_one_sided_rule():
+    """Nothing here counts roles. A single-document cycle — a voucher reached
+    from its population row — is a cycle, and a field that must be stated is a
+    one-sided assertion on that one record."""
+
+    proposal = validate_linkage_proposal(
+        _match_proposal(coverage=[_covered(
+            reads=["payment"], assertion_ids=["as_signed"],
+        )]),
+        _match_request(),
+    )
+
+    assert proposal["coverage"][0]["reads"] == ["payment"]
+
+
+def test_one_requirement_may_need_several_assertions():
+    """Five terms that must agree are five assertions, all of them named."""
+
+    proposal = _proposal(
+        assertions=[
+            {"id": "as_total", "label": "Totals agree",
+             "left": {"role": "invoice", "field": "total_amount"},
+             "right": {"role": "order", "field": "total_amount"},
+             "requirement": "The amount billed is the amount ordered.",
+             "rationale": "An invoice bills what was ordered."},
+            {"id": "as_order", "label": "Order reference stated",
+             "left": {"role": "invoice", "field": "order_number"}, "right": None,
+             "requirement": "The invoice names its order.",
+             "rationale": "An invoice with no order cannot be matched."},
+        ],
+        coverage=[_covered(assertion_ids=["as_total", "as_order"])],
+    )
+
+    validated = validate_linkage_proposal(proposal, _request([_requirement()]))
+
+    assert validated["coverage"][0]["assertion_ids"] == ["as_total", "as_order"]
+
+
+def test_an_entry_declaring_no_roles_is_refused():
+    with pytest.raises(WorkerResponseValidationError, match="declares no roles"):
+        validate_linkage_proposal(
+            _proposal(coverage=[_covered(reads=[])]),
+            _request(requirements=[_requirement()]),
+        )
+
+
+def test_a_role_in_reads_the_proposal_does_not_hold_is_refused():
+    with pytest.raises(WorkerResponseValidationError, match="not a role of this"):
+        validate_linkage_proposal(
+            _proposal(coverage=[_covered(reads=["invoice", "order", "ledger"])]),
+            _request(requirements=[_requirement()]),
+        )
+
+
+def test_a_role_no_join_key_can_reach_is_already_a_stated_gap():
+    proposal = validate_linkage_proposal(
+        _proposal(
+            coverage=[_covered(reads=["invoice", "order", "statement"])],
+            unreachable=[{"role": "statement",
+                          "reason": "The statement carries no identifier field."}],
+        ),
+        _request(requirements=[_requirement()]),
+    )
+
+    assert proposal["coverage"][0]["reads"][-1] == "statement"
+
+
+def test_the_earlier_single_assertion_shape_still_parses():
+    parsed = _linkage_response_schema(json.dumps(_proposal(coverage=[{
+        "rcm_id": "RCM-1", "control_attribute": "invoice_match",
+        "reads": ["invoice", "order"], "assertion_id": "as_total",
+    }])))
+
+    assert parsed["coverage"][0]["assertion_ids"] == ["as_total"]
+
+
 def test_a_proposal_is_still_valid_where_the_matrix_asks_nothing():
     """Rules may be proposed before a matrix asks anything of them."""
 
@@ -714,7 +991,11 @@ def test_the_prompt_tells_the_worker_what_the_requirements_are_for():
     # the only turn that has seen what the documents actually carry.
     assert "names no fields" in LINKAGE_SYSTEM
     assert "unsupported" in LINKAGE_SYSTEM
-    assert "needs no assertion" in LINKAGE_SYSTEM
+    # A join links records; it is never the answer to a requirement that they
+    # agree. The earlier wording let a join stand in for a three-way match.
+    assert "never shows that what" in LINKAGE_SYSTEM
+    assert "`reads`" in LINKAGE_SYSTEM
+    assert "`gaps`" in LINKAGE_SYSTEM
 
 
 def test_a_malformed_id_is_refused_where_a_repair_can_still_fix_it():

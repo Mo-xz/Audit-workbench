@@ -273,15 +273,70 @@ def _validate_assertions(
                 raise RulesetError(
                     f"Assertion '{assertion_id}' compares a field to itself."
                 )
-        assertions.append({
+        stored = {
             "id": assertion_id,
             "label": str(item.get("label") or "").strip(),
             "left": left,
             "right": right,
             "requirement": requirement,
             "rationale": str(item.get("rationale") or "").strip(),
-        })
+        }
+        # Which author a rule had: a model turn, or the field-name floor whose
+        # pairs survived review (``cycle_field_pairs``). Absent means a model's
+        # or an auditor's, which every rule stored before the floor was.
+        if str(item.get("proposed_by") or "") == "schema_names":
+            stored["proposed_by"] = "schema_names"
+        assertions.append(stored)
     return assertions
+
+
+def _declined_pairs(value: object) -> list[dict]:
+    """Field pairs the proposal turn declined, kept for whoever approves.
+
+    Outside ``ruleset_hash``: a decline is not a rule and changes nothing that
+    runs. It is kept because a pair the schemas proposed and a model turned
+    down is the one omission an approver cannot otherwise see — the rule is
+    simply absent.
+    """
+
+    declined: list[dict] = []
+    for item in value or []:
+        if not isinstance(item, Mapping):
+            continue
+        left = item.get("left") if isinstance(item.get("left"), Mapping) else {}
+        right = item.get("right") if isinstance(item.get("right"), Mapping) else {}
+        declined.append({
+            "id": str(item.get("id") or ""),
+            "left": {"role": str(left.get("role") or ""), "field": str(left.get("field") or "")},
+            "right": {"role": str(right.get("role") or ""), "field": str(right.get("field") or "")},
+            "basis": str(item.get("basis") or ""),
+            "reason": str(item.get("reason") or "").strip(),
+        })
+    return declined
+
+
+def coverage_assertion_ids(entry: Mapping) -> list[str]:
+    """The assertions one coverage entry names, in the order it names them.
+
+    A requirement is answered by every assertion it needs, not by one: "the
+    confirmation is matched to the deal on counterparty, principal, rate, value
+    date and maturity date" is five comparisons, and a contract holding only the
+    first one listed understates what the control has to show. A singular
+    ``assertion_id`` is the earlier shape, read as a list of one so a proposal
+    stored before the change still commits.
+    """
+
+    raw = entry.get("assertion_ids")
+    if raw is None and entry.get("assertion_id"):
+        raw = [entry.get("assertion_id")]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    names: list[str] = []
+    for value in raw:
+        name = str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
 
 
 def _validate_anchor(
@@ -399,6 +454,7 @@ def validate(workspace: Workspace, payload: object) -> dict:
         # is what was approved, and a reshaped cycle must not silently make an
         # auditor's signature refer to something else.
         "cycle_sha1": _cycle_sha1(workspace),
+        "declined_pairs": _declined_pairs(item.get("declined_pairs")),
     }
     record["ruleset_hash"] = canonical_sha256(definition_of(record))
     return record

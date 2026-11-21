@@ -190,6 +190,11 @@ watch(visible, open => { if (open) void load() }, { immediate: true })
           <div class="rule__what">
             <strong>{{ check.label || check.id }}</strong>
             <Tag :value="check.operator" severity="secondary" />
+            <Tag
+              v-if="check.proposed_by === 'schema_names'"
+              value="From field names"
+              severity="secondary"
+            />
           </div>
           <p v-if="check.rationale" class="rule__why">{{ check.rationale }}</p>
           <Message
@@ -198,6 +203,23 @@ watch(visible, open => { if (open) void load() }, { immediate: true })
             severity="warn"
             :closable="false"
           >{{ detail }}</Message>
+        </div>
+      </section>
+
+      <section v-if="selected.declined_pairs?.length" class="rule-group">
+        <h4>Declined field pairs</h4>
+        <p class="rule-group__why">
+          Matched by field name in the document schemas and turned down on review,
+          so nothing compares them. Disagree with one, and these rules leave that
+          comparison untested.
+        </p>
+        <div v-for="pair in selected.declined_pairs" :key="pair.id" class="rule">
+          <div class="rule__what">
+            <span class="aw-figure">{{ pair.left.role }}.{{ pair.left.field }}</span>
+            <span aria-hidden="true">↔</span>
+            <span class="aw-figure">{{ pair.right.role }}.{{ pair.right.field }}</span>
+          </div>
+          <p class="rule__why">{{ pair.reason }}</p>
         </div>
       </section>
     </template>

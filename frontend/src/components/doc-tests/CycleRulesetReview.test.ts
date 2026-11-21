@@ -90,6 +90,32 @@ describe('CycleRulesetReview', () => {
     expect(wrapper.text()).toContain('The amount billed must be the amount ordered.')
   })
 
+  it('lists the field pairs review declined, with the reason, for the approver', async () => {
+    stubApi(ruleset({
+      declined_pairs: [{
+        id: 'pair_order_vendor_address_invoice_vendor_name',
+        left: { role: 'order', field: 'vendor_address' },
+        right: { role: 'invoice', field: 'vendor_name' },
+        basis: 'shared_word',
+        reason: 'An address is not a name.',
+      }],
+    }))
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Declined field pairs')
+    expect(wrapper.text()).toContain('order.vendor_address')
+    expect(wrapper.text()).toContain('An address is not a name.')
+  })
+
+  it('says nothing about declined pairs on a ruleset that has none', async () => {
+    stubApi()
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Declined field pairs')
+  })
+
   it('shows join keys as the document types they actually relate', async () => {
     stubApi()
     const wrapper = render()

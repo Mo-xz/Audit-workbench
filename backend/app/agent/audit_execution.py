@@ -2256,6 +2256,28 @@ class AuditWorkflowExecution(ActionExecution):
                     f"express ({item.get('reason') or 'no reason given'}), so it "
                     "was re-routed to the strongest path they do support."
                 )
+            # Pairs the schemas proposed and review turned down. Usually noise
+            # — an address is not a name — but a declined true pair is the one
+            # omission an approver cannot see from the rules alone.
+            if output.get("declined_pairs"):
+                self.warn(
+                    f"The cycle rules proposal declined "
+                    f"{counted(int(output.get('declined_pairs') or 0), 'field pair')} "
+                    "the document schemas suggested; each is listed on the ruleset "
+                    "with its reason, for review before approval."
+                )
+            # Answered for some of the records the requirement is about. What
+            # could be written as a comparison is contracted and will be
+            # tested; this names what will not be, so it is not read as done.
+            for item in output.get("partial") or []:
+                role = str(item.get("role") or "")
+                self.warn(
+                    f"Control attribute '{item.get('control_attribute')}' of RCM "
+                    f"row {item.get('rcm_id')} is only partly answered by the "
+                    "cycle rules"
+                    + (f": nothing tests what it asks of '{role}'" if role else "")
+                    + f" ({item.get('reason') or 'no reason given'})."
+                )
 
         return BoundUnitPipeline(
             request=UnitPipelineRequest(

@@ -327,6 +327,91 @@ def test_the_written_back_contract_is_covered_by_the_rules_it_came_from():
     assert cycle_linking.unanswerable_cycle_requirements(workspace, row) == []
 
 
+_TWO_TERMS = [
+    {
+        "id": "as_total",
+        "label": "Totals agree",
+        "left": {"role": "invoice", "field": "total_amount"},
+        "right": {"role": "order", "field": "total_amount"},
+        "requirement": "The amount billed must be the amount ordered.",
+        "rationale": "The amount billed must be the amount ordered.",
+    },
+    {
+        "id": "as_order_cited",
+        "label": "Order cited",
+        "left": {"role": "invoice", "field": "purchase_order_number"},
+        "right": None,
+        "requirement": "The invoice names the order it bills against.",
+        "rationale": "An invoice with no order cannot be matched to one.",
+    },
+]
+
+
+def test_every_assertion_a_requirement_names_is_written_back():
+    """A requirement needing two comparisons is contracted with both.
+
+    One per requirement understated the control on every engagement that had a
+    match on several terms: treasury's five-term confirmation match was
+    contracted as its rate alone.
+    """
+
+    workspace, rcm_id = _workspace(_attribute())
+    target = CycleRulesetExecutorTarget(workspace, "run-several")
+
+    receipt = EXECUTORS.execute(
+        _request(workspace, rcm_id, _proposal([{
+            "rcm_id": rcm_id,
+            "control_attribute": "three_way_match",
+            "reads": ["invoice", "order"],
+            "assertion_ids": ["as_total", "as_order_cited"],
+        }], assertions=_TWO_TERMS)),
+        target,
+    )
+    cycle_rulesets.approve(
+        target.workspace, receipt.output["ruleset_id"], approved_by="auditor@example.com"
+    )
+    workspace = workspaces.load_workspace(target.workspace.id)
+    (row,) = workspace.rcm
+
+    comparisons = cycle_linking.required_comparisons_for(
+        row, [f"{rcm_id}:three_way_match"]
+    )
+    assert [item["key"] for item in comparisons] == ["as_total", "as_order_cited"]
+    assert comparisons[1]["right"] is None
+    # The approved rules cover every one of them, so a cycle test builds.
+    ruleset = cycle_rulesets.effective(workspace)
+    assert cycle_linking.uncovered_comparisons(ruleset, comparisons) == []
+    assert not receipt.output["partial"]
+
+
+def test_a_stated_gap_is_reported_beside_what_was_contracted():
+    workspace, rcm_id = _workspace(_attribute())
+    target = CycleRulesetExecutorTarget(workspace, "run-partial")
+
+    receipt = EXECUTORS.execute(
+        _request(workspace, rcm_id, _proposal([{
+            "rcm_id": rcm_id,
+            "control_attribute": "three_way_match",
+            "reads": ["invoice", "order"],
+            "assertion_ids": ["as_total"],
+            "gaps": [{"role": "order",
+                      "reason": "The order states no delivery terms to compare."}],
+        }])),
+        target,
+    )
+
+    (attribute,) = target.workspace.rcm[0]["control_attributes"]
+    assert [item["key"] for item in attribute["required_comparisons"]] == ["as_total"]
+    (reported,) = receipt.output["partial"]
+    assert dict(reported) == {
+        "rcm_id": rcm_id,
+        "control_attribute": "three_way_match",
+        "role": "order",
+        "reason": "The order states no delivery terms to compare.",
+    }
+    assert not receipt.output["downgraded"]
+
+
 def test_an_uncontracted_attribute_is_reported_as_untested_until_it_is_designed():
     """The silence between the matrix and the cycle design has to be said.
 

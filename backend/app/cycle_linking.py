@@ -516,7 +516,10 @@ def bind_roles(prepared: PreparedCycle, reached: Mapping[str, dict], edges: int)
 # evaluation
 # --------------------------------------------------------------------------- #
 def normalize_value(
-    raw: object, field: Mapping[str, object], citation: object
+    raw: object,
+    field: Mapping[str, object],
+    citation: object,
+    context: object = None,
 ) -> dict:
     """Type one printed value according to the schema field that names it.
 
@@ -548,7 +551,7 @@ def normalize_value(
         }
     try:
         return normalize_evidence_value(
-            raw, semantic_type=value_type, citation=citation
+            raw, semantic_type=value_type, citation=citation, context=context
         )
     except CycleSchemaError as error:
         return {
@@ -579,9 +582,16 @@ def operand_entries(
         document_id = str(binding.get("document_id") or "")
         for fact in stated(record, field_name):
             citation = str(fact.get("citation") or "")
-            envelope = normalize_value(fact.get("value"), definition, citation)
             anchor = catalog.get((document_id, citation))
-            entries.append({
+            # The cited line is where an amount printed bare finds its
+            # currency: "Invoice amount (PKR)   2,900,000".
+            envelope = normalize_value(
+                fact.get("value"),
+                definition,
+                citation,
+                context=(anchor or {}).get("excerpt"),
+            )
+            entry = {
                 "role": role,
                 "document_id": document_id,
                 "record_id": str(binding.get("record_id") or ""),
@@ -593,7 +603,10 @@ def operand_entries(
                 ),
                 "normalization_error": envelope.get("normalization_error"),
                 "evidence_refs": [anchor] if anchor else [],
-            })
+            }
+            if "currency" in envelope:
+                entry["currency"] = envelope.get("currency")
+            entries.append(entry)
     return entries
 
 
@@ -644,7 +657,16 @@ def resolve_operand(
     }
     if len(distinct) != 1:
         return {"state": "ambiguous", "entries": entries}
-    return {"state": "resolved", "value": normalized[0]["value"], "entries": entries}
+    resolved = {"state": "resolved", "value": normalized[0]["value"], "entries": entries}
+    if any("currency" in entry for entry in normalized):
+        # Records agreeing on the figure but naming different currencies have
+        # not stated one amount. One naming a currency and another leaving it
+        # unstated have: the unstated one is silent, not different.
+        currencies = {entry.get("currency") for entry in normalized} - {None}
+        if len(currencies) > 1:
+            return {"state": "ambiguous", "entries": entries}
+        resolved["currency"] = next(iter(currencies), None)
+    return resolved
 
 
 def assertion_inputs(assertion: Mapping[str, object], *, item: Mapping[str, object]) -> dict:
@@ -1331,7 +1353,14 @@ def evaluate_cycle_item(
             # anything, so the reason travels with it into the working paper.
             "reason": str(judgment.get("reason") or ""),
             "display": " vs ".join(
-                str(bounded_value(entry.get("value")))
+                " ".join(
+                    part
+                    for part in (
+                        str(entry.get("currency") or ""),
+                        str(bounded_value(entry.get("value"))),
+                    )
+                    if part
+                )
                 for entry in comparisons
                 if entry.get("state") == "resolved"
             )[:240],
@@ -2440,14 +2469,21 @@ def judgment_request(workspace, test: Mapping[str, object], item_id: str) -> dic
             entries = comparison.get("entries") or []
             first = entries[0] if entries else {}
             anchors = first.get("evidence_refs") or []
-            operands.append({
+            supplied = {
                 "operand": f"{role}.{operand.get('field')}",
                 "document_type": roles.get(role, ""),
                 "value": first.get("raw_value"),
                 # The source line the value was read from. It is what lets the
                 # reader notice a value that does not match its own evidence.
                 "excerpt": str((anchors[0] or {}).get("excerpt") or "") if anchors else "",
-            })
+            }
+            if "currency" in comparison:
+                # An amount's currency as the documents state it, or null when
+                # they do not. Supplied rather than left to be read off the
+                # value, because "look past currency codes" is right for one
+                # stated against none and wrong for PKR against USD.
+                supplied["currency"] = comparison.get("currency")
+            operands.append(supplied)
         checks.append({
             "check_id": str(key),
             "label": str(assertion.get("label") or ""),

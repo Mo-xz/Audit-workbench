@@ -432,7 +432,9 @@ Agreement of substance, not of rendering. Two documents recording one fact in
 different house styles agree. Two recording different facts do not.
 
 LOOK PAST THESE - they agree
-- currency words, codes and symbols: 'PKR 2,000,000.00' and '2,000,000.00'
+- a currency stated on one side and not the other:
+  'PKR 2,000,000.00' and '2,000,000.00'. An amount's operand carries
+  `currency`, null when the document does not state one.
 - thousands separators and trailing zeros: '2,000,000', '2000000.00', '25', '25.0'
 - date formats and separators: '06-Apr-2024', '6 April 2024', '2024-04-06'
 - case, accents, and whitespace, including stray spaces left by scanning:
@@ -442,6 +444,8 @@ LOOK PAST THESE - they agree
 
 REPORT THESE AS AN EXCEPTION - they disagree
 - a different amount, quantity, date, party or reference, once rendering is set aside
+- amounts whose operands state different currencies: PKR against USD is two
+  different sums, whatever the figures
 - a description denoting different goods, not merely different wording
 
 Do not apply a materiality threshold of your own. 'Material' here means the
@@ -548,6 +552,15 @@ def _value_was_supplied(value: str, supplied: set[str]) -> bool:
     )
 
 
+def _stated_currencies(check: Mapping[str, Any]) -> set[str]:
+    """The distinct currencies a check's amount operands state."""
+    return {
+        str(operand.get("currency"))
+        for operand in check.get("operands") or []
+        if isinstance(operand, Mapping) and operand.get("currency")
+    }
+
+
 def validate_cycle_vouch_proposal(
     proposal: Mapping[str, Any],
     request: WorkerRequest,
@@ -602,6 +615,16 @@ def validate_cycle_vouch_proposal(
                 "Demoted: the values reported for this check were not the ones "
                 f"supplied ({'; '.join(repr(value) for value in unfounded[:2])}). "
                 + reason
+            )
+        currencies = _stated_currencies(checks[check_id])
+        if len(currencies) > 1 and verdict == "agrees":
+            # Two stated currencies are two sums; no reading of the figures
+            # makes them one. Decided here, not asked, for the same reason the
+            # values are: this is a property of what was supplied.
+            verdict = "disagrees"
+            reason = (
+                f"The amounts are stated in different currencies "
+                f"({', '.join(sorted(currencies))}). " + reason
             )
         cells.append({
             "check_id": check_id,

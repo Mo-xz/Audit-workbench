@@ -28,6 +28,8 @@ from typing import Iterable, Mapping
 
 import polars as pl
 
+from .currencies import ISO_CURRENCIES
+
 
 
 class CycleSchemaError(ValueError):
@@ -143,6 +145,47 @@ _AMBIGUOUS_DATE_FORMATS = ("%m-%d-%Y", "%m/%d/%Y")
 # and a value column separately) concatenate into 2525.
 _NUMBER_RE = re.compile(r"[-+]?\d(?:[\d,]*\d)?(?:\.\d+)?")
 
+# Symbols that name one currency. "$", "¥" and "Rs" name several, so they are
+# kept as printed: the reader compares them, and nothing here guesses which
+# dollar a document meant.
+_CURRENCY_SYMBOLS = {"€": "EUR", "£": "GBP", "₹": "INR", "$": "$", "¥": "¥", "₨": "Rs"}
+_CURRENCY_TOKEN_RE = re.compile(r"(?<![A-Za-z])(?:[A-Z]{3}|Rs\.?)(?![A-Za-z])|[€£₹$¥₨]")
+
+
+def stated_currency(text: object) -> str | None:
+    """The one currency a printed value or line states, or ``None``.
+
+    ``None`` both when nothing names a currency and when two different ones
+    appear: a line naming PKR and USD does not say which the figure is in.
+    """
+
+    found: set[str] = set()
+    for token in _CURRENCY_TOKEN_RE.findall(str(text or "")):
+        if token in _CURRENCY_SYMBOLS:
+            found.add(_CURRENCY_SYMBOLS[token])
+        elif token.rstrip(".") == "Rs":
+            found.add("Rs")
+        elif token in ISO_CURRENCIES:
+            found.add(token)
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _parse_number(raw: str) -> tuple[int | float | None, str | None]:
+    negative = raw.startswith("(") and raw.endswith(")")
+    match = _NUMBER_RE.search(raw)
+    if match is None:
+        return None, "unrecognized numeric format"
+    if _parsed_dates(_date_candidate(raw), _DATE_FORMATS):
+        # ``19 Apr 2024`` yields 19 from a bare numeric scan. Reporting it
+        # invalid is what lets the map validator send a date supplied for an
+        # amount back for repair instead of committing a wrong number that
+        # normalized cleanly.
+        return None, "value is a date, not a number"
+    value = Decimal(match.group(0).replace(",", ""))
+    if negative:
+        value = -value
+    return (int(value) if value == value.to_integral() else float(value)), None
+
 
 def _object(value: object, label: str) -> dict:
     if not isinstance(value, dict):
@@ -209,11 +252,17 @@ def normalize_evidence_value(
     *,
     semantic_type: str,
     citation: object,
+    context: object = None,
 ) -> dict:
     """Normalize one extracted value locally while retaining failed evidence.
 
     Workers report the verbatim value and its citation. They do not get to
     choose the normalized form the graph compares on.
+
+    An ``amount`` also carries ``currency``: the one the value itself states,
+    else the one its source line (``context``) states — "Invoice amount (PKR)
+    2,900,000" — else ``None``, which says the documents did not state it and
+    is never filled with a guess.
     """
 
     raw = str(raw_value or "").strip()
@@ -221,6 +270,7 @@ def normalize_evidence_value(
         raise CycleSchemaError("An extracted raw value must not be empty.")
     normalized: object | None = None
     error: str | None = None
+    currency: str | None = None
     try:
         if semantic_type == "identifier":
             from . import cycle_measurement
@@ -242,22 +292,10 @@ def normalize_evidence_value(
                 error = "ambiguous day and month order"
             else:
                 normalized = next(iter(accepted))
-        elif semantic_type == "number":
-            negative = raw.startswith("(") and raw.endswith(")")
-            match = _NUMBER_RE.search(raw)
-            if match is None:
-                error = "unrecognized numeric format"
-            elif _parsed_dates(_date_candidate(raw), _DATE_FORMATS):
-                # ``19 Apr 2024`` yields 19 from a bare numeric scan. Reporting
-                # it invalid is what lets the map validator send a date supplied
-                # for an amount back for repair instead of committing a wrong
-                # number that normalized cleanly.
-                error = "value is a date, not a number"
-            else:
-                value = Decimal(match.group(0).replace(",", ""))
-                if negative:
-                    value = -value
-                normalized = int(value) if value == value.to_integral() else float(value)
+        elif semantic_type in {"number", "amount"}:
+            normalized, error = _parse_number(raw)
+            if semantic_type == "amount":
+                currency = stated_currency(raw) or stated_currency(context)
         elif semantic_type == "boolean":
             token = raw.casefold()
             if token in {"true", "yes", "y", "present", "1"}:
@@ -273,13 +311,16 @@ def normalize_evidence_value(
     except (InvalidOperation, ValueError) as exc:
         error = str(exc) or f"invalid {semantic_type} value"
         normalized = None
-    return {
+    envelope = {
         "raw_value": raw,
         "value": normalized,
         "normalization_status": "normalized" if normalized is not None else "invalid",
         "normalization_error": None if normalized is not None else error,
         "citation": citation,
     }
+    if semantic_type == "amount":
+        envelope["currency"] = currency if normalized is not None else None
+    return envelope
 
 
 def _canonical_hash(value: object) -> str:

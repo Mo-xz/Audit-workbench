@@ -33,8 +33,15 @@ _FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 #: What a field is *for*. The only part of a schema with downstream meaning.
 FIELD_ROLES = frozenset({"identifier", "party", "attribute", "control"})
-#: How a value is normalized and which operators may read it.
-VALUE_TYPES = frozenset({"identifier", "date", "number", "text", "boolean"})
+#: How a value is normalized and which operators may read it. ``amount`` is a
+#: sum of money and keeps the currency it is stated in; ``number`` is every
+#: other quantity — a count, a rate, a percentage. They are separate because
+#: a number normalized from "PKR 2,900,000.00" lost its currency, and because a
+#: voucher's paid amount typed ``text`` (the printed value is not a bare number)
+#: was never compared with the invoice it settled.
+VALUE_TYPES = frozenset({"identifier", "date", "amount", "number", "text", "boolean"})
+#: The value types that normalize to a numeric magnitude.
+NUMERIC_VALUE_TYPES = frozenset({"amount", "number"})
 CARDINALITIES = frozenset({"one", "many"})
 CONFIDENCES = frozenset({"high", "medium", "low"})
 #: Where a field is stated. ``record`` — one transaction's fact, the default and

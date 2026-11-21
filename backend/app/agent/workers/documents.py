@@ -1621,8 +1621,9 @@ WORKERS.register(CLASSIFY_WORKER)
 # ``document_schemas.validate_fields`` re-validates the accumulated master at
 # commit — same roles, same value types, same errors, one definition each.
 _FIELD_ROLES = ("identifier", "party", "attribute", "control")
-_VALUE_TYPES = ("identifier", "date", "number", "text", "boolean")
+_VALUE_TYPES = ("identifier", "date", "amount", "number", "text", "boolean")
 _FIELD_SCOPES = ("record", "document")
+_NUMERIC_VALUE_TYPES = frozenset({"amount", "number"})
 
 
 def _schema_field(raw: object, label: str) -> dict[str, Any]:
@@ -1720,8 +1721,8 @@ records is an array. Each entry is one record the chunk carries, with:
       appear more than once, "value": the value exactly as printed,
       "citation": the id of a citation showing it}}
   additional_fields — facts the record states that no field above can hold, as
-    {{"name": lower_snake_case, "value_type": one of identifier, date, number,
-      text, boolean, "value", "citation"}}
+    {{"name": lower_snake_case, "value_type": one of identifier, date, amount,
+      number, text, boolean, "value", "citation"}}
 
 Use additional_fields rather than forcing a fact into a field that does not mean
 it. A value put under the wrong name is worse than one recorded outside the
@@ -2252,6 +2253,20 @@ role says what a new field is *for*, and is the only part with consequences:
   control    — evidence that someone performed a step: an approval, a signature,
                a checked box, an attachment reference.
   attribute  — anything else the document states.
+
+value_type says how the value is read when one document is compared with
+another, so type the value, not how it is printed:
+  identifier — the value of an identifier field, and only that.
+  date       — a calendar date.
+  amount     — a sum of money: a price, a total, a fee, a balance, an amount
+               billed or paid. "PKR 2,900,000.00", "2,900,000" under an amount
+               heading and "$1,200" are all amounts.
+  number     — any other quantity: a count, a quantity with its unit
+               ("20 Laptops"), a rate, a percentage.
+  boolean    — a yes-or-no fact, such as a checked box.
+  text       — words: a description, a name, an address, a status.
+A currency, a unit or a thousands separator around a figure never makes it
+text. A figure typed as text is never compared as one.
 
 verbatim is false only when the value does not appear in the document as text —
 the *role* a named party plays, the *decision* a signature block represents.
@@ -2801,6 +2816,8 @@ def validate_read_proposal(
                     "citation you declared."
                 )
 
+    _validate_new_field_types(new_fields)
+
     declared_names = [str(field.get("name")) for field in new_fields]
     if len(declared_names) != len(set(declared_names)):
         raise WorkerResponseValidationError(
@@ -2809,6 +2826,57 @@ def validate_read_proposal(
         )
     _validate_record_shape(records, new_fields, on_document, known)
     return proposal
+
+
+# A figure as documents print one: an optional currency in front, a number, and
+# an optional unit, currency or percent sign after it. Narrow on purpose — it
+# has to tell "PKR 2,900,000.00" and "20 Laptops" from a postal code or an
+# address line, so a bare integer qualifies only with something marking it as
+# a figure (a currency, a separator, decimals, a unit).
+_PRINTED_FIGURE = re.compile(
+    r"^\s*(?P<pre>[A-Z]{3}|Rs\.?|[$€£¥₹])?\s*\(?-?\d[\d,]*(?:\.\d+)?\)?"
+    r"\s*(?P<post>%|[A-Za-z][A-Za-z.]{0,19})?\s*$"
+)
+
+
+def _printed_figure(value: str) -> bool:
+    """Whether a printed value is a figure dressed as text.
+
+    The check behind a text field's refusal. A bare integer is not enough on
+    its own — "44000" is as likely a code as a count — so something on the
+    value has to mark it as a figure.
+    """
+
+    match = _PRINTED_FIGURE.match(value)
+    if match is None:
+        return False
+    number = re.search(r"\d[\d,]*(?:\.\d+)?", value)
+    marked = bool(match.group("pre") or match.group("post"))
+    return marked or bool(number and ("," in number.group(0) or "." in number.group(0)))
+
+
+def _validate_new_field_types(new_fields: Sequence[Mapping[str, Any]]) -> None:
+    """Refuse a field declared ``text`` whose every value is a figure.
+
+    A field's type is fixed by the document that declares it — later readings
+    fill it and cannot retype it — so this is the one moment a mistyped figure
+    can be caught. Procurement's voucher declared ``payment_amount`` as text
+    from "PKR 2,900,000.00", and the amount paid was never compared with the
+    amount invoiced.
+    """
+
+    for position, field in enumerate(new_fields):
+        if str(field.get("value_type") or "") != "text":
+            continue
+        values = [str(value.get("value") or "") for value in field.get("values") or []]
+        if values and all(_printed_figure(value) for value in values):
+            raise WorkerResponseValidationError(
+                f"new_fields[{position}] declares '{field.get('name')}' as text, "
+                f"but every value it states is a figure ({values[0]!r}). Type the "
+                "value, not how it is printed: a sum of money is amount, and any "
+                "other quantity — a count, a quantity with its unit, a rate — is "
+                "number. A figure typed as text is never compared as one."
+            )
 
 
 def _validate_record_shape(
@@ -2876,7 +2944,7 @@ def _validate_record_shape(
         amounts = {
             name: count
             for name, count in repeated.items()
-            if value_types.get(name) == "number"
+            if value_types.get(name) in _NUMERIC_VALUE_TYPES
         }
         lengths = {*dated.values(), *amounts.values()}
         if dated and amounts and len(lengths) > 1:

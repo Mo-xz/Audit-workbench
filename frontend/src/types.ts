@@ -138,7 +138,7 @@ export interface ClassifiedDocument extends DocumentClassification {
 export interface DocumentSchemaField {
   name: string
   role: 'identifier' | 'party' | 'attribute' | 'control'
-  value_type: 'identifier' | 'date' | 'number' | 'text' | 'boolean'
+  value_type: 'identifier' | 'date' | 'amount' | 'number' | 'text' | 'boolean'
   cardinality: 'one' | 'many'
   verbatim: boolean
   confidence: 'high' | 'medium' | 'low'
@@ -237,6 +237,19 @@ export interface CycleRulesetAssertion {
   operator: string
   tolerance: Record<string, number> | null
   rationale: string
+  /** Proposed from matching field names in the schemas and kept on review,
+   *  rather than written by the proposing turn. */
+  proposed_by?: 'schema_names'
+}
+
+/** A field pair the schemas proposed by name that review declined. Not a rule,
+ *  so outside the ruleset hash; kept so an approver can see what was left out. */
+export interface CycleDeclinedPair {
+  id: string
+  left: CycleOperandRef
+  right: CycleOperandRef
+  basis: 'same_name' | 'shared_word' | string
+  reason: string
 }
 
 /** Code-computed, never model-supplied. Fan-out is what makes an entity
@@ -291,6 +304,8 @@ export interface CycleRuleset {
   updated: string
   measured: CycleRulesetMeasurement
   concerns: CycleRulesetConcern[]
+  /** Absent on a ruleset proposed before the field-pair floor existed. */
+  declined_pairs?: CycleDeclinedPair[]
 }
 
 /** What a cycle test can be built on in a workspace with approved rules.
@@ -493,6 +508,8 @@ export interface NormalizedEvidenceValue<T = unknown> {
   normalization_status: 'normalized' | 'invalid'
   normalization_error: string | null
   citation: string | DocumentAnalysisCitation | Array<string | DocumentAnalysisCitation>
+  /** An `amount` value's currency as the documents state it; null when they do not. */
+  currency?: string | null
 }
 
 export interface DocumentAnalysisDetail {

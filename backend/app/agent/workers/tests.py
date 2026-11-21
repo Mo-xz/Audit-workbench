@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ... import (
+    cycle_field_pairs,
     cycle_linking,
     cycle_rulesets,
     cycle_vouching,
@@ -2027,6 +2028,34 @@ assertions say what must then agree once the documents are linked. These are the
 audit tests: an amount that must match, a date that must not follow another, an
 approval that must be present.
 
+Where `field_pairs` are supplied, they were found from the schemas alone: two
+fields on documents of different roles with the same value type whose names are
+the same or share a word. They are proposals. Each one becomes an assertion
+under its own id unless you decline it in `declined_pairs` as
+{{"id", "reason"}}.
+
+Decline a pair only when its two fields describe different things: an address
+and a name, a contact person and the organisation, the status of one document
+and the status of another. Never decline a pair because its values may
+legitimately differ. Two fields describing the same thing — a quantity ordered
+and a quantity received, a notional booked and a notional confirmed, an amount
+billed and an amount paid — are what a comparison is for, partial deliveries,
+part payments and amendments included: a difference is what the auditor has to
+see and have explained, and declining the pair hides it. Cite a kept pair in
+coverage by its id. You may write an assertion
+over a supplied pair's two fields to state its requirement better; it then
+replaces the pair, so do not also decline it. Decline only what is wrong: a pair
+you do not mention is kept, and a pair you decline is shown to whoever approves
+the rules beside your reason.
+
+`unpaired_fields` are the amount, number and date fields that no supplied pair
+connects to some other linked role; `no_pair_with` names those roles. Names do
+not find two fields that call one value different things — a principal and an
+amount, a rate and a price. For each, decide whether it states the
+same value as a field on another linked role, and where it does, write that
+assertion yourself. Where two dates must fall in an order rather than be equal,
+say so in the assertion's requirement.
+
 Propose only what the fields support. A rule naming a field a type does not carry
 cannot run, and a plausible rule that never runs is worse than an absent one —
 it reads as a passing test.
@@ -2037,22 +2066,42 @@ and names no fields; choosing which fields answer a requirement is your work,
 and it is the reason you are the turn that sees the schemas.
 
 Answer every one. Return `coverage`, one entry per supplied requirement, either
-  {{"rcm_id", "control_attribute", "assertion_id"}}
-naming the assertion that answers it, or
+  {{"rcm_id", "control_attribute", "reads", "assertion_ids", "gaps"}}
+naming the assertions that answer it, or
   {{"rcm_id", "control_attribute", "unsupported": true, "reason"}}
 where no field these schemas carry can express it. Copy rcm_id and
 control_attribute exactly. Say unsupported rather than reaching for a nearby
 field: a requirement about amounts answered by comparing vendor names proves
 something else, and the control reads as tested when it is not.
 
+`reads` names every role whose records the requirement is about, in the
+cycle's role names: each record it says must agree with another, or must state
+something. Then `assertion_ids` lists every assertion the requirement needs —
+one for each thing it says must agree or be stated, not the first of them. A
+requirement that the confirmation match the deal on five terms is five
+assertions; a requirement that one record be matched to two others needs
+assertions reading all three. Every role in reads must be read by at least one
+of the assertions named, and every assertion named must read a role in reads.
+
+Where what is asked of a role cannot be written as a pair of its fields — a
+value that must equal a product or a sum of others, a comparison against
+something no document states — list it in `gaps` as {{"role", "reason"}} and
+keep the assertions that do apply. Do not drop a role from reads to avoid a
+gap: the gap is what tells the auditor which part of the control is untested.
+
 Several requirements routinely want the same pair of fields, because more than
 one control depends on that pair. They are one assertion, not one each: name it
 in each of their coverage entries rather than writing a second rule over the
 same fields.
 
-A requirement a join key already binds needs no assertion of its own: the join
-established that pair, and a rule repeating it cannot fail. Name the join's
-pair through the assertion that rests on it.
+A join key shows that two records refer to each other. It never shows that what
+they state agrees: that a record cites another's reference says nothing about
+whether the quantities, amounts, dates or parties the two state are the same.
+Where a requirement is that records
+agree, answer it with assertions over the fields that must agree, never with
+the join that linked them and never with a rule over some other record. Where a
+requirement is only that a record cites another, a one-sided assertion that the
+citing field is stated answers it, and the join then shows what it points to.
 
 Give every rule a short lower_snake_case id and a one-sentence rationale saying
 why it holds. The rationale is what an auditor reads when deciding whether to
@@ -2072,11 +2121,15 @@ Keys:
   assertions    array of {{"id", "label", "left": {{"role", "field"}},
                 "right": {{"role", "field"}} or null, "requirement",
                 "rationale"}}
-  coverage      array of {{"rcm_id", "control_attribute", "assertion_id"}} or
-                {{"rcm_id", "control_attribute", "unsupported": true, "reason"}},
-                one per supplied requirement; omit where none were supplied
+  coverage      array of {{"rcm_id", "control_attribute", "reads": [role],
+                "assertion_ids": [assertion id], "gaps": [{{"role", "reason"}}]}}
+                or {{"rcm_id", "control_attribute", "unsupported": true,
+                "reason"}}, one per supplied requirement; omit where none were
+                supplied, and omit gaps where there are none
   unreachable   array of {{"role", "reason"}} for a supplied role whose document
                 type carries no identifier field; omit where there are none
+  declined_pairs array of {{"id", "reason"}} for supplied field pairs that do
+                not state the same value; omit where you decline none
 
 requirement says what these fields must show for the control to hold, in the
 terms the control is written in — "the invoice is settled for the amount the
@@ -2099,6 +2152,19 @@ def _linkage_operand(raw: object, label: str) -> dict[str, Any]:
     if not role or not field:
         raise WorkerResponseValidationError(f"{label} needs a role and a field.")
     return {"role": role, "field": field}
+
+
+def _name_list(raw: object, label: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise WorkerResponseValidationError(f"{label} must be an array of names.")
+    names: list[str] = []
+    for value in raw:
+        name = str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
 
 
 def _linkage_response_schema(response: str) -> Mapping[str, Any]:
@@ -2149,11 +2215,20 @@ def _linkage_response_schema(response: str) -> Mapping[str, Any]:
             ).strip(),
             "rationale": str(raw.get("rationale") or "").strip(),
         })
-    if not assertions:
-        raise WorkerResponseValidationError(
-            "The response must propose at least one assertion; a cycle that tests "
-            "nothing is not a cycle."
-        )
+    # Not refused here when empty: kept field pairs become assertions in the
+    # validator, so a response that only reviews them is complete. A cycle
+    # left with no assertion at all is refused there, after the floor.
+
+    declined_pairs = []
+    for index, raw in enumerate(payload.get("declined_pairs") or []):
+        if not isinstance(raw, Mapping):
+            raise WorkerResponseValidationError(
+                f"declined_pairs[{index}] must be an object."
+            )
+        declined_pairs.append({
+            "id": str(raw.get("id") or "").strip(),
+            "reason": str(raw.get("reason") or "").strip(),
+        })
 
     coverage = []
     for index, raw in enumerate(payload.get("coverage") or []):
@@ -2167,7 +2242,22 @@ def _linkage_response_schema(response: str) -> Mapping[str, Any]:
             entry["unsupported"] = True
             entry["reason"] = str(raw.get("reason") or "").strip()
         else:
-            entry["assertion_id"] = str(raw.get("assertion_id") or "").strip()
+            entry["reads"] = _name_list(raw.get("reads"), f"coverage[{index}].reads")
+            if raw.get("assertion_ids") is not None:
+                _name_list(raw.get("assertion_ids"), f"coverage[{index}].assertion_ids")
+            entry["assertion_ids"] = cycle_rulesets.coverage_assertion_ids(raw)
+            gaps = []
+            for gap_index, gap in enumerate(raw.get("gaps") or []):
+                if not isinstance(gap, Mapping):
+                    raise WorkerResponseValidationError(
+                        f"coverage[{index}].gaps[{gap_index}] must be an object."
+                    )
+                gaps.append({
+                    "role": str(gap.get("role") or "").strip(),
+                    "reason": str(gap.get("reason") or "").strip(),
+                })
+            if gaps:
+                entry["gaps"] = gaps
         coverage.append(entry)
 
     unreachable = []
@@ -2200,6 +2290,7 @@ def _linkage_response_schema(response: str) -> Mapping[str, Any]:
         },
         "join_keys": join_keys,
         "assertions": assertions,
+        "declined_pairs": declined_pairs,
         # Absent where nothing was asked, which is the shape a proposal written
         # from the vocabulary alone has always had.
         "coverage": coverage,
@@ -2303,6 +2394,30 @@ def _supplied_cycle_roles(request: WorkerRequest) -> dict[str, str]:
         for role in step.get("roles") or []
         if isinstance(role, Mapping) and role.get("name")
     }
+
+
+def _supplied_cycle_role_list(request: WorkerRequest) -> list[dict]:
+    """The cycle's roles in the order it runs them, each ``{name, document_type}``."""
+
+    return [
+        {"name": name, "document_type": document_type}
+        for name, document_type in _supplied_cycle_roles(request).items()
+    ]
+
+
+def _supplied_field_pairs(request: WorkerRequest) -> dict:
+    """The pairs the schemas propose, computed from exactly what the turn is shown.
+
+    Read by the prompt and by the validator through this one accessor, so a
+    pair the review is asked about is the pair its answer is checked against.
+    Empty where no cycle was supplied: without declared roles there are no
+    positions to pair fields between, and the turn names its own roles.
+    """
+
+    roles = _supplied_cycle_role_list(request)
+    if not roles:
+        return {"pairs": [], "omitted": 0}
+    return cycle_field_pairs.candidates(_plain_json(_supplied_schemas(request)), roles)
 
 
 def _require_the_cycle_s_roles(
@@ -2475,8 +2590,252 @@ def validate_linkage_proposal(
             )
     field_of(proposal["anchor"], "The anchor")
     _require_every_role_reachable(proposal)
+    proposal = _apply_field_pairs(proposal, request)
     _require_every_requirement_answered(proposal, request)
     return proposal
+
+
+def _apply_field_pairs(
+    proposal: Mapping[str, Any], request: WorkerRequest
+) -> dict[str, Any]:
+    """Make every field pair the review kept an assertion, and record the rest.
+
+    Silence keeps a pair. That is the property the floor exists for: a review
+    that ignores the list, or reads a requirement too narrowly to want the
+    pair, still leaves the comparison in the rules, and cycle vouching
+    evaluates every rule on every item whatever the coverage says. A pair
+    leaves the rules only by being declined, with a reason, and the decline is
+    kept on the ruleset where whoever approves it can disagree.
+
+    An assertion the turn wrote over a candidate's two fields is that pair
+    kept in its own words: it replaces the candidate, and coverage citing the
+    candidate's id is pointed at it.
+
+    Refused here, where a repair can still fix it: a decline naming no
+    candidate or giving no reason; a pair both declined and written; an
+    authored rule taking a candidate's id; an authored assertion over a join
+    key's own pair, which restates the link and cannot fail; and a cycle left
+    with no assertion at all.
+    """
+
+    candidates = _supplied_field_pairs(request)
+    roles = {str(role.get("name") or "") for role in proposal.get("roles") or []}
+    pairs = [
+        pair
+        for pair in candidates["pairs"]
+        if pair["left"]["role"] in roles and pair["right"]["role"] in roles
+    ]
+    by_id = {pair["id"]: pair for pair in pairs}
+    # Every pair the turn was shown, including those on a role it then listed
+    # unreachable. Declining one of those is the right answer to a pair that
+    # cannot be bound, so it is accepted, and dropped with the role.
+    supplied = {pair["id"] for pair in candidates["pairs"]}
+    problems: list[str] = []
+
+    declined: dict[str, str] = {}
+    for item in proposal.get("declined_pairs") or []:
+        pair_id = str(item.get("id") or "")
+        if pair_id in supplied and pair_id not in by_id:
+            continue
+        if pair_id not in by_id:
+            problems.append(
+                f"declined_pairs names '{pair_id or 'nothing'}', which is not one "
+                "of the field pairs supplied. Decline a pair by the id it was "
+                "given."
+            )
+        elif not str(item.get("reason") or "").strip():
+            problems.append(
+                f"Field pair '{pair_id}' is declined with no reason. Say why the "
+                "two fields do not state the same value."
+            )
+        else:
+            declined[pair_id] = str(item.get("reason")).strip()
+
+    authored = [dict(item) for item in proposal.get("assertions") or []]
+    pair_ids = {cycle_field_pairs.signature(pair): pair["id"] for pair in pairs}
+    joined = {
+        cycle_field_pairs.signature(key) for key in proposal.get("join_keys") or []
+    }
+    replaced: dict[str, str] = {}
+    for item in authored:
+        signature = cycle_field_pairs.signature(item)
+        own_id = str(item.get("id") or "")
+        if own_id in by_id and pair_ids.get(signature) != own_id:
+            # Written out under a pair's id is the pair kept in the turn's own
+            # words — handled below. Under a pair's id over other fields is two
+            # rules claiming one name.
+            problems.append(
+                f"Assertion '{own_id}' uses the id of a supplied field pair but "
+                "compares different fields. Give it its own id, or compare the "
+                "pair's two fields."
+            )
+        elif signature in pair_ids:
+            # The turn wrote the pair itself, which is the pair kept in its own
+            # words. Its rule replaces the candidate, and coverage citing the
+            # candidate's id follows it there.
+            pair_id = pair_ids[signature]
+            if pair_id in declined:
+                problems.append(
+                    f"Field pair '{pair_id}' is declined, and assertion "
+                    f"'{item.get('id')}' compares the same two fields. Keep one "
+                    "answer: remove the assertion, or withdraw the decline."
+                )
+            replaced[pair_id] = str(item.get("id") or "")
+        elif item.get("right") is not None and signature in joined:
+            problems.append(
+                f"Assertion '{item.get('id')}' compares the two fields a join key "
+                "already links. The join made them equal for every linked "
+                "record, so the rule cannot fail: remove it, and test what the "
+                "linked records state instead."
+            )
+
+    kept = [
+        cycle_field_pairs.as_assertion(
+            pair,
+            _plain_json(_supplied_schemas(request)),
+            _supplied_cycle_role_list(request),
+        )
+        for pair in pairs
+        if pair["id"] not in declined and pair["id"] not in replaced
+    ]
+    assertions = authored + kept
+    if not assertions and not problems:
+        problems.append(
+            "The response must leave at least one assertion; a cycle that tests "
+            "nothing is not a cycle."
+        )
+    if problems:
+        raise WorkerResponseValidationError(problems)
+
+    result = dict(proposal)
+    result["assertions"] = assertions
+    if replaced:
+        result["coverage"] = [
+            (
+                {
+                    **{key: value for key, value in entry.items() if key != "assertion_id"},
+                    "assertion_ids": [
+                        replaced.get(value, value)
+                        for value in cycle_rulesets.coverage_assertion_ids(entry)
+                    ],
+                }
+                if not entry.get("unsupported")
+                else dict(entry)
+            )
+            for entry in proposal.get("coverage") or []
+        ]
+    result["declined_pairs"] = [
+        {
+            "id": pair["id"],
+            "left": dict(pair["left"]),
+            "right": dict(pair["right"]),
+            "basis": pair["basis"],
+            "reason": declined[pair["id"]],
+        }
+        for pair in pairs
+        if pair["id"] in declined
+    ]
+    return result
+
+
+def _reach_problems(
+    target: tuple[str, str],
+    entry: Mapping[str, Any],
+    named: list[str],
+    *,
+    assertion_roles: Mapping[str, set[str]],
+    known_roles: set[str],
+    unreachable_roles: set[str],
+) -> list[str]:
+    """Hold one coverage entry to the roles it says its requirement is about.
+
+    Naming an assertion that exists proves only that it exists. A procurement
+    proposal answered "the invoice is matched to the purchase order and the
+    goods receipt" with a rule that the payment voucher is signed, and a
+    treasury one answered "matched on counterparty, principal, rate, value
+    date and maturity date" with the rate alone. Both validated, both were
+    approved, and the first left a short delivery that only the receipt states
+    untested.
+
+    So the entry declares ``reads`` — every role whose records the requirement
+    is about, in the cycle's own role names — and is then held to it, in two
+    directions. Every declared role is read by at least one of its assertions,
+    or is stated as a gap with the reason no pair of its fields can express
+    what is asked of it; a role no join key can reach is already a stated gap.
+    And every assertion it names reads at least one declared role, because a
+    rule over records the requirement is not about cannot answer it.
+
+    Nothing here counts roles or asks for a comparison: a requirement can be
+    about one record, and a field that must merely be stated is a one-sided
+    assertion on that record. What it refuses is a declaration the named
+    rules do not live up to — which is a structural check over role names,
+    the same in any cycle, and never a reading of the requirement's words.
+    """
+
+    label = f"Requirement {target[0]}/{target[1]}"
+    reads = _name_list(entry.get("reads"), "reads")
+    if not reads:
+        return [
+            f"{label} declares no roles in reads. Name every role whose records "
+            "this requirement is about, using the cycle's role names."
+        ]
+    problems: list[str] = []
+    unknown = [role for role in reads if role not in known_roles]
+    if unknown:
+        problems.append(
+            f"{label} reads '{unknown[0]}', which is not a role of this "
+            f"proposal; its roles are: {', '.join(sorted(known_roles))}."
+        )
+    gap_roles: set[str] = set()
+    for gap in entry.get("gaps") or []:
+        if not isinstance(gap, Mapping):
+            continue
+        role = str(gap.get("role") or "").strip()
+        if not str(gap.get("reason") or "").strip():
+            problems.append(
+                f"{label} states a gap{f' on role {role!r}' if role else ''} "
+                "with no reason. Say what is asked of those records that no "
+                "pair of their fields can express."
+            )
+        if role and role not in reads:
+            problems.append(
+                f"{label} states a gap on role '{role}', which it does not "
+                "list in reads."
+            )
+        if role:
+            gap_roles.add(role)
+    read_by_rules = set().union(*(assertion_roles.get(value, set()) for value in named))
+    unread = [
+        role
+        for role in reads
+        if role not in unknown
+        and role not in read_by_rules
+        and role not in unreachable_roles
+        and role not in gap_roles
+    ]
+    if unread:
+        listed = ", ".join(f"'{role}'" for role in unread)
+        problems.append(
+            f"{label} is about {listed}, and none of its assertions "
+            f"({', '.join(named)}) reads "
+            f"{'it' if len(unread) == 1 else 'them'}. For each, add an "
+            "assertion over the field that must agree or be stated, or list "
+            "the role under gaps with the reason no field of it can express "
+            "what the requirement asks. A join key that reaches a record "
+            "shows that the record exists, not that what it states agrees."
+        )
+    wanted = set(reads)
+    for value in named:
+        if assertion_roles.get(value, set()) & wanted:
+            continue
+        problems.append(
+            f"{label} names assertion '{value}', which reads "
+            f"{', '.join(sorted(assertion_roles.get(value) or {'nothing'}))} "
+            f"and none of the roles it is about ({', '.join(reads)}). Remove "
+            "it from this entry, or add the role to reads if the requirement "
+            "is about it."
+        )
+    return problems
 
 
 def _require_every_requirement_answered(
@@ -2509,8 +2868,30 @@ def _require_every_requirement_answered(
     assertion_ids = {
         str(item.get("id") or "") for item in proposal.get("assertions") or []
     }
+    # The roles each assertion reads, which is what the declared ``reads`` of a
+    # requirement is held to. A one-sided assertion reads one role.
+    assertion_roles = {
+        str(item.get("id") or ""): {
+            str((item.get(side) or {}).get("role") or "")
+            for side in ("left", "right")
+            if isinstance(item.get(side), Mapping)
+        }
+        for item in proposal.get("assertions") or []
+    }
+    unreachable_roles = {
+        str(item.get("role") or "")
+        for item in proposal.get("unreachable") or []
+        if isinstance(item, Mapping)
+    }
+    known_roles = {
+        str(role.get("name") or "") for role in proposal.get("roles") or []
+    } | unreachable_roles
     answered: dict[tuple[str, str], Mapping[str, Any]] = {}
     problems: list[str] = []
+    # Counted over the requirements, not over the problems: one requirement can
+    # raise several (answered twice, a role it never reads), and a repair
+    # prompt saying the proposal answered minus-one of two teaches nothing.
+    unanswered: set[tuple[str, str]] = set()
     for entry in proposal.get("coverage") or []:
         target = (
             str(entry.get("rcm_id") or ""),
@@ -2531,12 +2912,14 @@ def _require_every_requirement_answered(
         )
         entry = answered.get(target)
         requirement = str(item.get("requirement") or "")
+        before = len(problems)
         if entry is None:
             problems.append(
                 f"Requirement {target[0]}/{target[1]} has no coverage entry: "
                 f"\"{requirement}\". Name the assertion that answers it, or "
                 "say it is unsupported and why."
             )
+            unanswered.add(target)
             continue
         if entry.get("unsupported"):
             if not str(entry.get("reason") or "").strip():
@@ -2545,38 +2928,57 @@ def _require_every_requirement_answered(
                     "unsupported with no reason. Say which field these schemas "
                     "would need to carry."
                 )
+                unanswered.add(target)
             continue
-        assertion_id = str(entry.get("assertion_id") or "")
-        if assertion_id not in assertion_ids:
+        named = cycle_rulesets.coverage_assertion_ids(entry)
+        if not named:
+            problems.append(
+                f"Requirement {target[0]}/{target[1]} names no assertion. List "
+                "in assertion_ids every assertion it needs, or say the "
+                "requirement is unsupported."
+            )
+            unanswered.add(target)
+            continue
+        missing = [value for value in named if value not in assertion_ids]
+        declined_ids = {
+            str(item.get("id") or "") for item in proposal.get("declined_pairs") or []
+        }
+        if missing and missing[0] in declined_ids:
+            problems.append(
+                f"Requirement {target[0]}/{target[1]} names field pair "
+                f"'{missing[0]}', which this proposal declines. Keep the pair, "
+                "or name the assertions that do answer the requirement."
+            )
+            unanswered.add(target)
+            continue
+        if missing:
             # An id naming nothing is the one failure mode that reads as
             # coverage from every angle: the requirement is answered, the
             # proposal validates, and the executor finds no assertion to derive
             # a comparison from.
             problems.append(
                 f"Requirement {target[0]}/{target[1]} names assertion "
-                f"'{assertion_id or 'nothing'}', which this proposal does not "
-                "contain. Name one of its own assertions, or say the "
-                "requirement is unsupported."
+                f"'{missing[0]}', which this proposal does not contain. Name "
+                "its own assertions, or say the requirement is unsupported."
             )
+            unanswered.add(target)
+            continue
+        problems.extend(
+            _reach_problems(
+                target,
+                entry,
+                named,
+                assertion_roles=assertion_roles,
+                known_roles=known_roles,
+                unreachable_roles=unreachable_roles,
+            )
+        )
+        if len(problems) > before:
+            unanswered.add(target)
     if not problems:
         return
-    # Counted over the requirements, not over the problems: one requirement can
-    # raise two (answered twice, and one of those naming nothing), and a repair
-    # prompt saying the proposal answered minus-one of two teaches nothing.
-    unanswered = len(
-        {
-            (str(item.get("rcm_id") or ""), str(item.get("control_attribute") or ""))
-            for item in required
-        }
-        - {
-            target
-            for target, entry in answered.items()
-            if entry.get("unsupported")
-            or str(entry.get("assertion_id") or "") in assertion_ids
-        }
-    )
     raise WorkerResponseValidationError(
-        f"The proposal answers {len(required) - unanswered} of "
+        f"The proposal answers {len(required) - len(unanswered)} of "
         f"{counted(len(required), 'supplied requirement')}. "
         + " ".join(problems)
     )
@@ -2613,6 +3015,27 @@ def run_linkage_worker(
     requirements = _supplied_requirements(request)
     if requirements:
         payload["requirements"] = requirements
+    # Found locally from the schemas, and read back through the same accessor
+    # by the validator, so what the review answers is what it was asked.
+    candidates = _supplied_field_pairs(request)
+    if candidates["pairs"]:
+        payload["field_pairs"] = [
+            {
+                "id": pair["id"],
+                "left": pair["left"],
+                "right": pair["right"],
+                "basis": pair["basis"],
+                **({"shared_words": pair["words"]} if pair["words"] else {}),
+            }
+            for pair in candidates["pairs"]
+        ]
+        if candidates["omitted"]:
+            payload["field_pairs_omitted"] = candidates["omitted"]
+        payload["unpaired_fields"] = cycle_field_pairs.unpaired_fields(
+            _plain_json(_supplied_schemas(request)),
+            _supplied_cycle_role_list(request),
+            candidates["pairs"],
+        )
     user = json.dumps(payload, indent=1, default=str)
     if attempt.is_repair:
         user += (
@@ -2636,7 +3059,7 @@ def run_linkage_worker(
 LINKAGE_RESPONSE_SCHEMA = WorkerResponseSchema(
     schema_id="tests.cycle_linkage.response",
     schema_hash=_sha256_text(
-        "tests-cycle-linkage-response:roles-joins-assertions-coverage"
+        "tests-cycle-linkage-response:roles-joins-assertions-coverage-reads-field-pairs-v3"
     ),
     validator=_linkage_response_schema,
 )
@@ -2644,8 +3067,12 @@ LINKAGE_WORKER = WorkerDefinition(
     worker_id=LINKAGE_WORKER_ID,
     prompt_hash=_sha256_text(LINKAGE_SYSTEM),
     response_schema=LINKAGE_RESPONSE_SCHEMA,
+    # Two, as the evidence read and test generation have: the response now
+    # carries a review of the field pairs beside its own rules, and each check
+    # it can fail names its own repair. A ruleset that fails here costs the
+    # stage, and every cycle test behind it.
     repair_policy=WorkerRepairPolicy(
-        max_repair_attempts=1,
+        max_repair_attempts=2,
         guidance_hash=_sha256_text(
             "Repair the cycle linkage proposal against the supplied schemas."
         ),

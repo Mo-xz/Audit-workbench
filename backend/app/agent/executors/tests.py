@@ -899,6 +899,7 @@ def _cycle_ruleset_result(
     revision_before: int,
     record: Mapping[str, object],
     downgraded: list[dict] | None = None,
+    partial: list[dict] | None = None,
     unreachable: list[dict] | None = None,
 ) -> ExecutorResult:
     ref = cycle_ruleset_ref(str(record.get("ruleset_id") or ""))
@@ -931,6 +932,19 @@ def _cycle_ruleset_result(
             # attribute kept its requirement and took the strongest path still
             # open to it, and an auditor is told which control that happened on.
             "downgraded": list(downgraded or []),
+            # Requirements answered for some of the records they are about. The
+            # comparisons that could be written are contracted; the rest is
+            # named, role by role, with the reason no pair of fields states it.
+            "partial": list(partial or []),
+            # Rules the field-name floor proposed and review kept, and the pairs
+            # review declined. The declines are on the ruleset with their
+            # reasons; the count is what the run reports.
+            "field_pair_assertions": sum(
+                1
+                for item in record.get("assertions") or []
+                if isinstance(item, Mapping) and item.get("proposed_by") == "schema_names"
+            ),
+            "declined_pairs": len(list(record.get("declined_pairs") or [])),
             # A position the cycle holds that no join key can reach, because its
             # document type carries no identifier field. Dropped from the rules
             # so the rest of the ruleset can stand, kept on the shape because
@@ -992,16 +1006,18 @@ def _contract_matrix_rows(
     always read them there. Only the author moved — to the one turn that has
     this engagement's induced schemas in front of it.
 
-    Returns the downgrades, which the run reports: a requirement no field these
-    schemas carry can express is a real limit and an auditor has to be told
-    which control it landed on.
+    Returns what the run reports: ``downgraded``, a requirement no field these
+    schemas carry can express, which is a real limit an auditor has to be told
+    which control it landed on; and ``partial``, a requirement answered for
+    some of the records it is about and stated as a gap for the rest, so the
+    part of the control nothing tests is named rather than implied away.
     """
 
     coverage = [
         entry for entry in proposal.get("coverage") or [] if isinstance(entry, Mapping)
     ]
     if not coverage:
-        return []
+        return {"downgraded": [], "partial": []}
     roles = {
         str(role.get("name") or ""): role
         for role in proposal.get("roles") or []
@@ -1019,7 +1035,7 @@ def _contract_matrix_rows(
     # Profiled once. The fallback asks which population bears on a row, and
     # answering that per attribute would re-profile every table each time.
     answers = cycle_linking.tabular_evidence_answers(fresh)
-    downgraded: list[dict] = []
+    report: dict[str, list[dict]] = {"downgraded": [], "partial": []}
     for rcm_id, entries in by_row.items():
         row = rows.get(rcm_id)
         if row is None:
@@ -1034,23 +1050,48 @@ def _contract_matrix_rows(
                 working = cycle_linking.downgrade_uncontracted(
                     fresh, working, attribute_key, answers=answers
                 )
-                downgraded.append({
+                report["downgraded"].append({
                     "rcm_id": rcm_id,
                     "control_attribute": attribute_key,
                     "reason": str(entry.get("reason") or ""),
                 })
                 continue
-            assertion = assertions.get(str(entry.get("assertion_id") or ""))
-            comparison = (
-                _derived_comparison(assertion, roles) if assertion is not None else None
-            )
-            if comparison is None:
+            # Every assertion the requirement needs, not the first of them: a
+            # contract holding one of five comparisons understates what the
+            # control has to show and what a cycle test is refused without.
+            comparisons = []
+            for assertion_id in cycle_rulesets.coverage_assertion_ids(entry):
+                assertion = assertions.get(assertion_id)
+                comparison = (
+                    _derived_comparison(assertion, roles)
+                    if assertion is not None
+                    else None
+                )
+                if comparison is not None:
+                    comparisons.append(comparison)
+            if not comparisons:
                 continue
+            # A gap is reported only where it lands: an attribute an earlier
+            # proposal already contracted is left alone, and so is its report.
+            lands = any(
+                isinstance(attribute, Mapping)
+                and str(attribute.get("key") or "") == attribute_key
+                and cycle_linking.uncontracted(attribute)
+                for attribute in working.get("control_attributes") or []
+            )
+            for gap in (entry.get("gaps") or []) if lands else []:
+                if isinstance(gap, Mapping):
+                    report["partial"].append({
+                        "rcm_id": rcm_id,
+                        "control_attribute": attribute_key,
+                        "role": str(gap.get("role") or ""),
+                        "reason": str(gap.get("reason") or ""),
+                    })
             working = {
                 **working,
                 "control_attributes": [
                     (
-                        {**attribute, "required_comparisons": [comparison]}
+                        {**attribute, "required_comparisons": comparisons}
                         if isinstance(attribute, Mapping)
                         and str(attribute.get("key") or "") == attribute_key
                         and cycle_linking.uncontracted(attribute)
@@ -1072,7 +1113,7 @@ def _contract_matrix_rows(
                 f"RCM row '{rcm_id}': {error}"
             ) from error
         fresh.update_rcm(rcm_id, {"control_attributes": attributes}, agent=True)
-    return downgraded
+    return report
 
 
 def _anchor_population(cycle: Mapping[str, object]) -> dict:
@@ -1170,7 +1211,7 @@ def execute_cycle_ruleset(
         # the matrix rows these comparisons land on, so a row rewritten since
         # the proposal was authored conflicts the whole commit rather than
         # being quietly overwritten with a contract answering the old wording.
-        state["downgraded"] = _contract_matrix_rows(fresh, proposal)
+        state.update(_contract_matrix_rows(fresh, proposal))
         return record
 
     # Through the transaction even though the ruleset lands in a side store,
@@ -1189,6 +1230,7 @@ def execute_cycle_ruleset(
         revision_before=int(state["revision_before"]),
         record=dict(committed.value),
         downgraded=list(state.get("downgraded") or []),
+        partial=list(state.get("partial") or []),
         unreachable=unreachable,
     )
 

@@ -1032,11 +1032,89 @@ renders that assessment's changes into the worker's instruction.
 | Binding | pipeline — worker `tests.cycle_linkage`, executor `tests.cycle_ruleset` |
 | Context | `tests.cycle_linkage` — the induced schemas as **one atomic item** (a cycle is a statement about how the whole set relates, so a budget that admitted some of it would produce a proposal missing a role with nothing saying which), plus the matrix's requirements |
 | Input | the schema hashes ride on the unit's `input_sha1`, so a re-derived schema re-proposes rather than leaving an auditor approving rules against a vocabulary that moved |
-| Output | `{roles[], join_keys[], assertions[]}` |
+| Output | `{roles[], join_keys[], assertions[], coverage[], unreachable[]}` |
 
 This is the only stage that sees the matrix's requirements, the cycle's roles,
 *and* the induced field vocabulary at once, which is why the evidence contract
 is authored here.
+
+**A requirement is answered by every assertion it needs, held to the roles it
+reads.** A coverage entry is `{rcm_id, control_attribute, reads[], assertion_ids[],
+gaps[]?}` or `{…, unsupported: true, reason}`. `reads` names the cycle roles whose
+records the requirement is about; the validator refuses an entry unless every
+role in it is read by one of its assertions, unreachable, or stated under `gaps`
+with a reason, and unless every assertion it names reads one of those roles. The
+executor writes *every* named assertion back as the row's `required_comparisons`
+and reports each gap as `partial`, which the run warns about beside `downgraded`.
+
+Both rules came from approved rulesets that read as complete and were not. A
+procurement proposal answered "the invoice is matched to the order and the goods
+receipt" with a rule that the payment voucher is signed, so a receipt recording 17
+laptops against 20 billed and paid was never compared; and a treasury proposal
+answered a five-term confirmation match with its rate alone, because coverage
+then held one assertion per requirement. The check is over role names only: it
+does not count roles (a single-document cycle reads one), does not refuse a
+one-sided assertion (a field that must be stated is one), and never reads the
+requirement's words. What it cannot catch is a requirement whose assertions read
+the right roles but leave out terms — that is the prompt's to ask for, by
+listing them all. The prompt also says what a join key is not: that two records
+cite each other shows they belong together, never that what they state agrees.
+A singular `assertion_id` from an earlier proposal is still read, as a list of
+one.
+
+**The field pairs are proposed from the schemas, and the turn reviews them.**
+Which field of one document is which field of another is a property of the
+schemas, not of any requirement's wording, and a turn writing assertions from the
+words wrote what they named: in three live re-proposals of procurement, "matched
+to the purchase order and the goods receipt" never once produced receipt quantity
+against order quantity. `cycle_field_pairs.candidates` now pairs, locally, the
+fields of the cycle's document types that share a value type and either a name or
+a word (generic words and the field's own document type's words set aside; dates
+by name only; identifiers and controls never; every tie kept; one role per
+document type, the last in cycle order). The prompt carries them as `field_pairs`,
+with the number and date fields no pair reaches as `unpaired_fields` — the
+fields a name cannot match, such as a principal and an amount — for the turn to
+pair where they state one value. **A pair the turn does not decline, with a
+reason, becomes an assertion** (`proposed_by: "schema_names"`); an assertion the
+turn writes over a pair's two fields replaces it; an assertion restating a join
+key's pair is refused, because it cannot fail. Declines are stored on the ruleset
+as `declined_pairs`, outside `ruleset_hash`, and shown in the approval dialog.
+Because cycle vouching evaluates every assertion on every item, a kept pair is
+tested whatever the coverage says: the worst case is the floor. Measured on the
+shipped schemas the floor is 35 pairs on procurement and 19 on treasury, and it
+includes receipt quantity against order quantity, and the deal's counterparty,
+rate, value date and maturity date against the confirmation's.
+
+Three refinements followed the `amount` value type (a sum of money, normalized
+with its stated currency; `number` is every other quantity). Amounts pair with
+amounts, and with a `number` that shares their name. A short table of generic
+synonyms (`SYNONYMS`: supplier = vendor; total = sum = value = amount) is applied
+before names are compared. Without it the floor missed PO total against invoice
+amount, the comparison a three-way match is, and an invoice's `supplier_name`
+against an order's `vendor_name`. Currency codes are no longer shared words,
+because "(PKR)" in two labels is not a reason to pair the fields. And
+`unpaired_fields` is computed per document: a field is listed with
+`no_pair_with`, naming every other role that carries its value type and that no
+candidate connects it to. Before this, a PO total paired with the requisition's
+estimate was left off the list even though nothing paired it with the invoice.
+On procurement's rebuilt schemas the floor is 43 pairs, including invoice amount
+against payment amount, which a voucher amount typed `text` had kept out of the
+floor entirely.
+
+What made it hold on the real provider (21 November 2026, read-only, three trials
+per engagement). The first version refused declines of pairs on a role the turn
+then listed unreachable, and refused a kept pair written out under its own id; it
+failed five of six trials on those alone, so both are now accepted. With those
+fixed, the turn declined receipt quantity against order quantity twice in three
+("a goods receipt can record a partial delivery"), reading *does not state the
+same value* as *may differ*. The rule now says to decline only fields that
+describe different things, never a pair whose values may legitimately differ,
+since that difference is what the comparison exists to show. After that, all six
+trials kept receipt quantity and invoice amount against PO total (procurement)
+and principal, counterparty and rate against the confirmation (treasury);
+principal against amount, which no name matches, was paired from
+`unpaired_fields` every time. One trial needed two repairs, which is why this
+worker's allowance is 2.
 
 ### `tests.cycle_ruleset_approved` — Cycle rules made effective
 

@@ -477,14 +477,30 @@ Each phase is independently useful and measurable against the key.
    change. The cycle turn gains the map as a source where it stands, after the
    APM, so local code binds its populations and the steps with no record
    surface (the smaller first step in 4.2).
-3. **The cycle's shape moves ahead.** It reads the process documents instead of
-   the memorandum, theme placement splits off after the APM, and analysis takes
-   a partial edge on the shape.
-4. **Aggregates and the memo.** The new representation and permission, the new
-   skeleton with step names, frame names hidden.
-5. **Reading and authoring.** The characterize, explore and outline sections,
+3. **Aggregates and the memo.** *Done.* `analysis_results.bounded_aggregate`
+   keeps each result's summary in its evidence sidecar; `allow_analysis_aggregates`
+   and the `analysis_aggregates` source give it to the memo writer alone; the
+   memo gains the three optional profile sections and "Implications for the
+   plan"; recipe frames reach the writer as "requisitions joined to po_data,
+   invoice_data". "What the data cannot answer" waits for phase 4, which is
+   where the reading turn's unanswerable list reaches the memo. Live on
+   procurement (two summary calls, 126k prompt tokens): the memo states the
+   data's character (PO equals estimate on 52 of 52, prices fixed within 13 of
+   14 items), carries all three profile sections and tells planning not to
+   report PO-within-estimate as clean. The repair turn dropped the profile
+   sections the first draft wrote, so a repair now carries `profile` and
+   `implications` forward from the draft it repairs. Still short of the
+   benchmark: weekend-heavy dates are read as "no after-hours keying" rather
+   than "keyed, not stamped", and 37 embeds is too many to read.
+4. **Reading and authoring.** The characterize, explore and outline sections,
    and one batched code call replacing per-frame definitions.
-6. **Exhibits.** The new chart types in `ChartView`, `MemoView` and `memoDocx`.
+5. **Exhibits.** The new chart types in `ChartView`, `MemoView` and `memoDocx`.
+6. **The cycle's shape moves ahead.** It reads the process documents instead of
+   the memorandum, theme placement splits off after the APM, and analysis takes
+   a partial edge on the shape. Last because phase 2 already feeds the map to
+   the cycle where it stands, which was most of the cycle's gain; this phase is
+   for step names in the analysis, and it is the one with the widest reach
+   across planning.
 
 ## 8. Decisions to make
 
@@ -501,7 +517,7 @@ Each phase is independently useful and measurable against the key.
   placement is structural. The second removes a turn but changes a template
   firms edit.
 - **Whether the shape moves at all.** Phase 2's smaller step (the map feeding
-  the cycle where it stands) captures the cycle's gain. Phase 3 is only for the
+  the cycle where it stands) captures the cycle's gain. Phase 6 is only for the
   analysis's gain, step names in the memo and in every exception, and costs a
   graph change across planning.
 - **A free-running analyst loop.** The benchmark was written that way: a model

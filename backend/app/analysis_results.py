@@ -493,6 +493,62 @@ class EvidenceWriter:
         self._writes.clear()
 
 
+#: The most rows of a result's aggregate that are kept for a reader. A breakdown
+#: past this is folded by the test itself; a frame past it is not an aggregate.
+MAX_AGGREGATE_ROWS = 30
+#: A group summarising fewer rows than this restates them: its figures are a
+#: row's figures. ``adapters.MIN_CATEGORY_REPETITION`` holds a category value set
+#: to the same bound, for the same reason.
+MIN_AGGREGATE_GROUP_ROWS = 4
+#: Column names a test uses for how many source rows one summary row covers.
+_COUNT_COLUMNS = (
+    "rows", "records", "approvals", "transactions", "dated", "present", "of",
+    "count", "n", "len", "total",
+)
+
+
+def bounded_aggregate(frame, *, population: int | None = None) -> dict | None:
+    """A result's summary frame, bounded for a model to read.
+
+    The frame is an aggregate, not rows — but a group built from one or two
+    rows states those rows' figures. Where the frame says how many rows each
+    of its groups covers, a group below ``MIN_AGGREGATE_GROUP_ROWS`` keeps its
+    label and count and has its other figures withheld. Where it does not say,
+    it counts as an aggregate only when it is that much smaller than the
+    population it was computed from. What was withheld is reported, never
+    silently dropped.
+    """
+    import polars as pl  # local: this module is imported by code that avoids Polars
+
+    if frame is None or not isinstance(frame, pl.DataFrame) or frame.is_empty():
+        return None
+    count = next((c for c in _COUNT_COLUMNS if c in frame.columns and frame.schema[c].is_numeric()), None)
+    groups_withheld = 0
+    if count is not None:
+        small = pl.col(count).cast(pl.Float64, strict=False).fill_null(0) < MIN_AGGREGATE_GROUP_ROWS
+        groups_withheld = int(frame.select(small.sum()).item())
+        figures = [
+            c for c in frame.columns
+            if c != count and frame.schema[c].is_numeric()
+        ]
+        if groups_withheld and figures:
+            frame = frame.with_columns(
+                [pl.when(small).then(None).otherwise(pl.col(c)).alias(c) for c in figures]
+            )
+    elif population is not None and frame.height * MIN_AGGREGATE_GROUP_ROWS > population:
+        return None
+    from .explore import frame_payload
+
+    kept = frame_payload(frame, MAX_AGGREGATE_ROWS)
+    return {
+        **kept,
+        "total_rows": frame.height,
+        "rows_withheld": max(frame.height - MAX_AGGREGATE_ROWS, 0),
+        "groups_withheld": groups_withheld,
+        "count_column": count,
+    }
+
+
 def exception_evidence(
     payload: Mapping[str, object], *, analysis_id: str, result: Mapping[str, object]
 ) -> dict | None:
@@ -503,7 +559,9 @@ def exception_evidence(
     definition currently carries.
     """
     frame = payload.get("exceptions")
-    if not isinstance(frame, Mapping) or not int(result.get("exception_count") or 0):
+    flagged = isinstance(frame, Mapping) and bool(int(result.get("exception_count") or 0))
+    aggregate = payload.get("aggregate") if isinstance(payload.get("aggregate"), Mapping) else None
+    if not flagged and aggregate is None:
         return None
     return {
         "analysis_id": analysis_id,
@@ -511,7 +569,10 @@ def exception_evidence(
         "executed_at": result.get("executed_at"),
         "result_sha1": result.get("result_sha1"),
         "exception_count": int(result.get("exception_count") or 0),
-        "frame": _plain_json(frame),
+        **({"frame": _plain_json(frame)} if flagged else {}),
+        # The result's own summary, bounded. Kept beside the flagged rows and
+        # under the same stamp, so it is discarded exactly when they are.
+        **({"aggregate": _plain_json(aggregate)} if aggregate is not None else {}),
     }
 
 
@@ -533,7 +594,29 @@ def read_exception_evidence(workspace: Workspace, analysis: Mapping[str, object]
         return None
     if stored.get("result_sha1") != result.get("result_sha1"):
         return None
+    if not isinstance(stored.get("frame"), Mapping):
+        return None
     return stored
+
+
+def read_result_aggregate(workspace: Workspace, analysis: Mapping[str, object]) -> dict | None:
+    """The bounded summary the analysis' recorded result concluded, if kept.
+
+    The same sidecar and the same rule as the flagged rows: an aggregate that
+    outlived its result is not this result's.
+    """
+    result = analysis.get("last_result")
+    if not isinstance(result, Mapping) or result.get("status") == "error":
+        return None
+    path = analysis_evidence_path(workspace.root, str(analysis.get("id") or ""))
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(stored, dict) or stored.get("result_sha1") != result.get("result_sha1"):
+        return None
+    aggregate = stored.get("aggregate")
+    return dict(aggregate) if isinstance(aggregate, Mapping) else None
 
 
 def record_analysis_result(
@@ -789,6 +872,8 @@ __all__ = [
     "is_manual_run",
     "manual_run_id",
     "read_exception_evidence",
+    "read_result_aggregate",
+    "bounded_aggregate",
     "record_analysis_result",
     "summary_basis_digest",
 ]

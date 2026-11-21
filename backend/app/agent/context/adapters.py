@@ -3668,6 +3668,58 @@ def analysis_definition_scope(
 # --------------------------------------------------------------------------- #
 SUMMARY_RESULTS_SOURCE_ID = "analysis_results"
 SUMMARY_EXCEPTIONS_SOURCE_ID = "analysis_exceptions"
+SUMMARY_AGGREGATES_SOURCE_ID = "analysis_aggregates"
+
+
+def _frame_label(analysis: Mapping[str, object]) -> str:
+    """What a procedure ran over, in the tables' own names.
+
+    A frame built by an input recipe is named for the machinery
+    (``profile_chain_requisitions_c284cfb7``), and a memo copies whatever name
+    it is handed. The tables it was built from are what a reader recognises.
+    """
+    table = str(analysis.get("table") or "")
+    recipe = analysis.get("alignment")
+    if not isinstance(recipe, Mapping):
+        return table
+    root = str(recipe.get("root") or table)
+    joined = [str(join.get("right") or "") for join in recipe.get("joins") or [] if isinstance(join, Mapping)]
+    joined = [name for name in joined if name]
+    return f"{root} joined to {', '.join(joined)}" if joined else root
+
+
+def analysis_summary_aggregate_candidates(workspace: Workspace) -> tuple[ContextCandidate, ...]:
+    """What each procedure computed, bounded, for the memo to describe."""
+    from ...analysis_results import read_result_aggregate
+    from ..data_map import is_profile
+
+    candidates = []
+    for item in workspace.analyses:
+        aggregate = read_result_aggregate(workspace, item)
+        if not aggregate:
+            continue
+        content = {
+            "analysis_id": str(item.get("id") or ""),
+            "title": item.get("title"),
+            "frame": _frame_label(item),
+            "test": (item.get("spec") or {}).get("test"),
+            "profile": is_profile(item),
+            "columns": list(aggregate.get("columns") or []),
+            "rows": list(aggregate.get("rows") or []),
+            "total_rows": aggregate.get("total_rows"),
+            "rows_withheld": aggregate.get("rows_withheld"),
+            "groups_withheld": aggregate.get("groups_withheld"),
+        }
+        candidates.append(
+            ContextCandidate(
+                source_ref=f"analysis:{item['id']}",
+                source=content,
+                representations={"analysis_aggregate": content},
+                metadata={"analysis_id": str(item.get("id") or "")},
+                lexical_text=str(item.get("title") or ""),
+            )
+        )
+    return tuple(candidates)
 SUMMARY_ANOMALIES_SOURCE_ID = "analysis_anomalies"
 SUMMARY_GAPS_SOURCE_ID = "coverage_gaps"
 SUMMARY_JOINS_SOURCE_ID = "table_joins"
@@ -3708,6 +3760,12 @@ def _bounded_code(spec: Mapping[str, object]) -> str | None:
     return code[:MAX_SUMMARY_CODE_CHARACTERS] + "\n… truncated"
 
 
+def _is_profile(analysis: Mapping[str, object]) -> bool:
+    from ..data_map import is_profile
+
+    return is_profile(analysis)
+
+
 def _summary_result_projection(
     workspace: Workspace, analysis: Mapping[str, object]
 ) -> dict[str, object]:
@@ -3723,8 +3781,11 @@ def _summary_result_projection(
         # The authored rationale. A memo that can say *why* a procedure was run
         # reads like an auditor wrote it; one that only has titles does not.
         "note": analysis.get("note"),
-        "table": analysis.get("table"),
-        **({"alignment": analysis["alignment"]} if analysis.get("alignment") else {}),
+        # The tables the frame was built from, not the recipe's machine name.
+        # The recipe itself is not supplied: its join keys are what the frame
+        # *is*, and they are named in the label and the join definitions.
+        "table": _frame_label(analysis),
+        "profile": _is_profile(analysis),
         "kind": analysis.get("kind"),
         "test": spec.get("test"),
         # What the procedure actually did, not only what it was called. A title
@@ -3817,7 +3878,7 @@ def analysis_summary_exception_candidates(
         flagged = {
             "analysis_id": str(item.get("id") or ""),
             "title": item.get("title"),
-            "table": item.get("table"),
+            "table": _frame_label(item),
             "verdict": verdict,
             "verdict_text": (item.get("last_result") or {}).get("verdict_text"),
             "exception_count": evidence.get("exception_count"),
@@ -3967,6 +4028,7 @@ def analysis_summary_scope(
             SUMMARY_ANOMALIES_SOURCE_ID: analysis_summary_exception_candidates(
                 workspace, failures=False
             ),
+            SUMMARY_AGGREGATES_SOURCE_ID: analysis_summary_aggregate_candidates(workspace),
             SUMMARY_GAPS_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="analysis:coverage_gaps",

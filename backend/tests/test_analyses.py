@@ -621,7 +621,9 @@ def test_a_procedure_that_flags_nothing_stores_no_evidence(workspace_with_data):
     executed = analysis_results.execute_and_record(ws, clean["id"])
 
     assert executed.result["exception_count"] == 0
-    assert not _evidence_file(ws, clean["id"]).exists()
+    # The sidecar may keep the result's bounded summary; it keeps no rows.
+    path = _evidence_file(ws, clean["id"])
+    assert not path.exists() or "frame" not in json.loads(path.read_text())
     assert analysis_results.read_exception_evidence(ws, ws.analyses[0]) is None
 
 

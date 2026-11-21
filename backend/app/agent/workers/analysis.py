@@ -2316,7 +2316,33 @@ SUMMARY_SECTIONS: tuple[str, ...] = (
     "Further work required",
 )
 
-_SECTION_LIST = "\n".join(f"## {section}" for section in SUMMARY_SECTIONS)
+# Sections a memo carries only when the population profile supports them, in
+# the order they appear between the data received and the findings. A two-table
+# engagement with no roles has no "People and authority", and a heading over
+# nothing is worse than no heading — so these are offered, never demanded.
+PROFILE_SECTIONS: tuple[str, ...] = (
+    "Where the value is",
+    "How the process runs",
+    "People and authority",
+)
+# What planning should do about it, after the reliance section. A list of
+# procedures run is no help to an auditor planning the work; "test the 18
+# requisitions over 10M individually" is.
+IMPLICATIONS_SECTION = "Implications for the plan"
+# Profile results whose summary reads best as a chart; every other profile
+# result is placed as its summary table.
+_CHART_TESTS = frozenset({"breakdown", "value_bands", "calendar_profile", "period_compare", "skipped_steps"})
+
+_SECTION_LIST = "\n".join(
+    f"## {section}"
+    for section in (
+        SUMMARY_SECTIONS[0],
+        *(f"{name}  (optional, from `profile`)" for name in PROFILE_SECTIONS),
+        *SUMMARY_SECTIONS[1:3],
+        IMPLICATIONS_SECTION,
+        SUMMARY_SECTIONS[3],
+    )
+)
 
 SUMMARY_SUBMISSION_TOOL = "submit_analysis_summary"
 
@@ -2336,6 +2362,35 @@ no heading, no fenced block, and no draft you then replace.
 `lead` is a short paragraph saying what the analysis concluded — the two or
 three things a reader who stops there should leave with. Not what was performed:
 what it showed.
+
+Understanding the population comes before its exceptions. The items of
+source `analysis_aggregates` carry the summary each procedure computed — a breakdown, a duration profile,
+a role matrix, a value carried from step to step — bounded, with any group too
+small to report withheld and counted in `groups_withheld`. Most of them come
+from the population profile (procedures marked `profile` in PROCEDURE
+REFERENCES), written to describe the data rather than to test it. Read them as
+an analyst would, for what they say about how this business runs:
+
+- `data_received` says what kind of data this is, not only how much. A figure
+  that equals the step before it on every row, a price that never varies
+  between suppliers, dates spread across weekends as evenly as across weekdays,
+  numbers carried from one record to the next — each changes which tests can
+  prove anything, and saying so is the most useful sentence in the memo. A
+  test that cannot fail on this data is worth naming here.
+- `profile` holds the parts that describe the population, one per section it
+  supports: "Where the value is" (concentration, size bands, categories, time),
+  "How the process runs" (how long each step takes, what runs out of order or
+  is skipped, what is paid early or late), "People and authority" (who acts in
+  which role, how authority is used, who holds two roles that are usually kept
+  apart). Give each the procedures it rests on; their summaries are placed under
+  your prose. Leave out a section the supplied results do not support.
+- An exception reads better against the profile: three requisitions never
+  ordered mean something when every other one was ordered within thirteen days.
+
+`implications` is a list of what the plan should do about it, ordered by
+importance — where to point the testing, which records to examine individually,
+which evidence to obtain, which planned test the data makes pointless. One
+entry per decision, at most 40 words each.
 
 When AUDITOR INSTRUCTION is present, the auditor asked for particular tests.
 `lead` says, in one sentence, which of them the data could test and which it
@@ -2382,7 +2437,8 @@ half of one is a better part:
 - each finding's `prose`, at most 120 words. Its `title` is a phrase naming the
   issue — around eight words, no procedure reference, no final full stop.
 - `reliance.prose`, at most 180 words. The coverage table is below it.
-- each `further_work` item, at most 40 words.
+- each `profile` part's prose, at most 150 words.
+- each `implications` and `further_work` item, at most 40 words.
 
 Cut in this order: adjectives, then any sentence restating a figure the reader
 can see, then any clause explaining why a number is what a number is. Never cut
@@ -2565,6 +2621,8 @@ def _summary_reference_sheet(request: WorkerRequest) -> list[dict[str, Any]]:
             "table": item.get("table"),
             "verdict": item.get("verdict_text") or item.get("verdict"),
         }
+        if item.get("profile"):
+            entry["profile"] = True
         if item.get("informative") is False:
             entry["established_nothing"] = item.get("uninformative_reason")
         try:
@@ -2724,6 +2782,30 @@ def _exception_table_embed(analysis_id: str, result: Mapping[str, Any]) -> list[
 
 
 
+def _summary_embed(analysis_id: str, result: Mapping[str, Any]) -> list[str]:
+    """The embed a profile part places under its prose: a chart or the summary."""
+    kind = "chart" if str(result.get("test") or "") in _CHART_TESTS else "summary_table"
+    caption = str(result.get("verdict_text") or result.get("title") or "").strip()
+    block = [f"```{EMBED_FENCE}", f"analysis: {analysis_id}", f"as: {kind}"]
+    if caption:
+        block.append(f"caption: {caption}")
+    block.append("```")
+    return block
+
+
+def _profile_parts(value: object) -> list[tuple[str, Mapping[str, Any]]]:
+    """The profile parts in section order, one per section, unknown ones dropped."""
+    by_section: dict[str, Mapping[str, Any]] = {}
+    for raw in value if isinstance(value, (list, tuple)) else []:
+        part = _memo_part(raw)
+        if part is None:
+            continue
+        section = str(part.get("section") or "").strip()
+        if section in PROFILE_SECTIONS and section not in by_section:
+            by_section[section] = part
+    return [(section, by_section[section]) for section in PROFILE_SECTIONS if section in by_section]
+
+
 def _summary_submission_tool(request: WorkerRequest) -> dict[str, Any]:
     """One forced tool whose schema binds every procedure reference in the memo.
 
@@ -2789,6 +2871,24 @@ def _summary_submission_tool(request: WorkerRequest) -> dict[str, Any]:
                         "required": ["prose"],
                         "additionalProperties": False,
                     },
+                    "profile": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "section": {"type": "string", "enum": list(PROFILE_SECTIONS)},
+                                "prose": {"type": "string", "minLength": 1},
+                                "procedures": procedure_list,
+                            },
+                            "required": ["section", "prose", "procedures"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "implications": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "minLength": 1},
+                    },
                     # A set of items, and now shaped as one. Asked for a string,
                     # the writer returned 460 words of paragraphs enumerating
                     # work the reader then had to separate out again; an array
@@ -2804,6 +2904,7 @@ def _summary_submission_tool(request: WorkerRequest) -> dict[str, Any]:
                     "data_received",
                     "findings",
                     "reliance",
+                    "implications",
                     "further_work",
                 ],
                 "additionalProperties": False,
@@ -3020,6 +3121,20 @@ def _render_summary_markdown(
     if population:
         out += [*population, ""]
 
+    # The population profile, in the fixed section order, each part followed by
+    # the summaries it rests on. A section the writer left out is not drawn.
+    placed: list[str] = []
+    for section, part in _profile_parts(payload.get("profile")):
+        out += [f"## {section}", ""]
+        out += [_rendered_prose(str(part.get("prose") or ""), index), ""]
+        for number in _cited_numbers(part):
+            analysis_id = index.get(int(number))
+            if analysis_id is None or analysis_id in placed:
+                continue
+            result = results_by_id.get(analysis_id) or {}
+            placed.append(analysis_id)
+            out += [*_summary_embed(analysis_id, result), ""]
+
     out += [f"## {FINDINGS_SECTION}", ""]
     # Numbered by the assembler, from the order the writer chose. The order is
     # already the argument — the prompt asks for the issues ranked by how much
@@ -3051,6 +3166,14 @@ def _render_summary_markdown(
     coverage = _coverage_table(request)
     if coverage:
         out += [*coverage, ""]
+
+    implications = _memo_items(payload.get("implications"))
+    if implications:
+        out += [f"## {IMPLICATIONS_SECTION}", ""]
+        for position, item in enumerate(implications, start=1):
+            text = re.sub(r"\s+", " ", _rendered_prose(item, index))
+            out += [f"{position}. {text}"]
+        out += [""]
 
     out += [f"## {SUMMARY_SECTIONS[3]}", ""]
     for position, item in enumerate(_memo_items(payload.get("further_work")), start=1):
@@ -3089,7 +3212,14 @@ def _prose_fields(payload: Mapping[str, Any]) -> list[tuple[str, str, bool]]:
             "\n\n".join(_memo_items(payload.get("further_work"))),
             False,
         ),
+        (
+            f"'{IMPLICATIONS_SECTION}'",
+            "\n\n".join(_memo_items(payload.get("implications"))),
+            False,
+        ),
     ]
+    for section, part in _profile_parts(payload.get("profile")):
+        fields.append((f"'{section}'", str(part.get("prose") or ""), False))
     for position, finding in enumerate(payload.get("findings") or [], start=1):
         fields.append(
             (f"finding {position}'s title", str(finding.get("title") or ""), False)
@@ -3183,6 +3313,30 @@ def validate_analysis_summary(
             )
     in_reliance = {number for number in reliance_numbers if number in index}
 
+    sections_seen: list[str] = []
+    for raw in proposal.get("profile") or []:
+        part = _memo_part(raw) or {}
+        section = str(part.get("section") or "").strip()
+        if section not in PROFILE_SECTIONS:
+            reject(f"profile section '{section}' is not one of: {', '.join(PROFILE_SECTIONS)}")
+            continue
+        if section in sections_seen:
+            reject(f"profile section '{section}' is written twice; write each once")
+        sections_seen.append(section)
+        for number in _cited_numbers(part):
+            if number not in index:
+                reject(
+                    f"'{section}' references [#{number}], which is not one of the "
+                    f"supplied procedures (1 to {len(index)})",
+                    integrity=True,
+                )
+            elif index[number] in uninformative:
+                reject(
+                    f"'{section}' rests on [#{number}] ({index[number]}), which "
+                    f"{uninformative[index[number]]}; it describes nothing",
+                    integrity=True,
+                )
+
     # The two sections the memo must keep apart. Findings belong above,
     # reliance limits below, and a procedure argued in both is the restatement
     # the older skeleton produced by construction.
@@ -3234,6 +3388,11 @@ def validate_analysis_summary(
             for number in _cited_numbers(finding)
         ),
         *_cited_numbers(reliance),
+        *(
+            number
+            for _section, part in _profile_parts(proposal.get("profile"))
+            for number in _cited_numbers(part)
+        ),
     ]:
         analysis_id = index.get(int(number))
         if analysis_id is not None and analysis_id not in cited:
@@ -3358,11 +3517,24 @@ def _summary_response_schema(response: str) -> Mapping[str, Any]:
     for field in ("lead", "data_received"):
         if not str(payload.get(field) or "").strip():
             raise WorkerResponseValidationError(f"`{field}` must carry prose")
+    profile = payload.get("profile")
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except ValueError:
+            profile = None
     return {
         "lead": payload.get("lead"),
         "data_received": payload.get("data_received"),
         "findings": findings,
         "reliance": reliance,
+        # Both optional to the parser: the profile because a population may
+        # support none of its sections, the implications because a memo that
+        # omits them is still a memo — the tool asks for them, and the
+        # assembler draws the heading only over what was written.
+        "profile": [part for part in (_memo_part(p) for p in (profile or [])) if part is not None]
+        if isinstance(profile, (list, tuple)) else [],
+        "implications": _memo_items(payload.get("implications")),
         "further_work": further_work,
     }
 
@@ -3409,7 +3581,8 @@ def run_analysis_summary_worker(
                     "while preserving all otherwise-valid wording and evidence: "
                     + "; ".join(attempt.validation_errors)
                     + f". Call {SUMMARY_SUBMISSION_TOOL} once with the complete "
-                    "corrected summary."
+                    "corrected summary, every part included — `profile` and "
+                    "`implications` as well, unchanged where no error names them."
                 ),
             },
         ]
@@ -3436,14 +3609,43 @@ def run_analysis_summary_worker(
         conversation=conversation,
         return_message=True,
     )
-    return _summary_submission_response(message)
+    response = _summary_submission_response(message)
+    if attempt.is_repair and attempt.previous_response:
+        response = _carry_unrepaired_parts(response, attempt.previous_response)
+    return response
+
+
+#: Parts a repair is never asked to change, and once dropped silently. Observed
+#: on procurement: asked to move one procedure out of the reliance section, the
+#: rewrite returned without the three profile sections the first draft had
+#: written, and the memo lost the population it described.
+_CARRIED_PARTS = ("profile", "implications")
+
+
+def _carry_unrepaired_parts(response: str, previous: str) -> str:
+    """Restore the optional parts a repair dropped, from the draft it repaired."""
+    try:
+        repaired = json.loads(response)
+        earlier = json.loads(previous)
+    except (TypeError, ValueError):
+        return response
+    if not isinstance(repaired, dict) or not isinstance(earlier, dict):
+        return response
+    carried = {
+        part: earlier[part]
+        for part in _CARRIED_PARTS
+        if not repaired.get(part) and earlier.get(part)
+    }
+    if not carried:
+        return response
+    return json.dumps({**repaired, **carried}, ensure_ascii=False)
 
 
 ANALYSIS_SUMMARY_RESPONSE_SCHEMA = WorkerResponseSchema(
     schema_id="analysis.summary.response",
     schema_hash=_sha256_text(
-        "analysis-summary-response:v4:structured-references:flattened-parts-read"
-        ":titled-findings:listed-further-work"
+        "analysis-summary-response:v5:structured-references:flattened-parts-read"
+        ":titled-findings:listed-further-work:profile-sections:implications"
     ),
     validator=_summary_response_schema,
 )

@@ -290,6 +290,14 @@ class ContextPrivacy(_JSONModel):
     # them. A summary that can say "1 invoice was backdated" but not which one
     # is not a summary an auditor can use.
     allow_analysis_exception_rows: bool = False
+    # The summary a procedure computed — a breakdown, a duration profile, a role
+    # matrix — bounded to a few dozen rows, with any group built from fewer rows
+    # than ``analysis_results.MIN_AGGREGATE_GROUP_ROWS`` keeping its label and
+    # count and losing its figures (``groups_withheld``). A result, not an input:
+    # what the memo needs to say "Facilities holds 45% of the value", which a
+    # verdict and three statistics cannot. Its own permission because it is
+    # wider than ``allow_analysis_results`` and narrower than any row door.
+    allow_analysis_aggregates: bool = False
     # The rows a *Data Test* flagged, for the one capability that must describe
     # them: drafting a finding. Deliberately separate from
     # ``allow_analysis_exception_rows`` — that admits the rows a saved
@@ -346,6 +354,7 @@ class ContextPrivacy(_JSONModel):
         "allow_small_table_rows",
         "allow_analysis_results",
         "allow_analysis_exception_rows",
+        "allow_analysis_aggregates",
         "allow_datatest_exception_rows",
         "allow_datatest_exception_keys",
         "allow_analysis_summary",

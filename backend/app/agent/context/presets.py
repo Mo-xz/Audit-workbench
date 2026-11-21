@@ -56,6 +56,7 @@ _REPRESENTATION_PRIVACY_FIELD = {
     "table_rows_small": "allow_small_table_rows",
     "analysis_result": "allow_analysis_results",
     "analysis_exception_rows": "allow_analysis_exception_rows",
+    "analysis_aggregate": "allow_analysis_aggregates",
     "datatest_exception_rows": "allow_datatest_exception_rows",
     "datatest_exception_keys": "allow_datatest_exception_keys",
     "analysis_summary": "allow_analysis_summary",
@@ -2095,6 +2096,17 @@ PRESETS.register(
                     budget=ContextBudget(max_items=40, max_characters=30_000),
                 ),
                 ContextSource(
+                    id="analysis_aggregates",
+                    source_type="analyses",
+                    required=False,
+                    selector=ContextSelector(selector_id="analyses.all"),
+                    # The summary each procedure computed, read back from its
+                    # evidence sidecar and stamped to its current result. The
+                    # population profile is most of it.
+                    representations=(ContextRepresentation("analysis_aggregate"),),
+                    budget=ContextBudget(max_items=60, max_characters=60_000),
+                ),
+                ContextSource(
                     id="coverage_gaps",
                     source_type="analyses",
                     required=False,
@@ -2162,7 +2174,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=251, max_characters=172_000),
+            budget=ContextBudget(max_items=311, max_characters=232_000),
             privacy=ContextPrivacy(
                 allow_auditor_instruction=True,
                 allow_planning_context=True,
@@ -2172,6 +2184,10 @@ PRESETS.register(
                 # The deliberate widening. Bounded by the per-source character
                 # budget above and by the row cap the adapter applies.
                 allow_analysis_exception_rows=True,
+                # What each procedure computed, bounded and with small groups
+                # withheld, so the memo can describe the population and not
+                # only list what failed.
+                allow_analysis_aggregates=True,
             ),
         ),
     )

@@ -84,6 +84,13 @@ def compute_payload(workspace: Workspace, item: dict) -> dict:
                     result, analysis_results.EXCEPTION_ROWS
                 )
                 payload["exception_rows"] = result.height
+            else:
+                # An informational result is an aggregate only when it is
+                # smaller than the population by the category bound: code that
+                # returns the frame it read is rows, whatever its policy says.
+                payload["aggregate"] = analysis_results.bounded_aggregate(
+                    result, population=payload["population"]
+                )
             payload["error"] = None
             return payload
 
@@ -113,6 +120,10 @@ def compute_payload(workspace: Workspace, item: dict) -> dict:
             payload["frame"] = explore.frame_payload(source, _cap_for(payload["viz"]))
         else:
             payload["frame"] = None
+        # What the test concluded, small enough to read: its summary frame and
+        # never its detail, which is rows.
+        if result.summary is not None:
+            payload["aggregate"] = analysis_results.bounded_aggregate(result.summary)
         # ``frame`` is what the test concluded — the aggregate a chart is
         # drawn from. ``detail`` is which rows it concluded it about, and
         # every exception-producing test computes one. Collapsing the two

@@ -61,6 +61,16 @@ value set is a domain rather than the rows restated — `MIN_CATEGORY_ROWS`,
 after free text written from a few templates was found to repeat often enough to
 pass the first two. See `docs/audit-workflow-graph.md`.
 
+A fifth is a procedure's *result* rather than its input, under its own
+`allow_analysis_aggregates`, granted to the EDA memo alone: the summary frame a
+saved analysis computed (a breakdown, a duration profile, a role matrix),
+capped at `MAX_AGGREGATE_ROWS`. A group built from fewer than
+`MIN_AGGREGATE_GROUP_ROWS` rows states those rows' figures, so it keeps its
+label and count and loses its figures, reported as `groups_withheld`; a result
+with no count column is an aggregate only when it is that much smaller than its
+population. It is stored in the result's evidence sidecar under the same
+`result_sha1`, so it goes stale exactly when the conclusion does.
+
 The choke points are the assistant context builders and the bounded agent
 context bundles. The machinery is named `ContextPrivacy` in code, which predates
 this framing. The one boundary here that *is* a security boundary is the
@@ -1000,8 +1010,11 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   `created_by` ownership flip, so regenerating always replaces it and it cannot
   drift from the results it cites. The worker/executor contract is the modern
   one for this shape.
-  Its structure is fixed in code (`workers.analysis.SUMMARY_SECTIONS`) and
-  enforced by the semantic validator, which also rejects any `embed` fence
+  Its structure is fixed in code (`workers.analysis.SUMMARY_SECTIONS`, the
+  required core, with `PROFILE_SECTIONS` — where the value is, how the process
+  runs, people and authority — drawn between the data received and the
+  findings only where the writer supplies them, and `IMPLICATIONS_SECTION`
+  before the further work) and enforced by the semantic validator, which also rejects any `embed` fence
   citing a procedure the bundle did not supply — a citation that resolves to
   nothing is worse than none. Staleness is content-hashed by
   `analysis_results.summary_basis_digest`, over each analysis' `result_sha1`,

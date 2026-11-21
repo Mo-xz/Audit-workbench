@@ -1276,6 +1276,16 @@ def grid_projection(
         "test_sha1": str(test.get("sha1") or ""),
         "definition_sha1": definition_sha1,
         "title": str(test.get("title") or ""),
+        "objective": str(test.get("objective") or ""),
+        "requirement_refs": list(test.get("requirement_refs") or []),
+        "roles": [
+            {
+                "name": str(role.get("name") or role.get("role") or ""),
+                "document_type": str(role.get("document_type") or ""),
+            }
+            for role in (ruleset.get("roles") or [])
+            if isinstance(role, Mapping)
+        ],
         # The two test-level records the grid stands in for. The grid is the
         # whole view of a cycle test — it deliberately never fetches the test
         # itself, which is what keeps a large population cheap to open — so

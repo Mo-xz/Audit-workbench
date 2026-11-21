@@ -1096,6 +1096,10 @@ export interface CycleVouchGridPayload {
   test_sha1: string
   definition_sha1: string
   title: string
+  objective?: string
+  requirement_refs?: string[]
+  /** Chronological roles from the approved cycle ruleset (optional for older payloads). */
+  roles?: Array<{ name: string; document_type: string }>
   /** The two test-level records the grid stands in for. They travel with the
    *  projection because the grid never fetches the test itself. */
   control_conclusion: ControlConclusion
@@ -1176,6 +1180,7 @@ export interface DocTest extends TestPlan, TestOutcome {
   state_counts?: Record<string, number>
   rollup?: DocTestRollup
   evidence_requests?: EvidenceRequest[]
+  created_by?: 'agent' | 'user' | string | null
   created: string
   updated: string
   sha1: string

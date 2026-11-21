@@ -13,6 +13,7 @@ import type {
 } from '../../types'
 import { CONTROL_CONCLUSIONS, useConclusionDraft } from './conclusionDraft'
 import type { ConclusionChanges } from './conclusionDraft'
+import DocTestStoryStrip from './DocTestStoryStrip.vue'
 import UiEmptyState from '../ui/UiEmptyState.vue'
 import UiTestStatus from '../ui/UiTestStatus.vue'
 import {
@@ -21,6 +22,7 @@ import {
   filterCycleGridRows,
   type CycleGridFilters,
 } from './cycleGridState'
+import { buildStageSpans, planCycleColumns } from './cycleColumnOrg'
 
 const props = defineProps<{
   workspaceId: string
@@ -69,8 +71,132 @@ const loadError = ref<string | null>(null)
 const offset = ref(0)
 const limit = ref(100)
 const filters = reactive<CycleGridFilters>({ ...EMPTY_CYCLE_GRID_FILTERS })
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => [
+  filters.evaluation,
+  filters.disposition,
+  filters.missingRole,
+  filters.assertionKey,
+  filters.assertionVerdict,
+].filter(Boolean).length)
 const selectedCell = ref<{ itemId: string; assertionKey: string } | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
+const columnMode = ref<'relevant' | 'flagged' | 'all' | 'stage'>('all')
+const selectedStageId = ref<string | null>(null)
+const initializedScopeFor = ref<string | null>(null)
+
+const columnPlan = computed(() => (payload.value ? planCycleColumns(payload.value) : null))
+const hasFocusedSubset = computed(() => {
+  const plan = columnPlan.value
+  return Boolean(plan && plan.relevantKeys.length >= 1 && plan.relevantKeys.length < plan.orderedColumns.length)
+})
+const showOrganizer = computed(() => Boolean(columnPlan.value && columnPlan.value.orderedColumns.length > 1))
+const visibleColumns = computed(() => {
+  const plan = columnPlan.value
+  if (!plan) return []
+  let cols = plan.orderedColumns
+  if (columnMode.value === 'relevant' && hasFocusedSubset.value) {
+    const keep = new Set(plan.relevantKeys)
+    cols = plan.orderedColumns.filter(c => keep.has(c.key))
+  } else if (columnMode.value === 'flagged' && plan.flaggedKeys.length) {
+    const keep = new Set(plan.flaggedKeys)
+    cols = plan.orderedColumns.filter(c => keep.has(c.key))
+  } else if (columnMode.value === 'stage' && selectedStageId.value) {
+    const stage = plan.stages.find(s => s.id === selectedStageId.value)
+    if (stage) cols = stage.columns
+  }
+  // If an explicit assertion filter is active and not in the current slice, include it.
+  if (filters.assertionKey && !cols.some(c => c.key === filters.assertionKey)) {
+    const match = plan.orderedColumns.find(c => c.key === filters.assertionKey)
+    if (match) cols = [match, ...cols]
+  }
+  return cols
+})
+const stageSpans = computed(() => (
+  columnPlan.value ? buildStageSpans(visibleColumns.value, columnPlan.value) : []
+))
+const showStageSuperHeader = computed(() => showOrganizer.value && stageSpans.value.length > 1)
+
+function selectScope(mode: 'relevant' | 'flagged' | 'all') {
+  columnMode.value = mode
+  selectedStageId.value = null
+}
+function selectStage(stageId: string) {
+  if (columnMode.value === 'stage' && selectedStageId.value === stageId) {
+    columnMode.value = hasFocusedSubset.value ? 'relevant' : 'all'
+    selectedStageId.value = null
+    return
+  }
+  columnMode.value = 'stage'
+  selectedStageId.value = stageId
+}
+
+const CONCLUSION_LABELS: Record<string, string> = {
+  effective: 'Effective',
+  partially_effective: 'Partially effective',
+  ineffective: 'Ineffective',
+  not_applicable: 'Not applicable',
+}
+
+const cycleStory = computed(() => {
+  const p = payload.value
+  if (!p) return null
+  const stageLabels = columnPlan.value?.stages.map(s => s.label) ?? []
+  const roles = stageLabels.length
+    ? stageLabels
+    : Array.from(new Set(p.columns.flatMap(col => col.applicable_roles))).map(label)
+  const scopeLabel = roles.length ? roles.join(' → ') : (p.population.table || 'Transaction evidence')
+  const matched = p.assertion_counts.match ?? 0
+  const mismatched = p.assertion_counts.mismatch ?? 0
+  const review = (p.assertion_counts.cannot_determine ?? 0)
+    + (p.assertion_counts.missing_evidence ?? 0)
+    + (p.assertion_counts.invalid_extraction ?? 0)
+    + (p.assertion_counts.ambiguous ?? 0)
+  const total = p.assertion_counts.total ?? (matched + mismatched + review)
+  const notRun = p.assertion_counts.not_run ?? 0
+  const ran = total > 0 && notRun < total
+  const pending = undispositioned.value
+  const conclusion = p.control_conclusion && p.control_conclusion !== 'no_conclusion'
+    ? (CONCLUSION_LABELS[p.control_conclusion] ?? p.control_conclusion)
+    : null
+
+  let humanTitle = 'Awaiting voucher execution'
+  let humanDetail = 'Run the test to compare extracted fields across each transaction pack.'
+  let humanTone: 'ok' | 'warn' | 'bad' | 'neutral' = 'neutral'
+  let humanBadge = 'Human in the loop'
+
+  if (conclusion && pending === 0) {
+    humanTitle = `Signed off · ${conclusion}`
+    humanDetail = `All ${p.page.total} transaction${p.page.total === 1 ? '' : 's'} ruled and control concluded.`
+    humanTone = 'ok'
+    humanBadge = 'Auditor signed off'
+  } else if (ran && pending > 0) {
+    humanTitle = `${pending} of ${p.page.total} transaction${p.page.total === 1 ? '' : 's'} awaiting call`
+    humanDetail = 'Confirm or flag each transaction below, then record the control conclusion.'
+    humanTone = 'warn'
+    humanBadge = 'Human review'
+  } else if (ran) {
+    humanTitle = 'Ready for control conclusion'
+    humanDetail = 'All transactions are ruled — record the control conclusion in the footer below.'
+    humanTone = 'warn'
+    humanBadge = 'Sign-off needed'
+  }
+
+  return {
+    ruleTitle: `${p.columns.length} cross-document assertion${p.columns.length === 1 ? '' : 's'}`,
+    scopeLabel,
+    ran,
+    matched,
+    mismatched,
+    review,
+    total,
+    coverageMeta: `${p.page.total} transaction${p.page.total === 1 ? '' : 's'} vouched · ${p.tested_item_counts.failed ?? 0} failed`,
+    humanTitle,
+    humanDetail,
+    humanTone,
+    humanBadge,
+  }
+})
 
 const evaluationOptions: Array<{ value: '' | CycleEvaluationState; label: string }> = [
   { value: '', label: 'All evaluations' },
@@ -210,6 +336,16 @@ async function loadGrid() {
       `/api/workspaces/${props.workspaceId}/doc-tests/${props.testId}/grid?offset=${offset.value}&limit=${limit.value}`,
     )
     if (payload.value.page.offset !== offset.value) offset.value = payload.value.page.offset
+    if (initializedScopeFor.value !== props.testId) {
+      initializedScopeFor.value = props.testId
+      const plan = planCycleColumns(payload.value)
+      if (plan.relevantKeys.length >= 1 && plan.relevantKeys.length < plan.orderedColumns.length) {
+        columnMode.value = 'relevant'
+      } else {
+        columnMode.value = 'all'
+      }
+      selectedStageId.value = null
+    }
   } catch (error) {
     payload.value = null
     loadError.value = error instanceof Error ? error.message : String(error)
@@ -282,51 +418,156 @@ defineExpose({ filters, focusSelectedCell, loadGrid, offset, scrollContainer, se
       </div>
     </header>
 
-    <div v-if="payload" class="grid-summary" aria-label="Cycle grid summary">
-      <span><strong>{{ payload.page.total }}</strong> selected items</span>
-      <span><strong>{{ payload.columns.length }}</strong> assertions</span>
-      <span><strong>{{ payload.tested_item_counts.failed ?? 0 }}</strong> failed items</span>
-      <span><strong>{{ payload.assertion_counts.mismatch ?? 0 }}</strong> mismatched cells</span>
-    </div>
+    <DocTestStoryStrip
+      v-if="cycleStory"
+      :ai-authored="true"
+      engine-label="3-way cycle vouch"
+      :rule-title="cycleStory.ruleTitle"
+      :scope-label="cycleStory.scopeLabel"
+      :ran="cycleStory.ran"
+      :passed-count="cycleStory.matched"
+      :failed-count="cycleStory.mismatched"
+      :review-count="cycleStory.review"
+      :total-count="cycleStory.total"
+      unit-label="checks"
+      evidence-badge="Page-cited extractions"
+      :coverage-meta="cycleStory.coverageMeta"
+      :human-title="cycleStory.humanTitle"
+      :human-detail="cycleStory.humanDetail"
+      :human-tone="cycleStory.humanTone"
+      :human-badge="cycleStory.humanBadge"
+    />
 
-    <div v-if="payload" class="grid-filters" aria-label="Grid filters">
-      <label class="search-filter">
-        <span>Search bounded grid fields</span>
-        <input v-model="filters.search" type="search" placeholder="Transaction, document, role, or display value" />
-      </label>
-      <label>
-        <span>Evaluation</span>
-        <select v-model="filters.evaluation">
-          <option v-for="option in evaluationOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label>
-        <span>Auditor disposition</span>
-        <select v-model="filters.disposition">
-          <option v-for="option in dispositionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label>
-        <span>Missing role</span>
-        <select v-model="filters.missingRole">
-          <option value="">Any role</option>
-          <option v-for="role in missingRoleOptions" :key="role" :value="role">{{ label(role) }}</option>
-        </select>
-      </label>
-      <label>
-        <span>Assertion</span>
-        <select v-model="filters.assertionKey">
-          <option value="">Any assertion</option>
-          <option v-for="column in payload.columns" :key="column.key" :value="column.key">{{ column.label }}</option>
-        </select>
-      </label>
-      <label>
-        <span>Assertion verdict</span>
-        <select v-model="filters.assertionVerdict" :disabled="!filters.assertionKey">
-          <option v-for="option in verdictOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <Button label="Clear filters" icon="aw-icon aw-icon-funnel-x" text size="small" @click="clearFilters" />
+    <section v-if="showOrganizer && columnPlan" class="cycle-organizer" aria-label="Organize cycle assertions">
+      <div class="scope-row" role="tablist" aria-label="Assertion scope">
+        <button
+          v-if="hasFocusedSubset"
+          type="button"
+          role="tab"
+          class="scope-pill"
+          :class="{ active: columnMode === 'relevant' }"
+          :aria-selected="columnMode === 'relevant'"
+          @click="selectScope('relevant')"
+        >
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          This test <span class="count aw-figure">{{ columnPlan.relevantKeys.length }}</span>
+        </button>
+        <button
+          v-if="columnPlan.flaggedKeys.length"
+          type="button"
+          role="tab"
+          class="scope-pill flagged"
+          :class="{ active: columnMode === 'flagged' }"
+          :aria-selected="columnMode === 'flagged'"
+          @click="selectScope('flagged')"
+        >
+          <i class="aw-icon aw-icon-triangle-alert" aria-hidden="true" />
+          Flagged <span class="count aw-figure">{{ columnPlan.flaggedKeys.length }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="scope-pill"
+          :class="{ active: columnMode === 'all' }"
+          :aria-selected="columnMode === 'all'"
+          @click="selectScope('all')"
+        >
+          All cycle checks <span class="count aw-figure">{{ columnPlan.orderedColumns.length }}</span>
+        </button>
+        <span class="scope-meta aw-figure">
+          Showing {{ visibleColumns.length }} of {{ columnPlan.orderedColumns.length }} assertions
+        </span>
+      </div>
+
+      <div v-if="columnPlan.stages.length > 1" class="stage-strip" role="list" aria-label="Cycle document stages">
+        <template v-for="(stage, idx) in columnPlan.stages" :key="stage.id">
+          <i v-if="idx > 0" class="stage-arrow aw-icon aw-icon-chevron-right" aria-hidden="true" />
+          <button
+            type="button"
+            role="listitem"
+            class="stage-chip"
+            :class="{ active: columnMode === 'stage' && selectedStageId === stage.id }"
+            :data-tone="stage.tone"
+            :aria-pressed="columnMode === 'stage' && selectedStageId === stage.id"
+            @click="selectStage(stage.id)"
+          >
+            <span class="stage-step">{{ stage.stepIndex }}</span>
+            <span class="stage-label">{{ stage.label }}</span>
+            <span class="stage-stats aw-figure">
+              {{ stage.columns.length }}
+              <template v-if="stage.mismatched > 0">
+                · <b class="bad">{{ stage.mismatched }} ✗</b>
+              </template>
+              <template v-else-if="stage.review > 0">
+                · <b class="warn">{{ stage.review }} ?</b>
+              </template>
+              <template v-else-if="stage.matched > 0">
+                · <b class="ok">✓</b>
+              </template>
+            </span>
+          </button>
+        </template>
+      </div>
+    </section>
+
+    <div v-if="payload" class="grid-toolbar" aria-label="Grid filters">
+      <div class="toolbar-primary">
+        <label class="search-filter">
+          <span class="sr-only">Search bounded grid fields</span>
+          <input v-model="filters.search" type="search" placeholder="Search transaction, document, role, or value…" />
+        </label>
+        <Button
+          :label="activeFilterCount ? `Filters (${activeFilterCount})` : 'Filters'"
+          icon="aw-icon aw-icon-sliders-horizontal"
+          size="small"
+          outlined
+          severity="secondary"
+          :aria-expanded="filtersOpen || activeFilterCount > 0"
+          @click="filtersOpen = !filtersOpen"
+        />
+        <Button
+          v-if="activeFilterCount || filters.search"
+          label="Clear filters"
+          icon="aw-icon aw-icon-funnel-x"
+          text
+          size="small"
+          @click="clearFilters"
+        />
+      </div>
+      <div v-if="filtersOpen || activeFilterCount > 0" class="grid-filters">
+        <label>
+          <span>Evaluation</span>
+          <select v-model="filters.evaluation">
+            <option v-for="option in evaluationOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Auditor disposition</span>
+          <select v-model="filters.disposition">
+            <option v-for="option in dispositionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Missing role</span>
+          <select v-model="filters.missingRole">
+            <option value="">Any role</option>
+            <option v-for="role in missingRoleOptions" :key="role" :value="role">{{ label(role) }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Assertion</span>
+          <select v-model="filters.assertionKey">
+            <option value="">Any assertion</option>
+            <option v-for="column in (columnPlan?.orderedColumns ?? payload.columns)" :key="column.key" :value="column.key">{{ column.label }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Assertion verdict</span>
+          <select v-model="filters.assertionVerdict" :disabled="!filters.assertionKey">
+            <option v-for="option in verdictOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <div v-if="payload" class="page-bar">
@@ -345,13 +586,28 @@ defineExpose({ filters, focusSelectedCell, loadGrid, offset, scrollContainer, se
       Dispositions are unavailable while the assistant is running or paused. Stop or finish the run to record them.
     </p>
     <div v-if="payload" ref="scrollContainer" class="grid-scroll" tabindex="0" aria-label="Scrollable Cycle vouch results">
-      <table>
+      <table :class="{ 'has-super-header': showStageSuperHeader }">
         <thead>
-          <tr>
+          <tr v-if="showStageSuperHeader" class="stage-super-row">
+            <th colspan="3" class="sticky super-spacer" scope="colgroup">Transaction &amp; disposition</th>
+            <th
+              v-for="span in stageSpans"
+              :key="`${span.stageId}-${span.stepIndex}`"
+              :colspan="span.span"
+              class="stage-group-head"
+              :data-tone="span.tone"
+              scope="colgroup"
+            >
+              <span class="stage-group-num">{{ span.stepIndex }}</span>
+              <span>{{ span.label }}</span>
+              <span class="stage-group-count aw-figure">({{ span.span }})</span>
+            </th>
+          </tr>
+          <tr class="col-head-row">
             <th class="sticky transaction-column" scope="col">Transaction</th>
             <th class="sticky evaluation-column" scope="col">Evaluation</th>
             <th class="sticky disposition-column" scope="col">Disposition</th>
-            <th v-for="column in payload.columns" :key="column.key" class="assertion-column" scope="col">
+            <th v-for="column in visibleColumns" :key="column.key" class="assertion-column" scope="col">
               <strong>{{ column.label }}</strong>
               <small>{{ column.requirement }}<template v-if="column.applicable_roles.length"> · {{ column.applicable_roles.map(label).join(', ') }}</template></small>
               <div class="column-counts" :aria-label="`${column.label} full-test verdict summary`">
@@ -417,7 +673,7 @@ defineExpose({ filters, focusSelectedCell, loadGrid, offset, scrollContainer, se
               </span>
             </td>
             <td
-              v-for="column in payload.columns"
+              v-for="column in visibleColumns"
               :key="column.key"
               class="assertion-cell"
               :data-assertion-key="column.key"
@@ -555,9 +811,103 @@ defineExpose({ filters, focusSelectedCell, loadGrid, offset, scrollContainer, se
 .grid-summary { flex-wrap: wrap; gap: .45rem; }
 .grid-summary span { padding: .35rem .6rem; border-radius: var(--aw-radius-pill); background: var(--aw-raised); color: var(--aw-muted); font-size: var(--aw-text-xs); }
 .grid-summary strong { color: var(--aw-ink); }
-.grid-filters { display: grid; grid-template-columns: minmax(14rem, 2fr) repeat(5, minmax(8rem, 1fr)) auto; gap: .55rem; align-items: end; }
+.cycle-organizer {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-canvas);
+}
+.scope-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.scope-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .28rem .65rem;
+  border: 1px solid var(--aw-border-strong);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel);
+  color: var(--aw-ink-soft);
+  font: inherit; font-size: var(--aw-text-xs); font-weight: 600;
+  cursor: pointer;
+}
+.scope-pill:hover:not(.active) { border-color: var(--aw-teal-line); color: var(--aw-ink-strong); }
+.scope-pill.active {
+  border-color: var(--aw-teal);
+  background: var(--aw-teal-soft);
+  color: var(--aw-teal-strong);
+}
+.scope-pill.flagged { border-color: var(--aw-danger-line); color: var(--aw-danger); }
+.scope-pill.flagged.active { background: var(--aw-danger-soft); border-color: var(--aw-danger); color: var(--aw-danger-ink); }
+.scope-pill .count {
+  padding: .02rem .35rem;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-raised);
+  color: inherit;
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.scope-meta { margin-left: auto; color: var(--aw-muted); font-size: var(--aw-text-xs); }
+
+.stage-strip { display: flex; align-items: center; gap: .3rem; overflow-x: auto; padding-bottom: .15rem; scrollbar-width: thin; }
+.stage-arrow { flex: none; color: var(--aw-border-strong); font-size: var(--aw-text-xs); }
+.stage-chip {
+  display: inline-flex; align-items: center; gap: .4rem; flex: none;
+  padding: .3rem .6rem;
+  border: 1px solid var(--aw-border);
+  border-left: 3px solid var(--aw-border-strong);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-panel);
+  color: var(--aw-ink);
+  font: inherit; font-size: var(--aw-text-xs); font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.stage-chip[data-tone='ok'] { border-left-color: var(--aw-ok); }
+.stage-chip[data-tone='warn'] { border-left-color: var(--aw-warn); }
+.stage-chip[data-tone='bad'] { border-left-color: var(--aw-danger); }
+.stage-chip:hover:not(.active) { background: var(--aw-raised); border-color: var(--aw-teal-line); }
+.stage-chip.active { border-color: var(--aw-teal); border-left-color: var(--aw-teal); background: var(--aw-teal-soft); color: var(--aw-teal-strong); }
+.stage-step {
+  display: grid; place-items: center;
+  width: 1.15rem; height: 1.15rem; border-radius: 50%;
+  background: var(--aw-raised); color: var(--aw-ink-soft);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.stage-chip.active .stage-step { background: var(--aw-teal); color: var(--aw-panel); }
+.stage-stats { color: var(--aw-muted); font-size: var(--aw-text-2xs); font-weight: 600; }
+.stage-stats .ok { color: var(--aw-ok); }
+.stage-stats .warn { color: var(--aw-warn-ink); }
+.stage-stats .bad { color: var(--aw-danger); }
+
+.stage-super-row th {
+  position: sticky; top: 0; z-index: 6;
+  height: 2.1rem; min-height: 2.1rem; padding: .28rem .6rem;
+  background: var(--aw-canvas);
+  border-bottom: 1px solid var(--aw-border-strong);
+  color: var(--aw-ink-strong);
+  font-size: var(--aw-text-xs); font-weight: 700;
+  vertical-align: middle; white-space: nowrap;
+}
+.stage-super-row .super-spacer { left: 0; z-index: 8; color: var(--aw-muted); background: var(--aw-raised); box-shadow: .35rem 0 .45rem -.45rem rgba(13, 35, 64, .45); }
+.stage-group-head[data-tone='ok'] { border-top: 2px solid var(--aw-ok); }
+.stage-group-head[data-tone='warn'] { border-top: 2px solid var(--aw-warn); }
+.stage-group-head[data-tone='bad'] { border-top: 2px solid var(--aw-danger); background: color-mix(in srgb, var(--aw-danger-soft) 50%, var(--aw-canvas)); }
+.stage-group-num {
+  display: inline-grid; place-items: center;
+  width: 1.1rem; height: 1.1rem; margin-right: .35rem;
+  border-radius: 50%; background: var(--aw-raised); color: var(--aw-ink-soft);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.stage-group-count { margin-left: .25rem; color: var(--aw-muted); font-weight: 500; }
+table.has-super-header thead tr.col-head-row th { top: 2.1rem; }
+
+.grid-toolbar { display: flex; flex-direction: column; gap: .5rem; }
+.toolbar-primary { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.search-filter { flex: 1 1 16rem; min-width: 0; }
+.search-filter input { width: 100%; min-width: 0; min-height: 2.1rem; padding: .3rem .6rem; border: 1px solid var(--aw-border-strong); border-radius: var(--aw-radius-control); background: var(--aw-panel); color: var(--aw-ink); font: inherit; font-size: var(--aw-text-sm); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.grid-filters { display: grid; grid-template-columns: repeat(5, minmax(8rem, 1fr)); gap: .55rem; align-items: end; padding: .6rem .75rem; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control); background: var(--aw-canvas); }
 .grid-filters label { display: grid; gap: .25rem; min-width: 0; color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 700; }
-.grid-filters input, .grid-filters select, .page-size select { width: 100%; min-width: 0; min-height: 2.25rem; padding: .35rem .5rem; border: 1px solid var(--aw-border-strong); border-radius: var(--aw-radius-control); background: var(--aw-panel); color: var(--aw-ink); font: inherit; }
+.grid-filters select, .page-size select { width: 100%; min-width: 0; min-height: 2.1rem; padding: .3rem .5rem; border: 1px solid var(--aw-border-strong); border-radius: var(--aw-radius-control); background: var(--aw-panel); color: var(--aw-ink); font: inherit; }
 .page-bar { justify-content: space-between; gap: .8rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 .page-bar > div { gap: .2rem; }
 .page-size { display: flex; align-items: center; gap: .35rem; }

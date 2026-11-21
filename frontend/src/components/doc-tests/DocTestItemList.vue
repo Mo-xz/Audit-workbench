@@ -82,13 +82,17 @@ function meta(entry: DocTestSummaryEntry) {
  * between "one voucher" and "every voucher" is the whole point of the shape.
  * Counts are accepted / exception / needs review, then assessed over resolved.
  */
+function humanizeType(value: string) {
+  return value.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 function population(entry: DocTestSummaryEntry) {
   if (entry.entry_type !== 'item' || !entry.population) return null
   const summary = entry.population
   const counts = summary.outcome_counts
   const sampled = summary.assurance_scope !== 'full_population'
   return {
-    type: summary.document_type,
+    type: humanizeType(summary.document_type),
     scope: sampled ? 'sampled' : 'full population',
     sampled,
     accepted: counts.accepted,
@@ -122,7 +126,15 @@ function population(entry: DocTestSummaryEntry) {
       >
       <span class="dot" :data-tone="TONES[item.classification] ?? 'neutral'" aria-hidden="true" />
       <button type="button" class="row-body" @click="$emit('select', item)">
-        <span class="title">{{ entryLabel(item) }}</span>
+        <span class="title-line">
+          <span class="title">{{ entryLabel(item) }}</span>
+          <span
+            class="kind-pill"
+            :data-kind="item.entry_type === 'cycle_test' ? 'cycle' : item.population ? 'population' : 'doc'"
+          >
+            {{ item.entry_type === 'cycle_test' ? '3-way vouch' : item.population ? 'Population' : 'Q&A' }}
+          </span>
+        </span>
         <span class="meta">
           {{ meta(item) }}<template v-if="item.conclusion_state === 'agent'"> · <span class="agent">agent-set</span></template>
         </span>
@@ -168,7 +180,19 @@ function population(entry: DocTestSummaryEntry) {
   text-align: left; cursor: pointer;
 }
 .row-body:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 2px; }
-.title { overflow: hidden; color: var(--aw-ink); font-size: var(--aw-text-base); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.title-line { display: flex; align-items: center; gap: .375rem; min-width: 0; }
+.title { flex: 1; min-width: 0; overflow: hidden; color: var(--aw-ink); font-size: var(--aw-text-base); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.kind-pill {
+  flex: none;
+  padding: .02rem .36rem;
+  border-radius: var(--aw-radius-pill);
+  font-size: var(--aw-text-2xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.kind-pill[data-kind='cycle'] { background: var(--aw-accent-soft); color: var(--aw-accent); border: 1px solid var(--aw-accent-line); }
+.kind-pill[data-kind='population'] { background: var(--aw-teal-soft); color: var(--aw-teal-strong); border: 1px solid var(--aw-teal-line); }
+.kind-pill[data-kind='doc'] { background: var(--aw-raised); color: var(--aw-ink-soft); border: 1px solid var(--aw-border); }
 .row.active .title { color: var(--aw-ink-strong); font-weight: 600; }
 .meta { overflow: hidden; color: var(--aw-muted); font-size: var(--aw-text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .meta .agent { color: var(--aw-accent); }

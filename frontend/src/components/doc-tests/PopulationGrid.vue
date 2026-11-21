@@ -13,6 +13,7 @@ import type {
 import UiEmptyState from '../ui/UiEmptyState.vue'
 import { CONTROL_CONCLUSIONS, useConclusionDraft } from './conclusionDraft'
 import type { ConclusionChanges } from './conclusionDraft'
+import DocTestStoryStrip from './DocTestStoryStrip.vue'
 import UiTestStatus from '../ui/UiTestStatus.vue'
 
 /**
@@ -134,6 +135,74 @@ const pageLabel = computed(() => {
   const first = page.offset + 1
   const last = Math.min(page.offset + page.limit, page.total)
   return `rows ${first}–${last} of ${page.total}`
+})
+
+const CONCLUSION_LABELS: Record<string, string> = {
+  effective: 'Effective',
+  partially_effective: 'Partially effective',
+  ineffective: 'Ineffective',
+  not_applicable: 'Not applicable',
+}
+
+function humanizeDocType(value: string): string {
+  return value.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const populationStory = computed(() => {
+  const p = payload.value
+  const s = summary.value
+  if (!p || !s) return null
+  const docLabel = humanizeDocType(p.document_type)
+  const fieldCount = p.field_columns.length
+  const scopeLabel = p.criteria.length
+    ? p.criteria.map(c => c.label).join(' · ')
+    : `${docLabel} · ${fieldCount} schema field${fieldCount === 1 ? '' : 's'}`
+  const counts = s.outcome_counts
+  const total = s.assessed > 0 ? s.assessed : s.resolved
+  const pending = undispositioned.value
+  const conclusion = props.test.control_conclusion && props.test.control_conclusion !== 'no_conclusion'
+    ? (CONCLUSION_LABELS[props.test.control_conclusion] ?? props.test.control_conclusion)
+    : null
+
+  let humanTitle = 'Awaiting assessment'
+  let humanDetail = 'Run this test so AI reads every resolved document record against the criteria.'
+  let humanTone: 'ok' | 'warn' | 'bad' | 'neutral' = 'neutral'
+  let humanBadge = 'Human in the loop'
+
+  if (conclusion && pending === 0) {
+    humanTitle = `Signed off · ${conclusion}`
+    humanDetail = 'All records reviewed and control conclusion saved by auditor.'
+    humanTone = 'ok'
+    humanBadge = 'Auditor signed off'
+  } else if (s.assessed > 0 && pending > 0) {
+    humanTitle = `${pending} of ${p.page.total} record${p.page.total === 1 ? '' : 's'} awaiting call`
+    humanDetail = acceptedUndispositioned.value.length
+      ? `Confirm ${acceptedUndispositioned.value.length} accepted record${acceptedUndispositioned.value.length === 1 ? '' : 's'} in one click, or inspect individual rows.`
+      : 'Click any row below to inspect its verbatim citation and record your call.'
+    humanTone = 'warn'
+    humanBadge = 'Human review'
+  } else if (s.assessed > 0) {
+    humanTitle = 'Ready for control conclusion'
+    humanDetail = 'All records are ruled — select and save the control conclusion in the footer.'
+    humanTone = 'warn'
+    humanBadge = 'Sign-off needed'
+  }
+
+  return {
+    aiAuthored: props.test.created_by === 'agent',
+    ruleTitle: `${docLabel} · ${fieldCount} field${fieldCount === 1 ? '' : 's'} checked`,
+    scopeLabel,
+    ran: s.assessed > 0,
+    passed: counts.accepted,
+    failed: counts.exception,
+    review: counts.needs_manual_check,
+    total,
+    coverageMeta: `${s.assessed} of ${s.resolved} records assessed across ${s.resolved_documents} document${s.resolved_documents === 1 ? '' : 's'}`,
+    humanTitle,
+    humanDetail,
+    humanTone,
+    humanBadge,
+  }
 })
 
 /** The coverage strip: what the numbers below it rest on. */
@@ -281,7 +350,12 @@ defineExpose({ loadGrid })
     <template v-if="payload">
       <header class="grid-head">
         <div>
-          <p class="eyebrow">Population · {{ payload.document_type }}</p>
+          <p class="eyebrow">
+            <span v-if="test.created_by === 'agent'" class="ai-badge">
+              <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI authored
+            </span>
+            <span>Population · {{ humanizeDocType(payload.document_type) }}</span>
+          </p>
           <h3>{{ payload.label || payload.item_id }}</h3>
           <p class="question">{{ payload.question }}</p>
           <p v-if="payload.criteria.length" class="criteria">
@@ -324,6 +398,26 @@ defineExpose({ loadGrid })
           />
         </div>
       </header>
+
+      <DocTestStoryStrip
+        v-if="populationStory"
+        :ai-authored="populationStory.aiAuthored"
+        engine-label="Document Q&A"
+        :rule-title="populationStory.ruleTitle"
+        :scope-label="populationStory.scopeLabel"
+        :ran="populationStory.ran"
+        :passed-count="populationStory.passed"
+        :failed-count="populationStory.failed"
+        :review-count="populationStory.review"
+        :total-count="populationStory.total"
+        unit-label="records"
+        evidence-badge="Schema-extracted & cited"
+        :coverage-meta="populationStory.coverageMeta"
+        :human-title="populationStory.humanTitle"
+        :human-detail="populationStory.humanDetail"
+        :human-tone="populationStory.humanTone"
+        :human-badge="populationStory.humanBadge"
+      />
 
       <!-- What the numbers rest on. A partial run must never read as full
            coverage, so the strip states the shortfall before the table. -->
@@ -602,7 +696,16 @@ defineExpose({ loadGrid })
 .grid-actions { display: flex; align-items: center; gap: .4rem; }
 .rcm-link { flex: 0 0 auto; border-color: var(--aw-teal-line); color: var(--aw-teal); white-space: nowrap; }
 .unlinked { color: var(--aw-warn-ink); font-size: var(--aw-text-sm); white-space: nowrap; }
-.eyebrow { margin: 0; color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 600; }
+.eyebrow { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin: 0; color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 600; }
+.ai-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .05rem .45rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
 .question { margin: .3rem 0 0; color: var(--aw-ink); font-size: var(--aw-text-sm); }
 .criteria { margin: .3rem 0 0; color: var(--aw-muted); font-size: var(--aw-text-xs); }
 .criteria-ref { margin-left: .35rem; padding: .1rem .4rem; border-radius: var(--aw-radius-pill); background: var(--aw-raised); }

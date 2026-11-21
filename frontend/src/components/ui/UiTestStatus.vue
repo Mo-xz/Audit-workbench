@@ -62,14 +62,16 @@ const info = computed(() => meta[props.status] ?? {
   >
     <i class="aw-icon" :class="info.icon" />{{ info.label }}
   </span>
-  <i
+  <span
     v-else
-    class="status-icon aw-icon"
-    :class="[info.icon, `tone-${info.tone}`]"
+    class="status-icon"
+    :class="`tone-${info.tone}`"
     v-tooltip.left="info.label"
     :aria-label="info.label"
     role="img"
-  />
+  >
+    <i class="aw-icon" :class="info.icon" aria-hidden="true" />
+  </span>
 </template>
 
 <style scoped>

@@ -182,6 +182,20 @@ const linkedFindings = computed<AuditFinding[]>(() => {
 })
 const assistantUnavailable = computed(() => agent.isActive.value || assistantChat.state.busy)
 const hasTests = computed(() => Boolean(summary.value?.test_counts.total))
+const docTestAiSummary = computed(() => {
+  const s = summary.value
+  if (!s?.test_counts.total) return null
+  const cycleCount = s.test_counts.cycle_vouch ?? 0
+  const itemFirstCount = s.test_counts.total - cycleCount
+  const assertionsChecked = (s.assertion_counts.match ?? 0) + (s.assertion_counts.mismatch ?? 0)
+  const parts = [plural(s.test_counts.total, 'test')]
+  const split: string[] = []
+  if (cycleCount) split.push(`${cycleCount} Cycle Vouch`)
+  if (itemFirstCount) split.push(`${itemFirstCount} Document Q&A`)
+  if (split.length) parts.push(split.join(' + '))
+  if (assertionsChecked > 0) parts.push(`${assertionsChecked.toLocaleString()} cross-doc checks`)
+  return parts.join(' · ')
+})
 const allTestIds = computed(() => {
   const ids = new Set<string>()
   for (const entry of summary.value?.entries ?? []) ids.add(entry.test_id)
@@ -869,7 +883,13 @@ function onRulesetApproved(): void {
          and a delete icon this row used to carry are a split button, a
          secondary and a kebab. -->
     <header class="page-head">
-      <h1>Document tests</h1>
+      <div class="head-copy">
+        <h1>Document tests</h1>
+        <span v-if="docTestAiSummary" class="ai-corpus-pill">
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          {{ docTestAiSummary }}
+        </span>
+      </div>
       <span class="grow" />
       <Button label="New test" icon="aw-icon aw-icon-plus" size="small" outlined severity="secondary" @click="openCreate" />
       <SplitButton
@@ -1140,6 +1160,16 @@ function onRulesetApproved(): void {
 .doc-tests { display: flex; flex-direction: column; gap: .75rem; min-width: 0; min-height: 0; height: 100%; }
 
 .grow { flex: 1; }
+.head-copy { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; min-width: 0; }
+.ai-corpus-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .15rem .6rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-xs); font-weight: 600; white-space: nowrap;
+}
 
 .layout { display: grid; grid-template-columns: 18.75rem minmax(0, 1fr); gap: .875rem; flex: 1; min-height: 12rem; }
 

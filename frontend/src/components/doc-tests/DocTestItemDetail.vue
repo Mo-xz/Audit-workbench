@@ -338,6 +338,9 @@ onMounted(() => { void focusAssertion() })
     <header class="detail-head">
       <div class="head-copy">
         <p class="eyebrow">
+          <span v-if="test.created_by === 'agent'" class="ai-badge">
+            <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI authored
+          </span>
           {{ kindLabel[test.kind ?? ''] ?? 'Document work' }} · <span class="item-id">{{ item.id }}</span>
         </p>
         <h2>{{ item.label || test.title || item.id }}</h2>
@@ -832,7 +835,16 @@ onMounted(() => { void focusAssertion() })
 .detail > * { flex: none; }
 .detail-head { display: flex; align-items: flex-start; gap: 1rem; min-width: 0; }
 .head-copy { display: flex; flex-direction: column; gap: .25rem; flex: 1; min-width: 0; }
-.eyebrow { margin: 0; }
+.eyebrow { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin: 0; }
+.ai-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .05rem .45rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-2xs); font-weight: 700; letter-spacing: 0; text-transform: none;
+}
 .item-id { font-family: var(--aw-font-mono); letter-spacing: 0; }
 .detail-head h2 { margin: 0; color: var(--aw-ink-strong); font-size: var(--aw-text-lg); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
 .context { margin: 0; color: var(--aw-ink-soft); font-size: var(--aw-text-base); }

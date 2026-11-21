@@ -82,11 +82,12 @@ DEPENDENCIES: dict[str, tuple[str, ...]] = {
         "data.join_utility_ready"
     ),
     "data.joins_ready": analysis_workflow.dependencies("data.joins_ready"),
+    "analysis.profiled": analysis_workflow.dependencies("analysis.profiled"),
     "analysis.register_ready": ("data.joins_ready",),
     "analysis.definitions_ready": analysis_workflow.dependencies(
         "analysis.definitions_ready"
     ),
-    "analysis.executed": ("analysis.definitions_ready",),
+    "analysis.executed": ("analysis.definitions_ready", "analysis.profiled"),
     "analysis.summarized": analysis_workflow.dependencies("analysis.summarized"),
     "planning.context_ready": ("sources.imported", "documents.analysis_generated"),
     "planning.apm_ready": ("planning.context_ready",),
@@ -257,6 +258,7 @@ BASIS_PRODUCERS: dict[str, tuple[str, ...]] = {
     "documents": documents_workflow.AUDIT_CAPABILITY_IDS,
     "joins": ("data.joins_ready",),
     "analyses": (
+        "analysis.profiled",
         "analysis.register_ready",
         "analysis.definitions_ready",
         "analysis.executed",

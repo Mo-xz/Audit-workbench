@@ -170,10 +170,13 @@ that are scored as raised or not raised. Values overlap across items (the
 ### Scoring the analyses automatically
 
 `backend/tests/eda_answer_key.py` scores a workspace's saved analyses against
-P-01 to P-14. It matches the computation rather than the title, treats a
-comparison the same in either direction, and does not count a result that
-flags its whole population. P-11 is reported as unscoreable, because no
-library test derives a unit price. Run it on one or more workspace folders:
+P-01 to P-14. It matches the records each item names in the table above
+against the rows an analysis actually flagged, whatever test or code flagged
+them, and counts an item only when every one of its records is flagged on the
+right population (requisition items on requisition rows, P-11 on PO rows). It
+reports a result that flags some of the records as partial, one that buries
+them among many other rows as broad, and one that flags its whole population
+as saturated; none of those count. Run it on one or more workspace folders:
 
 ```powershell
 .venv\Scripts\python.exe backend\tests\eda_answer_key.py Workspaces\Users\local\Workspaces\procurement

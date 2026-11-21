@@ -124,8 +124,11 @@ when every returned row is a potential exception; otherwise use
 aggregates, and relationship evidence, and must not repeat an analysis already
 supplied in current_analyses. Those cover the target frame's whole join family,
 so a check on columns that all come from one table is already covered wherever
-it is saved: on a joined frame, propose analyses that use columns from more than
-one of the joined tables, since that is what the join makes possible. You are
+it is saved. On a joined frame, propose analyses the join makes possible: a
+comparison of columns from more than one of the joined tables, or a check on a
+joined-in table's column asked once per row of the table the frame is built on
+(a vendor's status read per invoice). A check reading only that base table's
+own columns belongs on the base table. You are
 never shown table rows and must not invent values, counts, or relationships.
 
 VALUE DOMAINS lists the complete set of values each low-cardinality column
@@ -1394,10 +1397,17 @@ def validate_analysis_proposal(
     errors: list[str] = []
     duplicates: list[str] = []
     single_sided: list[str] = []
-    # A frame built from more than one table exists to relate them. An analytics
-    # spec there that reads only one of those tables computes what that table
-    # alone computes, so it belongs on the table, not here — and it is exactly
-    # the shape that filled a joined frame's slots with its sides' work.
+    # A frame built from more than one table exists to relate them. A spec there
+    # that reads only the frame's own root computes what the root alone
+    # computes, so it belongs on the root table, not here — and it is exactly
+    # the shape that filled a joined frame's slots with its root's work.
+    #
+    # A spec that reads only a joined-in side is not the same thing. Its rows
+    # are still the root's rows, so it asks its question once per root row: a
+    # vendor status read on an invoice frame flags invoices raised against an
+    # inactive vendor, which no check on the vendor master can say. Judging by
+    # where the columns came from dropped exactly that check on procurement —
+    # the spec was right, and the population was the finding.
     joined_frame = len(set(origins.values())) > 1
     budget = proposal_budget(_target_rows(schema), _measured_findings(request))
     if len(proposed) > budget:
@@ -1473,7 +1483,7 @@ def validate_analysis_proposal(
                 lookup = str((spec.get("params") or {}).get("lookup_table") or "")
                 if lookup:
                     scope = scope | {lookup}
-                single = len(scope) < 2
+                single = not (scope - {root})
             else:
                 # Code is read for the column names it quotes, which no
                 # procedure is obliged to quote — a frame-wide preview names
@@ -1482,7 +1492,7 @@ def validate_analysis_proposal(
                 # one-sidedness; only code that does name columns, all from one
                 # side, has shown itself to belong on that side.
                 scope = python_spec_scope(spec, origins)
-                single = bool(scope) and len(scope) < 2
+                single = bool(scope) and not (scope - {root})
             if single:
                 # Dropped, not rejected, for the same reason a repeat is: the
                 # rest of the response is still good work.
@@ -1528,13 +1538,15 @@ def validate_analysis_proposal(
                 )
             if single_sided:
                 reasons.append(
-                    "reads columns from only one of the tables this frame joins"
+                    f"reads only columns of {root}, which this frame is built on, "
+                    "and belongs on that table"
                 )
             raise WorkerResponseValidationError(
                 f"{NOTHING_NEW_TO_ANALYSE}: every proposed analysis "
                 + ", or ".join(reasons)
-                + ". Propose an analysis that uses columns from more than one of "
-                "the joined tables."
+                + f". Propose an analysis that reads a table joined to {root}: "
+                "either a comparison across the join, or a check on a joined "
+                f"table's columns asked once per {root} row."
             )
         # Nothing was proposed at all. That is now a permitted answer — the
         # budget is a ceiling, and a frame whose tables have nothing meaningful
@@ -1570,7 +1582,7 @@ def _declined(duplicates: list[str], single_sided: list[str]) -> list[str]:
             for item in duplicates
         ),
         *(
-            f"{item} reads columns from only one of the tables this frame joins"
+            f"{item} reads only the columns of the table this frame is built on"
             for item in single_sided
         ),
     ]

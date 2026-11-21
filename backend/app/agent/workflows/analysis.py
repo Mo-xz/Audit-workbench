@@ -41,8 +41,8 @@ from ..workflow import canonical_sha1
 # Authoritative workflow identity persisted on every analysis run.
 WORKFLOW_ID = "analysis_workflow_v1"
 
-# These tests remain available in the manual analytics library but are not
-# proposed or re-executed by the autonomous analysis workflow. All three are
+# These tests remain available in the manual analytics library but are never
+# proposed by a model turn; the profile's own are written by the profile sweep. All three are
 # `descriptive` in the registry's own classification: a stratification, a period
 # trend and a drawn sample have no exception concept at all, so an autonomous run
 # proposing one spends a definition turn and an execution to produce a chart that
@@ -62,7 +62,22 @@ WORKFLOW_ID = "analysis_workflow_v1"
 # this workflow's hash-identified definition, not a property of the registry.
 # ``test_the_workflow_proposes_no_descriptive_test`` holds the two in agreement.
 EXCLUDED_ANALYTICS_TEST_IDS = frozenset(
-    {"period_compare", "stratify", "sampling"}
+    {
+        "period_compare",
+        "stratify",
+        "sampling",
+        # The profile's descriptive tests. ``analysis.profiled`` writes them
+        # from the data map, deterministically, so a model turn proposing one
+        # would only restate what the profile already holds.
+        "breakdown",
+        "crosstab",
+        "value_bands",
+        "step_durations",
+        "calendar_profile",
+        "role_matrix",
+        "chain_reconciliation",
+        "authority_grid",
+    }
 )
 
 # The analysis dependency graph. Each capability ID maps to its direct
@@ -73,9 +88,13 @@ DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "data.relationships_inferred": (),
     "data.join_utility_ready": ("data.relationships_inferred",),
     "data.joins_ready": ("data.join_utility_ready",),
+    # The profile: what each table is and how the population looks, computed
+    # from the data map with no model turn. It needs nothing the register
+    # produces, and the register needs nothing from it yet.
+    "analysis.profiled": ("data.relationships_inferred",),
     "analysis.register_ready": ("data.relationships_inferred",),
     "analysis.definitions_ready": ("analysis.register_ready",),
-    "analysis.inputs_ready": ("analysis.definitions_ready",),
+    "analysis.inputs_ready": ("analysis.definitions_ready", "analysis.profiled"),
     "analysis.executed": ("analysis.inputs_ready",),
     "analysis.summarized": ("analysis.executed",),
 }
@@ -94,6 +113,7 @@ BASIS_PRODUCERS: dict[str, tuple[str, ...]] = {
     "tables": (),
     "joins": ("data.joins_ready",),
     "analyses": (
+        "analysis.profiled",
         "analysis.register_ready",
         "analysis.definitions_ready",
         "analysis.inputs_ready",

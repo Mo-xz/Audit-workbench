@@ -42,6 +42,10 @@ from .model import (
 JOIN_EXECUTOR_ID = "analysis.join"
 DEFINITIONS_EXECUTOR_ID = "analysis.definitions"
 REGISTER_EXECUTOR_ID = "analysis.register"
+# The profile commits a set of definitions across frames exactly as the register
+# does — one transaction, identity by semantic id, auditor edits preserved — so
+# it is the same implementation under its own id and receipt.
+PROFILE_EXECUTOR_ID = "analysis.profile"
 EXECUTION_EXECUTOR_ID = "analysis.execution"
 SUMMARY_EXECUTOR_ID = "analysis.summary"
 PROMOTION_EXECUTOR_ID = "analysis.promotion"
@@ -1509,6 +1513,13 @@ SUMMARY_EXECUTOR = ExecutorDefinition(
 EXECUTORS.register(JOIN_EXECUTOR)
 EXECUTORS.register(DEFINITIONS_EXECUTOR)
 EXECUTORS.register(REGISTER_EXECUTOR)
+PROFILE_EXECUTOR = ExecutorDefinition(
+    executor_id=PROFILE_EXECUTOR_ID,
+    concurrency=ExecutorConcurrency("parent_hashes"),
+    implementation=execute_analysis_register,
+    reconciler=reconcile_analysis_register,
+)
+EXECUTORS.register(PROFILE_EXECUTOR)
 EXECUTORS.register(EXECUTION_EXECUTOR)
 EXECUTORS.register(SUMMARY_EXECUTOR)
 EXECUTORS.register(PROMOTION_EXECUTOR)

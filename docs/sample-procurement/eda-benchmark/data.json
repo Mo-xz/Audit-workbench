@@ -1,0 +1,2110 @@
+{
+ "population": {
+  "req_n": 55,
+  "req_v": 645372000,
+  "po_n": 52,
+  "po_v": 609982000,
+  "grn_n": 52,
+  "inv_n": 52,
+  "inv_v": 622535800,
+  "paid_n": 52,
+  "staff": 20,
+  "vendors": 12,
+  "matrix": 4,
+  "req_from": "2024-01-08",
+  "req_to": "2024-12-20",
+  "po_to": "2024-12-31",
+  "inv_to": "2025-01-21",
+  "pay_to": "2025-02-10",
+  "po_eq_est": 52,
+  "inv_eq_po": 49,
+  "same_verifier": 48
+ },
+ "monthly": [
+  {
+   "m": "2024-01",
+   "committed": 107276000,
+   "pos": 4,
+   "paid": 0,
+   "payments": 0
+  },
+  {
+   "m": "2024-02",
+   "committed": 97880000,
+   "pos": 7,
+   "paid": 1276000,
+   "payments": 2
+  },
+  {
+   "m": "2024-03",
+   "committed": 52435000,
+   "pos": 6,
+   "paid": 205680000,
+   "payments": 8
+  },
+  {
+   "m": "2024-04",
+   "committed": 7970000,
+   "pos": 5,
+   "paid": 60885000,
+   "payments": 7
+  },
+  {
+   "m": "2024-05",
+   "committed": 355000,
+   "pos": 2,
+   "paid": 9065000,
+   "payments": 6
+  },
+  {
+   "m": "2024-06",
+   "committed": 5250000,
+   "pos": 1,
+   "paid": 247800,
+   "payments": 1
+  },
+  {
+   "m": "2024-07",
+   "committed": 20895000,
+   "pos": 3,
+   "paid": 5250000,
+   "payments": 1
+  },
+  {
+   "m": "2024-08",
+   "committed": 27210000,
+   "pos": 3,
+   "paid": 20895000,
+   "payments": 3
+  },
+  {
+   "m": "2024-09",
+   "committed": 92170000,
+   "pos": 5,
+   "paid": 27210000,
+   "payments": 3
+  },
+  {
+   "m": "2024-10",
+   "committed": 109095000,
+   "pos": 6,
+   "paid": 166170000,
+   "payments": 6
+  },
+  {
+   "m": "2024-11",
+   "committed": 56506000,
+   "pos": 5,
+   "paid": 26665000,
+   "payments": 5
+  },
+  {
+   "m": "2024-12",
+   "committed": 32940000,
+   "pos": 5,
+   "paid": 35670000,
+   "payments": 4
+  },
+  {
+   "m": "2025-01",
+   "committed": 0,
+   "pos": 0,
+   "paid": 59666000,
+   "payments": 4
+  },
+  {
+   "m": "2025-02",
+   "committed": 0,
+   "pos": 0,
+   "paid": 3856000,
+   "payments": 2
+  }
+ ],
+ "bands": [
+  {
+   "band": "Up to 1M",
+   "n": 17,
+   "v": 6887000
+  },
+  {
+   "band": "1M to 5M",
+   "n": 14,
+   "v": 34085000
+  },
+  {
+   "band": "5M to 10M",
+   "n": 6,
+   "v": 45850000
+  },
+  {
+   "band": "10M to 50M",
+   "n": 14,
+   "v": 261550000
+  },
+  {
+   "band": "Over 50M",
+   "n": 4,
+   "v": 297000000
+  }
+ ],
+ "departments": [
+  {
+   "dept": "Facilities",
+   "n": 9,
+   "v": 291790000,
+   "requesters": [
+    "Tom Hayes"
+   ],
+   "max": 85000000
+  },
+  {
+   "dept": "Human Resources",
+   "n": 10,
+   "v": 110620000,
+   "requesters": [
+    "Hina Raza",
+    "Zara Sheikh"
+   ],
+   "max": 64000000
+  },
+  {
+   "dept": "Procurement",
+   "n": 19,
+   "v": 102430000,
+   "requesters": [
+    "Ethan Smith",
+    "Sana Malik"
+   ],
+   "max": 24800000
+  },
+  {
+   "dept": "Branch Operations",
+   "n": 3,
+   "v": 54650000,
+   "requesters": [
+    "Michael Chen"
+   ],
+   "max": 40800000
+  },
+  {
+   "dept": "Marketing",
+   "n": 4,
+   "v": 46416000,
+   "requesters": [
+    "Fatima Noor"
+   ],
+   "max": 17800000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "n": 5,
+   "v": 21481000,
+   "requesters": [
+    "James Okafor"
+   ],
+   "max": 11750000
+  },
+  {
+   "dept": "Information Technology",
+   "n": 4,
+   "v": 15985000,
+   "requesters": [
+    "Priya Nair"
+   ],
+   "max": 8900000
+  },
+  {
+   "dept": "Finance",
+   "n": 1,
+   "v": 2000000,
+   "requesters": [
+    "Ethan Smith"
+   ],
+   "max": 2000000
+  }
+ ],
+ "vendors": [
+  {
+   "id": "V1034",
+   "name": "Vertex IT Hardware",
+   "status": "Active",
+   "n": 7,
+   "v": 176086000,
+   "items": 7,
+   "invoices": [
+    "INV2024105",
+    "INV2024110",
+    "INV2024112",
+    "INV2024116",
+    "INV2024120",
+    "INV2024131",
+    "INV2024145"
+   ]
+  },
+  {
+   "id": "V1025",
+   "name": "Horizon Learning Partners",
+   "status": "Active",
+   "n": 6,
+   "v": 85263800,
+   "items": 6,
+   "invoices": [
+    "INV2024109",
+    "INV2024121",
+    "INV2024122",
+    "INV2024132",
+    "INV2024134",
+    "INV2024136"
+   ]
+  },
+  {
+   "id": "V1013",
+   "name": "BlueRiver Consulting",
+   "status": "Active",
+   "n": 7,
+   "v": 81655000,
+   "items": 5,
+   "invoices": [
+    "INV2024102",
+    "INV2024108",
+    "INV2024111",
+    "INV2024117",
+    "INV2024129",
+    "INV2024146",
+    "INV2024151"
+   ]
+  },
+  {
+   "id": "V1031",
+   "name": "Northgate Interiors",
+   "status": "Active",
+   "n": 8,
+   "v": 79480000,
+   "items": 6,
+   "invoices": [
+    "INV2024101",
+    "INV2024103",
+    "INV2024115",
+    "INV2024125",
+    "INV2024128",
+    "INV2024135",
+    "INV2024139",
+    "INV2024141"
+   ]
+  },
+  {
+   "id": "V1019",
+   "name": "SecureNet Advisory",
+   "status": "Active",
+   "n": 4,
+   "v": 70550000,
+   "items": 4,
+   "invoices": [
+    "INV2024142",
+    "INV2024147",
+    "INV2024149",
+    "INV2024154"
+   ]
+  },
+  {
+   "id": "V1004",
+   "name": "PrimeCore Systems",
+   "status": "Active",
+   "n": 4,
+   "v": 47526000,
+   "items": 2,
+   "invoices": [
+    "INV2024106",
+    "INV2024123",
+    "INV2024140",
+    "INV2024152"
+   ]
+  },
+  {
+   "id": "V1022",
+   "name": "OfficeSupply Co.",
+   "status": "Active",
+   "n": 5,
+   "v": 29595000,
+   "items": 5,
+   "invoices": [
+    "INV2024004",
+    "INV2024107",
+    "INV2024119",
+    "INV2024130",
+    "INV2024144"
+   ]
+  },
+  {
+   "id": "V1028",
+   "name": "Apex Marketing Group",
+   "status": "Active",
+   "n": 4,
+   "v": 21700000,
+   "items": 3,
+   "invoices": [
+    "INV2024104",
+    "INV2024127",
+    "INV2024137",
+    "INV2024148"
+   ]
+  },
+  {
+   "id": "V1007",
+   "name": "Metro Facilities Services",
+   "status": "Active",
+   "n": 3,
+   "v": 12840000,
+   "items": 3,
+   "invoices": [
+    "INV2024114",
+    "INV2024118",
+    "INV2024143"
+   ]
+  },
+  {
+   "id": "V1001",
+   "name": "TechSolutions Ltd",
+   "status": "Active",
+   "n": 2,
+   "v": 11640000,
+   "items": 2,
+   "invoices": [
+    "INV2024113",
+    "INV2024133"
+   ]
+  },
+  {
+   "id": "V1010",
+   "name": "RapidBuild Constructors",
+   "status": "Under Review",
+   "n": 1,
+   "v": 5250000,
+   "items": 1,
+   "invoices": [
+    "INV2024126"
+   ]
+  },
+  {
+   "id": "V1017",
+   "name": "Express Courier Services",
+   "status": "Inactive",
+   "n": 1,
+   "v": 950000,
+   "items": 1,
+   "invoices": [
+    "INV2024150"
+   ]
+  }
+ ],
+ "dept_item": [
+  {
+   "dept": "Branch Operations",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 4450000
+  },
+  {
+   "dept": "Branch Operations",
+   "item": "Security consulting engagement",
+   "n": 1,
+   "v": 40800000
+  },
+  {
+   "dept": "Branch Operations",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 9400000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Branch fit-out \u2014 Gulberg",
+   "n": 2,
+   "v": 148000000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Marketing campaign \u2014 digital",
+   "n": 1,
+   "v": 6250000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Network switches \u2014 data centre",
+   "n": 1,
+   "v": 4200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 3200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Security consulting engagement",
+   "n": 2,
+   "v": 95200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 2256000
+  },
+  {
+   "dept": "Finance",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 2000000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "ATM cash cassettes",
+   "n": 1,
+   "v": 950000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Compliance advisory retainer",
+   "n": 1,
+   "v": 2250000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Data centre UPS replacement",
+   "n": 3,
+   "v": 108800000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Laptop refresh \u2014 branch staff",
+   "n": 1,
+   "v": 2900000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Network switches \u2014 data centre",
+   "n": 2,
+   "v": 5497800
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Signage \u2014 new branches",
+   "n": 1,
+   "v": 520000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "ATM cash cassettes",
+   "n": 2,
+   "v": 285000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 8900000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "Security consulting engagement",
+   "n": 1,
+   "v": 6800000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Core banking licence renewal",
+   "n": 1,
+   "v": 12400000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Data centre UPS replacement",
+   "n": 1,
+   "v": 16000000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 17800000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Printer toner \u2014 bulk order",
+   "n": 1,
+   "v": 216000
+  },
+  {
+   "dept": "Procurement",
+   "item": "ATM cash cassettes",
+   "n": 2,
+   "v": 2470000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Compliance advisory retainer",
+   "n": 1,
+   "v": 750000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Core banking licence renewal",
+   "n": 5,
+   "v": 44640000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Laptop refresh \u2014 branch staff",
+   "n": 2,
+   "v": 580000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Marketing campaign \u2014 digital",
+   "n": 2,
+   "v": 13750000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Network switches \u2014 data centre",
+   "n": 1,
+   "v": 2520000
+  },
+  {
+   "dept": "Procurement",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 3000000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Signage \u2014 new branches",
+   "n": 3,
+   "v": 33800000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 470000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "ATM cash cassettes",
+   "n": 1,
+   "v": 285000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Branch fit-out \u2014 Gulberg",
+   "n": 1,
+   "v": 9250000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 160000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Printer toner \u2014 bulk order",
+   "n": 1,
+   "v": 36000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 11750000
+  }
+ ],
+ "items_order": [
+  "Branch fit-out \u2014 Gulberg",
+  "Security consulting engagement",
+  "Data centre UPS replacement",
+  "Core banking licence renewal",
+  "Signage \u2014 new branches",
+  "Office furniture \u2014 head office",
+  "Staff training programme",
+  "Marketing campaign \u2014 digital",
+  "Network switches \u2014 data centre",
+  "New Hire Onboarding Kits",
+  "ATM cash cassettes",
+  "Laptop refresh \u2014 branch staff",
+  "Compliance advisory retainer",
+  "Printer toner \u2014 bulk order"
+ ],
+ "unit_prices": [
+  {
+   "PO_NUMBER": "PO2024004",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 2000000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024101",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 1250000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024102",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 1860000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024103",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 12500000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024104",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 9250000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024105",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 2900000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024106",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 32000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024107",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 8900000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024108",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 95000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024109",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 160000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024110",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 85000000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024111",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 2375000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024112",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 4200000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024113",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1001",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 10400000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024114",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 190000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024115",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 435000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024116",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 15500000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024117",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 285000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024118",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 10400000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024119",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 11750000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024120",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 4450000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024121",
+   "ITEM_DESCRIPTION": "Printer toner \u2014 bulk order",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 216000,
+   "unit": 18000.0
+  },
+  {
+   "PO_NUMBER": "PO2024122",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 210000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024123",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 1600000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024125",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 10200000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024126",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1010",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 5250000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024127",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 3000000,
+   "unit": 3000000.0
+  },
+  {
+   "PO_NUMBER": "PO2024128",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 95000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024129",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 74000000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024130",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 6800000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024131",
+   "ITEM_DESCRIPTION": "Printer toner \u2014 bulk order",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 36000,
+   "unit": 18000.0
+  },
+  {
+   "PO_NUMBER": "PO2024132",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 9400000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024133",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1001",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 1240000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024134",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 74000000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024135",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 17800000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024136",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 1240000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024137",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 3200000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024139",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 12400000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024140",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 940000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024141",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 24800000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024142",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 16000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024143",
+   "ITEM_DESCRIPTION": "Compliance advisory retainer",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 2250000,
+   "unit": 750000.0
+  },
+  {
+   "PO_NUMBER": "PO2024144",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 145000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024145",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 64000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024146",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 2520000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024147",
+   "ITEM_DESCRIPTION": "Compliance advisory retainer",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 750000,
+   "unit": 750000.0
+  },
+  {
+   "PO_NUMBER": "PO2024148",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 6250000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024149",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 13000000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024150",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1017",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 950000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024151",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 520000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024152",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 470000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024154",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 40800000,
+   "unit": 3400000.0
+  }
+ ],
+ "cycle": [
+  {
+   "stage": "Requisition verified",
+   "frm": "REQUISITION_DATE",
+   "to": "VERIFIED_DATE",
+   "n": 52,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Procurement approval",
+   "frm": "VERIFIED_DATE",
+   "to": "APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Financial approval",
+   "frm": "APPROVAL_DATE",
+   "to": "FIN_APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 4,
+   "neg": 0
+  },
+  {
+   "stage": "PO raised",
+   "frm": "FIN_APPROVAL_DATE",
+   "to": "PO_DATE",
+   "n": 52,
+   "min": 2,
+   "p25": 3.0,
+   "med": 6.5,
+   "p75": 9.0,
+   "max": 13,
+   "neg": 0
+  },
+  {
+   "stage": "Goods received",
+   "frm": "PO_DATE",
+   "to": "GRN_DATE",
+   "n": 52,
+   "min": 5,
+   "p25": 9.0,
+   "med": 12.5,
+   "p75": 18.0,
+   "max": 25,
+   "neg": 0
+  },
+  {
+   "stage": "Invoice dated",
+   "frm": "GRN_DATE",
+   "to": "INVOICE_DATE",
+   "n": 52,
+   "min": -23,
+   "p25": 2.0,
+   "med": 3.0,
+   "p75": 5.0,
+   "max": 6,
+   "neg": 4
+  },
+  {
+   "stage": "Invoice received",
+   "frm": "INVOICE_DATE",
+   "to": "DATE_RECEIVED",
+   "n": 52,
+   "min": -3,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 4,
+   "neg": 2
+  },
+  {
+   "stage": "Invoice verified",
+   "frm": "DATE_RECEIVED",
+   "to": "VERIFICATION_DATE",
+   "n": 52,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 8,
+   "neg": 0
+  },
+  {
+   "stage": "Invoice approved",
+   "frm": "VERIFICATION_DATE",
+   "to": "SUPERVISOR_APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Paid",
+   "frm": "SUPERVISOR_APPROVAL_DATE",
+   "to": "PAYMENT_DATE",
+   "n": 49,
+   "min": 3,
+   "p25": 8.0,
+   "med": 12.0,
+   "p75": 16.0,
+   "max": 20,
+   "neg": 0
+  }
+ ],
+ "e2e": {
+  "min": 19,
+  "med": 47.0,
+  "max": 64
+ },
+ "early": {
+  "all_early": 52,
+  "median": 13.0,
+  "min": 4,
+  "max": 21,
+  "terms": 30,
+  "hist": [
+   {
+    "bin": 3,
+    "n": 6,
+    "v": 50000000
+   },
+   {
+    "bin": 6,
+    "n": 7,
+    "v": 91405000
+   },
+   {
+    "bin": 9,
+    "n": 10,
+    "v": 77277000
+   },
+   {
+    "bin": 12,
+    "n": 5,
+    "v": 14835000
+   },
+   {
+    "bin": 15,
+    "n": 14,
+    "v": 186507800
+   },
+   {
+    "bin": 18,
+    "n": 9,
+    "v": 192311000
+   },
+   {
+    "bin": 21,
+    "n": 1,
+    "v": 10200000
+   }
+  ]
+ },
+ "routing_req": [
+  {
+   "band": "1M to 5M",
+   "title": "CEO",
+   "n": 1,
+   "v": 2000000,
+   "over": 0,
+   "ids": [
+    "REQ2024009"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Financial Controller",
+   "n": 11,
+   "v": 24885000,
+   "over": 0,
+   "ids": [
+    "REQ2024101",
+    "REQ2024102",
+    "REQ2024105",
+    "REQ2024111",
+    "REQ2024120",
+    "REQ2024123",
+    "REQ2024133",
+    "REQ2024136",
+    "REQ2024137",
+    "REQ2024143",
+    "REQ2024146"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Head of Treasury",
+   "n": 2,
+   "v": 7200000,
+   "over": 2,
+   "ids": [
+    "REQ2024112",
+    "REQ2024127"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "CFO",
+   "n": 6,
+   "v": 45850000,
+   "over": 0,
+   "ids": [
+    "REQ2024104",
+    "REQ2024107",
+    "REQ2024126",
+    "REQ2024130",
+    "REQ2024132",
+    "REQ2024148"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CEO",
+   "n": 17,
+   "v": 494550000,
+   "over": 0,
+   "ids": [
+    "REQ2024103",
+    "REQ2024106",
+    "REQ2024110",
+    "REQ2024113",
+    "REQ2024116",
+    "REQ2024118",
+    "REQ2024119",
+    "REQ2024125",
+    "REQ2024129",
+    "REQ2024134",
+    "REQ2024135",
+    "REQ2024138",
+    "REQ2024139",
+    "REQ2024141",
+    "REQ2024142",
+    "REQ2024149",
+    "REQ2024154"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CFO",
+   "n": 1,
+   "v": 64000000,
+   "over": 1,
+   "ids": [
+    "REQ2024145"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "Head of Treasury",
+   "n": 17,
+   "v": 6887000,
+   "over": 0,
+   "ids": [
+    "REQ2024108",
+    "REQ2024109",
+    "REQ2024114",
+    "REQ2024115",
+    "REQ2024117",
+    "REQ2024121",
+    "REQ2024122",
+    "REQ2024124",
+    "REQ2024128",
+    "REQ2024131",
+    "REQ2024140",
+    "REQ2024144",
+    "REQ2024147",
+    "REQ2024150",
+    "REQ2024151",
+    "REQ2024152",
+    "REQ2024153"
+   ]
+  }
+ ],
+ "routing_inv": [
+  {
+   "band": "1M to 5M",
+   "title": "Financial Controller",
+   "n": 13,
+   "v": 31085000,
+   "over": 0,
+   "ids": [
+    "INV2024004",
+    "INV2024101",
+    "INV2024102",
+    "INV2024105",
+    "INV2024111",
+    "INV2024112",
+    "INV2024120",
+    "INV2024123",
+    "INV2024133",
+    "INV2024136",
+    "INV2024137",
+    "INV2024143",
+    "INV2024146"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Head of Treasury",
+   "n": 2,
+   "v": 5256000,
+   "over": 2,
+   "ids": [
+    "INV2024127",
+    "INV2024140"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "CFO",
+   "n": 5,
+   "v": 36600000,
+   "over": 0,
+   "ids": [
+    "INV2024107",
+    "INV2024126",
+    "INV2024130",
+    "INV2024132",
+    "INV2024148"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 9250000,
+   "over": 0,
+   "ids": [
+    "INV2024104"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CEO",
+   "n": 16,
+   "v": 494950000,
+   "over": 0,
+   "ids": [
+    "INV2024103",
+    "INV2024106",
+    "INV2024110",
+    "INV2024113",
+    "INV2024116",
+    "INV2024118",
+    "INV2024119",
+    "INV2024125",
+    "INV2024129",
+    "INV2024134",
+    "INV2024135",
+    "INV2024139",
+    "INV2024141",
+    "INV2024142",
+    "INV2024145",
+    "INV2024149"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 40800000,
+   "over": 0,
+   "ids": [
+    "INV2024154"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "Head of Treasury",
+   "n": 13,
+   "v": 4558800,
+   "over": 0,
+   "ids": [
+    "INV2024108",
+    "INV2024109",
+    "INV2024114",
+    "INV2024115",
+    "INV2024117",
+    "INV2024121",
+    "INV2024122",
+    "INV2024128",
+    "INV2024144",
+    "INV2024147",
+    "INV2024150",
+    "INV2024151",
+    "INV2024152"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 36000,
+   "over": 0,
+   "ids": [
+    "INV2024131"
+   ]
+  }
+ ],
+ "matrix": [
+  {
+   "JOB_TITLE": "Head of Treasury",
+   "MAX_APPROVAL_AMOUNT": 1000000
+  },
+  {
+   "JOB_TITLE": "Financial Controller",
+   "MAX_APPROVAL_AMOUNT": 5000000
+  },
+  {
+   "JOB_TITLE": "CFO",
+   "MAX_APPROVAL_AMOUNT": 10000000
+  },
+  {
+   "JOB_TITLE": "CEO",
+   "MAX_APPROVAL_AMOUNT": 999999999999
+  }
+ ],
+ "ceo": {
+  "req_n": 18,
+  "req_v": 496550000,
+  "inv_n": 16,
+  "inv_v": 494950000
+ },
+ "roles": [
+  {
+   "role": "Raised requisition",
+   "staff": 1041,
+   "n": 10
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1042,
+   "n": 10
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1050,
+   "n": 4
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1051,
+   "n": 9
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1052,
+   "n": 5
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1053,
+   "n": 3
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1054,
+   "n": 4
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1055,
+   "n": 5
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1056,
+   "n": 5
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1010,
+   "n": 15
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1011,
+   "n": 9
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1012,
+   "n": 12
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1013,
+   "n": 15
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1042,
+   "n": 2
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1051,
+   "n": 1
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1053,
+   "n": 1
+  },
+  {
+   "role": "Procurement approval",
+   "staff": 1023,
+   "n": 30
+  },
+  {
+   "role": "Procurement approval",
+   "staff": 1024,
+   "n": 22
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1001,
+   "n": 18
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1002,
+   "n": 7
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1003,
+   "n": 11
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1004,
+   "n": 19
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1010,
+   "n": 15
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1011,
+   "n": 12
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1012,
+   "n": 12
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1013,
+   "n": 13
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1001,
+   "n": 16
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1002,
+   "n": 5
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1003,
+   "n": 13
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1004,
+   "n": 15
+  }
+ ],
+ "roles_order": [
+  "Raised requisition",
+  "Verified requisition",
+  "Procurement approval",
+  "Financial approval",
+  "Verified invoice",
+  "Approved invoice"
+ ],
+ "staff": [
+  {
+   "STAFF_ID": 1001,
+   "NAME": "John Doe",
+   "JOB_TITLE": "CEO",
+   "SUPERVISOR_ID": null,
+   "MAX_APPROVAL_AMOUNT": 999999999999
+  },
+  {
+   "STAFF_ID": 1002,
+   "NAME": "Emily White",
+   "JOB_TITLE": "CFO",
+   "SUPERVISOR_ID": 1001,
+   "MAX_APPROVAL_AMOUNT": 10000000
+  },
+  {
+   "STAFF_ID": 1003,
+   "NAME": "Daniel Reed",
+   "JOB_TITLE": "Financial Controller",
+   "SUPERVISOR_ID": 1002,
+   "MAX_APPROVAL_AMOUNT": 5000000
+  },
+  {
+   "STAFF_ID": 1004,
+   "NAME": "Aisha Karim",
+   "JOB_TITLE": "Head of Treasury",
+   "SUPERVISOR_ID": 1002,
+   "MAX_APPROVAL_AMOUNT": 1000000
+  },
+  {
+   "STAFF_ID": 1005,
+   "NAME": "David Miller",
+   "JOB_TITLE": "Head of Procurement",
+   "SUPERVISOR_ID": 1001,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1023,
+   "NAME": "Max Baker",
+   "JOB_TITLE": "General Goods & Services Sourcing Mgr",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1024,
+   "NAME": "Nadia Hussain",
+   "JOB_TITLE": "General Goods & Services Sourcing Mgr",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1010,
+   "NAME": "Olivia Smith",
+   "JOB_TITLE": "Senior Accountant",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1011,
+   "NAME": "Bilal Ahmed",
+   "JOB_TITLE": "Senior Accountant",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1012,
+   "NAME": "Grace Lin",
+   "JOB_TITLE": "Invoice Processing Specialist",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1013,
+   "NAME": "Omar Farooq",
+   "JOB_TITLE": "Invoice Processing Specialist",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1041,
+   "NAME": "Ethan Smith",
+   "JOB_TITLE": "Requisition & PO Associate",
+   "SUPERVISOR_ID": 1024,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1042,
+   "NAME": "Sana Malik",
+   "JOB_TITLE": "Requisition & PO Associate",
+   "SUPERVISOR_ID": 1024,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1050,
+   "NAME": "Priya Nair",
+   "JOB_TITLE": "IT Business Partner",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1051,
+   "NAME": "Tom Hayes",
+   "JOB_TITLE": "Facilities Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1052,
+   "NAME": "Zara Sheikh",
+   "JOB_TITLE": "HR Business Partner",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1053,
+   "NAME": "Michael Chen",
+   "JOB_TITLE": "Branch Operations Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1054,
+   "NAME": "Fatima Noor",
+   "JOB_TITLE": "Marketing Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1055,
+   "NAME": "James Okafor",
+   "JOB_TITLE": "Risk & Compliance Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1056,
+   "NAME": "Hina Raza",
+   "JOB_TITLE": "Learning & Development Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  }
+ ],
+ "weekend": [
+  {
+   "field": "Requisition",
+   "col": "REQUISITION_DATE",
+   "n": 52,
+   "weekend": 13
+  },
+  {
+   "field": "Requisition verified",
+   "col": "VERIFIED_DATE",
+   "n": 52,
+   "weekend": 14
+  },
+  {
+   "field": "Procurement approval",
+   "col": "APPROVAL_DATE",
+   "n": 49,
+   "weekend": 13
+  },
+  {
+   "field": "Financial approval",
+   "col": "FIN_APPROVAL_DATE",
+   "n": 52,
+   "weekend": 10
+  },
+  {
+   "field": "PO",
+   "col": "PO_DATE",
+   "n": 52,
+   "weekend": 17
+  },
+  {
+   "field": "Goods receipt",
+   "col": "GRN_DATE",
+   "n": 52,
+   "weekend": 15
+  },
+  {
+   "field": "Invoice date",
+   "col": "INVOICE_DATE",
+   "n": 52,
+   "weekend": 16
+  },
+  {
+   "field": "Invoice received",
+   "col": "DATE_RECEIVED",
+   "n": 52,
+   "weekend": 17
+  },
+  {
+   "field": "Invoice verified",
+   "col": "VERIFICATION_DATE",
+   "n": 52,
+   "weekend": 15
+  },
+  {
+   "field": "Invoice approved",
+   "col": "SUPERVISOR_APPROVAL_DATE",
+   "n": 49,
+   "weekend": 14
+  },
+  {
+   "field": "Payment",
+   "col": "PAYMENT_DATE",
+   "n": 52,
+   "weekend": 11
+  }
+ ],
+ "breaches": {
+  "req": [
+   {
+    "REQUISITION_ID": "REQ2024112",
+    "ESTIMATED_TOTAL_COST": 4200000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "REQUISITION_ID": "REQ2024127",
+    "ESTIMATED_TOTAL_COST": 3000000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "REQUISITION_ID": "REQ2024145",
+    "ESTIMATED_TOTAL_COST": 64000000,
+    "NAME": "Emily White",
+    "JOB_TITLE": "CFO",
+    "MAX_APPROVAL_AMOUNT": 10000000
+   }
+  ],
+  "inv": [
+   {
+    "INVOICE_ID": "INV2024127",
+    "INVOICE_AMOUNT": 3000000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "INVOICE_ID": "INV2024140",
+    "INVOICE_AMOUNT": 2256000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   }
+  ]
+ },
+ "stale": [
+  {
+   "REQUISITION_ID": "REQ2024124",
+   "ESTIMATED_TOTAL_COST": 450000,
+   "FIN_APPROVAL_DATE": "2024-07-30",
+   "age": 154
+  },
+  {
+   "REQUISITION_ID": "REQ2024138",
+   "ESTIMATED_TOTAL_COST": 34000000,
+   "FIN_APPROVAL_DATE": "2024-09-20",
+   "age": 102
+  },
+  {
+   "REQUISITION_ID": "REQ2024153",
+   "ESTIMATED_TOTAL_COST": 940000,
+   "FIN_APPROVAL_DATE": "2024-10-05",
+   "age": 87
+  }
+ ],
+ "exceptions": [
+  {
+   "theme": "Authority",
+   "title": "Requisition financially approved above the approver's limit",
+   "records": [
+    "REQ2024112",
+    "REQ2024127",
+    "REQ2024145"
+   ],
+   "n": 3,
+   "value": 71200000,
+   "note": "Head of Treasury (limit 1M) approved 4.2M and 3.0M; the CFO (limit 10M) approved 64M.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Authority",
+   "title": "Invoice approved above the approver's limit",
+   "records": [
+    "INV2024127",
+    "INV2024140"
+   ],
+   "n": 2,
+   "value": 5256000,
+   "note": "Both approved by the Head of Treasury, limit 1M.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Approval",
+   "title": "Procurement approval not recorded, requisition completed and ordered",
+   "records": [
+    "REQ2024116",
+    "REQ2024130",
+    "REQ2024152"
+   ],
+   "n": 3,
+   "value": 22770000,
+   "note": "Approver and approval date both blank; all three went on to financial approval and a PO.",
+   "exhibit": "roles"
+  },
+  {
+   "theme": "Approval",
+   "title": "Invoice paid with no approval recorded",
+   "records": [
+    "INV2024104",
+    "INV2024131",
+    "INV2024154"
+   ],
+   "n": 3,
+   "value": 50086000,
+   "note": "Approver and approval date both blank; all three paid.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Segregation",
+   "title": "Requisition verified by the person who raised it",
+   "records": [
+    "REQ2024108",
+    "REQ2024120",
+    "REQ2024134",
+    "REQ2024149"
+   ],
+   "n": 4,
+   "value": 91545000,
+   "note": "Every other requisition is verified by Finance; here the requester took the Finance step.",
+   "exhibit": "roles"
+  },
+  {
+   "theme": "Matching",
+   "title": "Invoice paid with no goods receipt reference",
+   "records": [
+    "INV2024110",
+    "INV2024132",
+    "INV2024147"
+   ],
+   "n": 3,
+   "value": 95150000,
+   "note": "Each PO does carry a GRN, so the goods may have arrived; the invoice was paid without being matched to it.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Matching",
+   "title": "Invoice amount above the PO total (value shown is the excess)",
+   "records": [
+    "INV2024106",
+    "INV2024122",
+    "INV2024140"
+   ],
+   "n": 3,
+   "value": 12553800,
+   "note": "Excess of 11.2M (35%), 1.3M (140%) and 37,800 (18%). Every other invoice equals its PO exactly.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Timing",
+   "title": "Payment released before the goods receipt",
+   "records": [
+    "INV2024114",
+    "INV2024129",
+    "INV2024143"
+   ],
+   "n": 3,
+   "value": 76440000,
+   "note": "Paid 8, 13 and 9 days before the GRN date.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice dated before the goods were received",
+   "records": [
+    "INV2024004",
+    "INV2024114",
+    "INV2024129",
+    "INV2024143"
+   ],
+   "n": 4,
+   "value": 78440000,
+   "note": "Billing in advance of delivery; three of the four are also the payments above.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice dated before its purchase order",
+   "records": [
+    "INV2024004"
+   ],
+   "n": 1,
+   "value": 2000000,
+   "note": "Dated 9 April against a PO of 19 April; the same chain sits outside every numbering series.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice recorded as received before its own invoice date",
+   "records": [
+    "INV2024118",
+    "INV2024136"
+   ],
+   "n": 2,
+   "value": 11640000,
+   "note": "Received 2 and 3 days before the date printed on the invoice.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Master data",
+   "title": "Vendor not Active, yet ordered from and paid",
+   "records": [
+    "INV2024126",
+    "INV2024150"
+   ],
+   "n": 2,
+   "value": 6200000,
+   "note": "V1010 is Under Review and V1017 Inactive. The master holds no status-change date.",
+   "exhibit": "vendors"
+  },
+  {
+   "theme": "Pricing",
+   "title": "Unit price far above every other order for the same item",
+   "records": [
+    "PO2024127"
+   ],
+   "n": 1,
+   "value": 3000000,
+   "note": "One kit at 3,000,000 against 80,000 on the three other orders, 37.5 times the price.",
+   "exhibit": "prices"
+  },
+  {
+   "theme": "Completeness",
+   "title": "Approved requisition never ordered and never withdrawn",
+   "records": [
+    "REQ2024124",
+    "REQ2024138",
+    "REQ2024153"
+   ],
+   "n": 3,
+   "value": 35390000,
+   "note": "87 to 154 days old at year end; every other requisition became a PO within 13 days.",
+   "exhibit": "cycle"
+  }
+ ],
+ "fin_to_po_max": 13
+}

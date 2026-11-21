@@ -117,6 +117,11 @@ backend/app/
 |- profiler.py                 - dataset and per-column profiling
 |- explore.py                  - declarative query engine and frame payloads
 |- analytics.py                - canned analytics registry and result metadata
+|- analytics_profile.py        - the profile's descriptive and screening tests
+|                                (breakdowns, step durations, skipped steps,
+|                                role matrix and overlap, chain reconciliation,
+|                                ratio within a group, identifier series,
+|                                authority grid), merged into the one registry
 |- validation.py               - durable table validation rules and run support
 |- analysis_payloads.py        - recompute a saved analysis's spec into a
 |                                render-ready payload; a broken spec degrades
@@ -283,6 +288,10 @@ backend/app/
    |- artifact_index.py        - artifact selectors and canonical resolution
    |- joins.py                 - deterministic join inference/diagnostics
    |- suggest.py               - deterministic validation rule suggestions
+   |- data_map.py              - the data map: facts, masters, children, the
+   |                             chain, dated steps and who did them, column
+   |                             typing; and the profile definitions written
+   |                             from it. No model turn
    |- prompts.py               - the loop's system prompt and the few shared
    |                             bounded prompts, keyed by [agent:<stage>]
    |                             tags; every capability prompt lives with its
@@ -625,7 +634,7 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   audit-shaped glue: which worker/executor and declared context a unit uses,
   approval items, post-commit bookkeeping, checkpoint handlers, and the audit
   completion projection.
-- The audit graph is 33 capabilities and is documented stage by stage —
+- The audit graph is 34 capabilities and is documented stage by stage —
   dependencies, readiness rules, unit expansions, per-stage context, worker and
   executor bindings, input/output shapes, budgets, and the on-disk sidecars — in
   [docs/audit-workflow-graph.md](docs/audit-workflow-graph.md). Its structure in
@@ -792,7 +801,7 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
 - Phase 7 completed with the audit lifecycle declared in exactly one place. The
   dependency graph lives in `agent/workflows/audit.py`; the capability
   declarations live in the grouped `agent/capabilities/` package, which is the
-  live registry (twelve at the time, 33 today — see the audit-graph note under
+  live registry (twelve at the time, 34 today — see the audit-graph note under
   §6); and each capability's execution is a registered worker/executor
   pair or a deterministic local computation under `agent/workers/` and
   `agent/executors/`, with declared context presets in `agent/context/`. Every
@@ -809,7 +818,9 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   `data.joins_ready` → `analysis.register_ready` →
   `analysis.definitions_ready` → `analysis.executed` → `analysis.summarized`
   (the memo and the register were both added later; see the analysis-summary
-  note below and the register note under §4). It introduces no workspace
+  note below and the register note under §4; `analysis.profiled`, the
+  population profile, was added beside the register — see the profile note
+  under §4). It introduces no workspace
   collection — relationship evidence is run-durable, joins land in
   `workspace.joins`, definitions in `workspace.analyses`, and each execution
   records a bounded `last_result` (shape, verdict, the analytics service's own
@@ -1045,6 +1056,22 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   register placed an *authored* assertion on — a kept nomination is already an
   exact spec with its counts measured, and re-deriving it through a model call
   was, measured across four runs, sometimes declined.
+- **The profile describes the population before anything is tested.**
+  `analysis.profiled` reads the scoped tables into a data map
+  (`agent/data_map.py`) — which tables hold transactions and which are masters,
+  which hang many to one beneath another, the chain the one-to-one links form,
+  the order the dates put the steps in and which role column records who did
+  each, and which numbers are amounts, limits, quantities or codes — and saves
+  the profile it calls for as ordinary analyses over base tables or a chain
+  alignment recipe. No model turn: the procurement benchmark's measurements
+  (`docs/sample-procurement/eda-benchmark`) came out of this pass whole. The
+  descriptive tests are in `EXCLUDED_ANALYTICS_TEST_IDS`, which now means "no
+  model proposes these"; `agent_analyses` still executes the profile's own,
+  recognised by their `profile:` semantic id. The cycle turn receives the map's
+  dated steps as `data_steps`, names which ones each cycle step is, and local
+  code writes the populations; a cycle step with no dated record of its own,
+  and a dated record no step names, are warned about on commit. Design and
+  phasing: `docs/eda-memo-redesign.md`.
 - **The memo feeds the APM.** `planning.apm` declares an optional
   `analysis_summary` source under its own `allow_analysis_summary` permission —
   planning sees the written memo, never the flagged rows behind it, and never

@@ -16,7 +16,7 @@ also what lets the model worker import it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from . import cycle_rulesets
 
@@ -227,3 +227,66 @@ def cycle_process_names(cycle: object) -> list[str]:
     if cross_name:
         names.append(cross_name)
     return names
+
+
+def expand_data_steps(cycle: Mapping, steps: Sequence[Mapping]) -> tuple[dict, list[str]]:
+    """Write each cycle step's populations from the data steps it names.
+
+    The model names which data steps a cycle step is; this writes the columns.
+    A population the model gave for the same table keeps its anchor flag and
+    takes the data step's columns. Returns the cycle and any unknown ids.
+    """
+    by_id = {str(step["id"]): step for step in steps}
+    unknown: list[str] = []
+    out_steps = []
+    for raw in cycle.get("steps") or []:
+        step = dict(raw)
+        ids = [str(i) for i in (step.pop("data_steps", None) or [])]
+        if ids:
+            columns_by_table: dict[str, list[str]] = {}
+            for step_id in ids:
+                found = by_id.get(step_id)
+                if found is None:
+                    unknown.append(step_id)
+                    continue
+                columns_by_table.setdefault(found["table"], [])
+                for column in found["columns"]:
+                    if column not in columns_by_table[found["table"]]:
+                        columns_by_table[found["table"]].append(column)
+            populations = [dict(p) for p in step.get("populations") or [] if isinstance(p, Mapping)]
+            for table, columns in columns_by_table.items():
+                existing = next((p for p in populations if p.get("table") == table), None)
+                if existing is None:
+                    populations.append({"table": table, "columns": columns})
+                elif existing.get("columns"):
+                    existing["columns"] = columns
+            step["populations"] = populations
+        out_steps.append(step)
+    return {**dict(cycle), "steps": out_steps}, unknown
+
+
+def cycle_record_coverage(cycle: Mapping, steps: Sequence[Mapping]) -> tuple[list[str], list[dict]]:
+    """Cycle steps with no dated record of their own, and data steps no step names.
+
+    A cycle step is recorded when one of its populations holds a data step's
+    date: on its listed columns, or — for a whole-table population — on the
+    table's first data step.
+    """
+    first_of_table: dict[str, str] = {}
+    for step in steps:
+        first_of_table.setdefault(step["table"], step["columns"][0])
+    claimed: set[tuple[str, str]] = set()
+    unrecorded: list[str] = []
+    for raw in cycle.get("steps") or []:
+        recorded = False
+        for population in raw.get("populations") or []:
+            table = str(population.get("table") or "")
+            columns = population.get("columns") or ([first_of_table[table]] if table in first_of_table else [])
+            for step in steps:
+                if step["table"] == table and step["columns"][0] in columns:
+                    claimed.add((table, step["columns"][0]))
+                    recorded = True
+        if not recorded:
+            unrecorded.append(str(raw.get("name") or ""))
+    unclaimed = [s for s in steps if (s["table"], s["columns"][0]) not in claimed]
+    return unrecorded, unclaimed

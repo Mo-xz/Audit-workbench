@@ -204,7 +204,7 @@ one:
 
 | Workflow | Chain |
 | --- | --- |
-| `analysis_workflow_v1` | `data.relationships_inferred` → `data.join_utility_ready` → `data.joins_ready`; `analysis.register_ready` → `analysis.definitions_ready` → `analysis.inputs_ready` → `analysis.executed` → `analysis.summarized` |
+| `analysis_workflow_v1` | `data.relationships_inferred` → `data.join_utility_ready` → `data.joins_ready`; `analysis.register_ready` → `analysis.definitions_ready` → `analysis.inputs_ready` → `analysis.executed` → `analysis.summarized`; `analysis.profiled` (off `data.relationships_inferred`) → `analysis.inputs_ready` |
 | `documents_workflow_v1` | `documents.text_ready` → `categorized` → `types_classified` → `evidence_read` → `schemas_stamped`; `analysis_chunks_ready` → `analysis_generated` → `analysis_reviewed` |
 | `doc_tests_workflow_v2` | `doc_tests.definitions_ready` → `doc_tests.executed` → `doc_tests.dispositioned` |
 
@@ -889,7 +889,9 @@ satisfies it, and an audit run must never wait on or imply it.
 
 The audit graph schedules `data.relationships_inferred` →
 `data.join_utility_ready` → `data.joins_ready` → `analysis.register_ready` →
-`analysis.definitions_ready` → `analysis.executed` → `analysis.summarized`.
+`analysis.definitions_ready` → `analysis.executed` → `analysis.summarized`,
+with `analysis.profiled` (deterministic: the data map and the population profile
+written from it) off `data.relationships_inferred` and into `analysis.executed`.
 The full-audit outcome set requests the memo *before* the planning outcomes, so
 the sequential scheduler completes it and the memo exists by the time planning
 reads it — but neither planning capability *depends* on it.

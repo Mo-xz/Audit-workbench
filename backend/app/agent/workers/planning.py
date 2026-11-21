@@ -3964,6 +3964,15 @@ Return {{"name": ..., "steps": [...], "cross_cutting": {{...}}}}.
   within a step — override, monitoring, segregation. Give it a `name` and its
   `themes`.
 
+DATA STEPS, where supplied, lists every dated step the tables record, in the
+order the data puts them, each with an `id` and the columns that record it.
+Give each step `data_steps`: the ids of the data steps that are this step. Local
+code writes those columns into the step's populations, so a step you give
+`data_steps` needs no `columns` of its own. A step the data records nowhere —
+a check made on paper, a referral, an outcome with no date — gets an empty
+`data_steps`; that is worth knowing, not a gap to fill with a column that
+records something else.
+
 Where EXISTING STEP NAMES or EXISTING PROCESS NAMES describe a step you are
 naming, reuse that wording exactly: the matrix's rows are grouped by it, and
 renaming a step it already uses orphans them.
@@ -4057,6 +4066,13 @@ def validate_cycle_proposal(
         str(theme) for theme in request.unit_input.get("risk_themes") or [] if theme
     ]
     cycle = _cycle_with_unplaced_themes(dict(proposal), planned)
+    supplied = list(request.unit_input.get("data_steps") or [])
+    cycle, unknown = planning_cycle.expand_data_steps(cycle, supplied)
+    if unknown:
+        raise WorkerResponseValidationError(
+            f"data_steps names {', '.join(sorted(set(unknown)))}, which DATA STEPS "
+            f"does not list; choose from: {', '.join(str(s['id']) for s in supplied) or 'none'}."
+        )
     allowed_types, allowed_tables = _cycle_allowed_values(request)
     try:
         return planning_cycle.validate_cycle_shape(
@@ -4083,6 +4099,11 @@ def _cycle_user(request: WorkerRequest) -> str:
             "TABLES": _table_column_names(request),
             "TABLE JOINS ALREADY INFERRED": _plain_json(
                 request.unit_input.get("joins") or []
+            ),
+            **(
+                {"DATA STEPS": _plain_json(request.unit_input.get("data_steps"))}
+                if request.unit_input.get("data_steps")
+                else {}
             ),
             "EXISTING STEP NAMES": [
                 str(name) for name in request.unit_input.get("existing_steps") or []

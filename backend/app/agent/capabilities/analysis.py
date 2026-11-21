@@ -25,7 +25,7 @@ from ...text import counted, verb
 from ...analysis_results import analysis_result_state, summary_basis_digest
 from ...workspaces import Workspace, WorkspaceError
 from .. import joins as join_diagnostics, register as assertion_register
-from .. import alignment_catalog
+from .. import alignment_catalog, data_map
 from ...analysis_inputs import source_refs, saved_input, InputWorkspace
 from ..workflow import Capability, Readiness, UnitSpec, semantic_unit_id
 from ..workflows import analysis as analysis_workflow
@@ -34,6 +34,7 @@ CAPABILITY_IDS: tuple[str, ...] = (
     "data.relationships_inferred",
     "data.join_utility_ready",
     "data.joins_ready",
+    "analysis.profiled",
     "analysis.register_ready",
     "analysis.definitions_ready",
     "analysis.inputs_ready",
@@ -386,8 +387,80 @@ def agent_analyses(workspace: Workspace, table_scope: TableScope) -> list[dict]:
                 (item.get("spec") or {}).get("test")
             )
             in analysis_workflow.EXCLUDED_ANALYTICS_TEST_IDS
+            # The exclusion is about what a model may propose. The profile's
+            # descriptive analyses are the workflow's own, written from the
+            # data map, and are executed like everything else it saved.
+            and not data_map.is_profile(item)
         )
     ]
+
+
+# --------------------------------------------------------------------------- #
+# analysis.profiled
+# --------------------------------------------------------------------------- #
+ANALYSIS_PROFILE_UNIT = "analysis_profile"
+
+
+def planned_profile(workspace: Workspace, table_scope: TableScope) -> list[dict]:
+    """The profile definitions the data map calls for in this scope."""
+    if not table_scope.tables:
+        return []
+    mapping = data_map.build_data_map(workspace, table_scope.tables)
+    return data_map.profile_definitions(workspace, mapping)
+
+
+def missing_profile(workspace: Workspace, table_scope: TableScope) -> list[dict]:
+    present = {str(item.get("semantic_id") or "") for item in workspace.analyses}
+    return [item for item in planned_profile(workspace, table_scope) if item["semantic_id"] not in present]
+
+
+def _profiled_ready(workspace: Workspace, scope: dict) -> Readiness:
+    table_scope = resolve_table_scope(workspace, scope)
+    blocked = _no_tables(table_scope)
+    if blocked is not None:
+        return blocked
+    planned = planned_profile(workspace, table_scope)
+    present = {str(item.get("semantic_id") or "") for item in workspace.analyses}
+    missing = [item for item in planned if item["semantic_id"] not in present]
+    details = {"planned": len(planned), "saved": len(planned) - len(missing)}
+    if not missing:
+        return Readiness("satisfied", details=details)
+    return Readiness(
+        "missing",
+        (f"{counted(len(missing), 'profile analysis', 'profile analyses')} not yet saved",),
+        details=details,
+    )
+
+
+def _profile_units(workspace: Workspace, scope: dict) -> list[UnitSpec]:
+    table_scope = resolve_table_scope(workspace, scope)
+    if not (_forced(scope) or missing_profile(workspace, table_scope)):
+        return []
+    return [
+        UnitSpec(
+            semantic_unit_id(ANALYSIS_PROFILE_UNIT),
+            ANALYSIS_PROFILE_UNIT,
+            "Profile the population",
+            tuple(frame_ref(workspace, name) for name in table_scope.tables),
+            {"tables": list(table_scope.tables)},
+        )
+    ]
+
+
+def _analysis_profiled() -> Capability:
+    return Capability(
+        "analysis.profiled",
+        "analysis_profile",
+        "Population profile",
+        "analysis_profile",
+        analysis_workflow.dependencies("analysis.profiled"),
+        _profiled_ready,
+        _profile_units,
+        context=None,
+        invalidate_on=("tables",),
+        produces=("analysis",),
+        accepts_refs=("table",),
+    )
 
 
 def unanswered_frames(
@@ -986,6 +1059,7 @@ _BUILDERS = {
     "data.relationships_inferred": _data_relationships_inferred,
     "data.join_utility_ready": _data_join_utility_ready,
     "data.joins_ready": _data_joins_ready,
+    "analysis.profiled": _analysis_profiled,
     "analysis.register_ready": _analysis_register_ready,
     "analysis.definitions_ready": _analysis_definitions_ready,
     "analysis.inputs_ready": _analysis_inputs_ready,

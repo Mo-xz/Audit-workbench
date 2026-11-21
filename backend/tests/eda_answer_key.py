@@ -4,8 +4,8 @@ The key is the Class 1 table (P-01 to P-14) of
 ``docs/sample-procurement/FACILITATOR_GUIDE.md``: the exceptions visible in the
 pack's six workbooks. Earlier run-by-run tables were rebuilt by hand three times
 and were wrong once. This module is the rebuild, once, in code: an answer key of
-*computations*, a scorer over a workspace's saved analyses, and a rendering of
-the same reach table.
+*records*, a scorer over a workspace's saved analyses, and a rendering of the
+same reach table.
 
 It scores the exploratory analyses only. Whether a run carried an item on into
 a finding and the report is the guide's own scoring, made against the findings;
@@ -13,40 +13,46 @@ the guide's document-only and judgement items (``OUT_OF_SCOPE``) are never
 reachable by an analysis at all. It replaces an earlier A01-A33 key, written for
 a larger edition of the same data whose records this pack does not hold.
 
-Two rules govern scoring and are intentionally enforced here rather than left to
-documentation:
+Three rules govern scoring and are intentionally enforced here rather than left
+to documentation:
 
-* **Match the computation, never the title.** Titles move between runs and the
-  test a frame ran does not. A key item names a test id and the columns that
-  identify it; a ``compare_columns`` pair is unordered, because ``A ≥ B`` and
-  ``B ≤ A`` are one computation written two ways.
+* **Match the records, never the spec or the title.** A key item names the
+  records the guide names, and an analysis reaches it when the rows it flagged
+  include every one of them. An earlier version matched library test ids and
+  column sets instead, and it was wrong in both directions at once: a
+  completeness check over three approval dates flagged exactly P-08's three
+  invoices and did not count, and no python analysis could count at all, so
+  P-11 (a unit price derived within each item) was unscoreable by
+  construction. The flagged rows are the conclusion; the spec is only how it
+  was reached.
 * **A saturated hit is not a hit.** A result flagging its whole population
   establishes nothing about any row in it, and the application already says so
   — so the scorer asks ``analysis_results.uninformative_reason`` rather than
-  keeping a second opinion. That function exempts ``referential`` deliberately,
-  since a reference that resolves nowhere can legitimately fail every row.
+  keeping a second opinion.
+* **A broad hit is not a hit.** A result that flags the item's records among
+  many others has not isolated them: a check that flags forty invoices
+  including P-07's three is not the over-billing test. Past
+  ``BROAD_FACTOR`` times the item's own record count, plus ``BROAD_SLACK``, a
+  capture is reported as broad and not counted.
 
-Where an item's population matters the key names a ``root`` — the base table the
-frame's rows are rows *of*. ``PO_NUMBER`` blank on a requisition is P-04, an
-approved requisition never ordered; the same column read through another table's
-rows is not. It is the same distinction ``analysis_semantic_id`` draws, for the
-same reason.
-
-P-11 carries no signature: it needs a unit price derived within each item, which
-no library test computes. It is reported as unscoreable rather than silently
-counted absent, because "no procedure can express this" and "no procedure was
-written" are different failures.
+Records are read from the evidence sidecar each execution writes
+(``analysis_results.read_exception_evidence``), which holds up to
+``EXCEPTION_ROWS`` flagged rows stamped with the result they belong to. A record
+is matched in the column the reading names, so the population still decides: a
+blank ``PO_NUMBER`` flagged on requisitions names requisitions, and the same
+check over the PO table names none. Where an item's population matters its
+reading also names a ``root``, the base table the flagged rows must be rows of.
 
 Run it directly to score a workspace::
 
-    .venv\\Scripts\\python.exe backend\\tests\\eda_answer_key.py Workspaces\\Users\\local\\Workspaces\\procurement
+    uv run --no-project python backend/tests/eda_answer_key.py Workspaces/Users/local/Workspaces/procurement
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 if __name__ == "__main__":  # pragma: no cover - direct-invocation convenience
@@ -56,196 +62,127 @@ from app import analysis_results
 from app.agent import joins as join_diagnostics
 from app.workspaces import Workspace
 
-
-# Parameter names that carry a spec's identifying columns, per test family. A
-# spec is identified by the set of columns it reads, so the scorer collects them
-# without needing to know each test's own argument order.
-_COLUMN_PARAMS = ("column", "other", "columns", "date_column", "amount_column")
+#: How many rows a capture may flag, relative to the item's own records, before
+#: it stops counting as having isolated them.
+BROAD_FACTOR = 3
+BROAD_SLACK = 2
 
 
 @dataclass(frozen=True)
-class Signature:
-    """One computation, in the terms that make two runs comparable.
+class Reading:
+    """One way of naming an item's records: the column and the ids it holds.
 
-    ``columns`` is a frozen set rather than a sequence: a comparison names two
-    columns and the direction it names them in is a property of how the model
-    worded it, not of what was measured.
+    ``root`` is the base table the flagged rows must be rows *of*, where the
+    population is what distinguishes the item. A joined frame carries every
+    chain's ids side by side, so a requisition's limit breach flags a row that
+    also holds that requisition's PO number — and without a root, the limit
+    check on REQ2024127 scored as the unit-price item on PO2024127.
     """
 
-    test: str
-    columns: frozenset[str] = frozenset()
-    lookup: tuple[str, str] | None = None
-    values: frozenset[str] = frozenset()
-    #: ``value_filter`` only. Which side of the named set the spec flags, and it
-    #: is never optional: ``flag`` on {Active} and ``allow`` on {Active} are
-    #: opposite findings over one column, and the second is 37 of 39 vendors
-    #: behaving correctly. ``value_filter`` is not saturation-sensitive, so
-    #: nothing downstream would have caught the inversion either.
-    mode: str = ""
-
-    def matches(self, spec: Mapping[str, object]) -> bool:
-        if str(spec.get("test") or "") != self.test:
-            return False
-        params = spec.get("params")
-        params = params if isinstance(params, Mapping) else {}
-        if self.columns and _spec_columns(params) != self.columns:
-            return False
-        if self.lookup is not None:
-            found = (
-                str(params.get("lookup_table") or ""),
-                str(params.get("lookup_column") or ""),
-            )
-            if found != self.lookup:
-                return False
-        if self.mode and str(params.get("mode") or "") != self.mode:
-            return False
-        if self.values:
-            named = {str(value) for value in params.get("values") or ()}
-            if named != self.values:
-                return False
-        return True
-
-
-def _spec_columns(params: Mapping[str, object]) -> frozenset[str]:
-    found: set[str] = set()
-    for name in _COLUMN_PARAMS:
-        value = params.get(name)
-        if isinstance(value, str) and value.strip():
-            found.add(value.strip())
-        elif isinstance(value, (list, tuple)):
-            found.update(str(item).strip() for item in value if str(item).strip())
-    return frozenset(found)
+    column: str
+    ids: frozenset[str]
+    root: str | None = None
 
 
 @dataclass(frozen=True)
 class KeyItem:
-    """One answer-key item and the computation that would reach it."""
+    """One answer-key item and the records that state it.
+
+    ``readings`` are alternatives: an analysis reaches the item when it flags
+    every record of any one of them. P-05 is the case that needs more than one,
+    because the vendor master names the two vendors and the chain names the
+    invoices paid to them, and either is the finding.
+    """
 
     id: str
     label: str
-    signatures: tuple[Signature, ...] = ()
-    #: The base table the frame's rows must be rows of, where the population is
-    #: what distinguishes this item from another reading the same columns.
-    root: str | None = None
-    #: Why no signature can express this one. Present exactly when signatures is
-    #: empty, and reported rather than scored.
-    unscoreable: str = ""
+    readings: tuple[Reading, ...]
 
 
-def _compare(*columns: str) -> Signature:
-    return Signature("compare_columns", frozenset(columns))
+def _records(column: str, *ids: str, root: str | None = None) -> Reading:
+    return Reading(column, frozenset(ids), root)
 
 
-def _flags(column: str, *values: str) -> Signature:
-    """A ``value_filter`` that flags the rows holding one of ``values``."""
-    return Signature(
-        "value_filter", frozenset({column}), values=frozenset(values), mode="flag"
-    )
-
-
-def _allows(column: str, *values: str) -> Signature:
-    """A ``value_filter`` that flags the rows holding anything but ``values``."""
-    return Signature(
-        "value_filter", frozenset({column}), values=frozenset(values), mode="allow"
-    )
-
-
-# The key. Item text is the Class 1 table of
-# ``docs/sample-procurement/FACILITATOR_GUIDE.md``; each signature is a
-# computation verified against the six workbooks in ``docs/sample-procurement/data``.
+# The key. Item text and records are the Class 1 table of
+# ``docs/sample-procurement/FACILITATOR_GUIDE.md``; ``test_the_key_is_the_
+# facilitator_guide`` holds the two together.
 ANSWER_KEY: tuple[KeyItem, ...] = (
     KeyItem(
         "P-01",
         "requisition verified by its own requester",
-        (_compare("REQUESTER_ID", "VERIFIED_BY_ID"),),
-        root="requisitions",
+        (_records("REQUISITION_ID", "REQ2024108", "REQ2024120", "REQ2024134", "REQ2024149", root="requisitions"),),
     ),
     KeyItem(
         "P-02",
         "requisition approved above the approver's limit",
-        (_compare("MAX_APPROVAL_AMOUNT", "ESTIMATED_TOTAL_COST"),),
-        root="requisitions",
+        (_records("REQUISITION_ID", "REQ2024112", "REQ2024127", "REQ2024145", root="requisitions"),),
     ),
     KeyItem(
         "P-03",
         "procurement approval not recorded",
-        (
-            Signature("completeness", frozenset({"APPROVED_BY_ID"})),
-            Signature("completeness", frozenset({"APPROVAL_DATE"})),
-        ),
-        root="requisitions",
+        (_records("REQUISITION_ID", "REQ2024116", "REQ2024130", "REQ2024152", root="requisitions"),),
     ),
     KeyItem(
         "P-04",
         "approved requisition neither ordered nor withdrawn",
-        (Signature("completeness", frozenset({"PO_NUMBER"})),),
-        root="requisitions",
+        (_records("REQUISITION_ID", "REQ2024124", "REQ2024138", "REQ2024153", root="requisitions"),),
     ),
     KeyItem(
         "P-05",
         "vendor not Active, yet ordered from and paid",
-        # Unrooted on purpose: the status is a property of the vendor, and a
-        # filter on the master names the same two vendors the chain reaches.
         (
-            _allows("VENDOR_STATUS", "Active"),
-            _flags("VENDOR_STATUS", "Inactive", "Under Review"),
-            _flags("VENDOR_STATUS", "Under Review"),
-            _flags("VENDOR_STATUS", "Inactive"),
+            _records("INVOICE_ID", "INV2024126", "INV2024150"),
+            _records("PO_NUMBER", "PO2024126", "PO2024150"),
+            _records("REQUISITION_ID", "REQ2024126", "REQ2024150"),
+            _records("VENDOR_ID", "V1010", "V1017"),
         ),
     ),
     KeyItem(
         "P-06",
         "invoice settled with no goods receipt reference",
-        (Signature("completeness", frozenset({"GRN_ID_LINK"})),),
-        root="invoice_data",
+        (_records("INVOICE_ID", "INV2024110", "INV2024132", "INV2024147", root="invoice_data"),),
     ),
     KeyItem(
         "P-07",
         "invoice amount above the PO total",
-        (_compare("INVOICE_AMOUNT", "PO_TOTAL_AMOUNT"),),
+        (_records("INVOICE_ID", "INV2024106", "INV2024140", "INV2024122"),),
     ),
     KeyItem(
         "P-08",
         "invoice paid with no approval recorded",
-        (
-            Signature("completeness", frozenset({"SUPERVISOR_APPROVAL_ID"})),
-            Signature("completeness", frozenset({"SUPERVISOR_APPROVAL_DATE"})),
-        ),
-        root="invoice_data",
+        (_records("INVOICE_ID", "INV2024104", "INV2024131", "INV2024154", root="invoice_data"),),
     ),
     KeyItem(
         "P-09",
         "invoice approved above the approver's limit",
-        (_compare("INVOICE_AMOUNT", "MAX_APPROVAL_AMOUNT"),),
-        root="invoice_data",
+        (_records("INVOICE_ID", "INV2024127", "INV2024140", root="invoice_data"),),
     ),
     KeyItem(
         "P-10",
         "payment released before the goods receipt",
-        (_compare("PAYMENT_DATE", "GRN_DATE"),),
+        (_records("INVOICE_ID", "INV2024114", "INV2024129", "INV2024143"),),
     ),
     KeyItem(
         "P-11",
         "unit price far above every other order for the same item",
-        unscoreable=(
-            "needs a unit price derived as PO total over quantity and compared "
-            "within each item; no library test computes the ratio, and a python "
-            "spec's identity is its code, which no signature can match"
-        ),
+        (_records("PO_NUMBER", "PO2024127", root="po_data"),),
     ),
-    KeyItem("P-12", "invoice dated before its PO", (_compare("INVOICE_DATE", "PO_DATE"),)),
+    KeyItem(
+        "P-12",
+        "invoice dated before its PO",
+        (_records("INVOICE_ID", "INV2024004"),),
+    ),
     KeyItem(
         "P-13",
         "invoice received before its own invoice date",
-        (_compare("DATE_RECEIVED", "INVOICE_DATE"),),
+        (_records("INVOICE_ID", "INV2024118", "INV2024136"),),
     ),
     KeyItem(
         "P-14",
         "invoice dated or received before the goods receipt",
-        (
-            _compare("INVOICE_DATE", "GRN_DATE"),
-            _compare("DATE_RECEIVED", "GRN_DATE"),
-        ),
+        # Read on the received date INV2024136 also qualifies, by one day. The
+        # four are common to both readings, so flagging them is the finding.
+        (_records("INVOICE_ID", "INV2024004", "INV2024114", "INV2024129", "INV2024143"),),
     ),
 )
 
@@ -253,36 +190,69 @@ ANSWER_KEY: tuple[KeyItem, ...] = (
 # EDA's scope entirely: no table carries them.
 OUT_OF_SCOPE = ("D-01", "D-02", "D-03", "D-04", "D-05", "J-01", "J-02", "J-03")
 
+#: Reads one analysis' flagged rows as ``{"columns": [...], "rows": [[...]]}``,
+#: or ``None`` where it flagged nothing or kept no evidence.
+EvidenceReader = Callable[[Mapping[str, object]], Mapping[str, object] | None]
+
 
 @dataclass(frozen=True)
 class Hit:
-    """One saved analysis that reaches a key item."""
+    """One saved analysis whose flagged rows include an item's records."""
 
     analysis_id: str
     table: str
-    root: str
-    exceptions: int
-    tested: int | None
+    kind: str
+    found: int
+    expected: int
+    flagged: int
+    denominator: int | None
+
+    @property
+    def captured(self) -> bool:
+        return self.found == self.expected
+
+    @property
+    def broad(self) -> bool:
+        return self.flagged > BROAD_FACTOR * self.expected + BROAD_SLACK
 
     @property
     def fraction(self) -> str:
-        return f"{self.exceptions}/{self.tested}" if self.tested else str(self.exceptions)
+        population = f" of {self.denominator}" if self.denominator else ""
+        return f"{self.found}/{self.expected} ({self.flagged}{population} flagged)"
 
 
 @dataclass(frozen=True)
 class ItemScore:
     item: KeyItem
     hits: tuple[Hit, ...] = ()
-    #: Analyses matching the signature that were rejected, and why.
+    #: Analyses whose flagged rows hold the item's records but establish
+    #: nothing, and why.
     rejected: tuple[tuple[str, str], ...] = ()
 
     @property
     def reached(self) -> bool:
-        return bool(self.hits)
+        return any(hit.captured and not hit.broad for hit in self.hits)
 
     @property
-    def saturated(self) -> bool:
-        return not self.hits and bool(self.rejected)
+    def best(self) -> Hit | None:
+        ranked = sorted(
+            self.hits,
+            key=lambda hit: (not (hit.captured and not hit.broad), -hit.found, hit.flagged, hit.analysis_id),
+        )
+        return ranked[0] if ranked else None
+
+    @property
+    def status(self) -> str:
+        if self.reached:
+            return "captured"
+        best = self.best
+        if best is not None and best.captured:
+            return "broad"
+        if best is not None:
+            return "partial"
+        if self.rejected:
+            return "saturated"
+        return "absent"
 
 
 @dataclass(frozen=True)
@@ -291,8 +261,6 @@ class Score:
     run_id: str | None
     items: tuple[ItemScore, ...]
     analyses: int
-    #: Key items whose signature no run can express (P-11).
-    unscoreable: tuple[KeyItem, ...] = field(default=())
 
     @property
     def reached(self) -> tuple[ItemScore, ...]:
@@ -310,7 +278,31 @@ def _analysis_root(workspace: Workspace, table: str) -> str:
         return table
 
 
-def score_workspace(workspace: Workspace, *, run_id: str | None = None) -> Score:
+def _column_values(evidence: Mapping[str, object], column: str) -> set[str]:
+    """Every value the flagged rows hold in ``column``, as text."""
+    frame = evidence.get("frame") if isinstance(evidence.get("frame"), Mapping) else evidence
+    columns = [str(name) for name in frame.get("columns") or []]
+    if column not in columns:
+        return set()
+    index = columns.index(column)
+    return {
+        str(row[index]).strip()
+        for row in frame.get("rows") or []
+        if isinstance(row, (list, tuple)) and index < len(row) and row[index] is not None
+    }
+
+
+def _flagged_count(evidence: Mapping[str, object]) -> int:
+    frame = evidence.get("frame") if isinstance(evidence.get("frame"), Mapping) else evidence
+    return len(frame.get("rows") or [])
+
+
+def score_workspace(
+    workspace: Workspace,
+    *,
+    run_id: str | None = None,
+    evidence: EvidenceReader | None = None,
+) -> Score:
     """Score every saved analysis in a workspace against the answer key.
 
     ``run_id`` restricts scoring to one agent run, which is what makes two runs
@@ -318,58 +310,84 @@ def score_workspace(workspace: Workspace, *, run_id: str | None = None) -> Score
     counts, including any the auditor wrote — the same basis used for the pinned
     measurement, since the measured runs are unattended and author everything
     they hold.
+
+    ``evidence`` reads an analysis' flagged rows; the default reads the sidecar
+    its last execution wrote, and returns nothing for a result it no longer
+    belongs to.
     """
+    read = evidence or (lambda analysis: analysis_results.read_exception_evidence(workspace, analysis))
     analyses = [
         item
         for item in workspace.analyses
         if run_id is None or str(item.get("agent_run_id") or "") == run_id
     ]
-    scored: list[ItemScore] = []
-    unscoreable: list[KeyItem] = []
-    for key in ANSWER_KEY:
-        if not key.signatures:
-            unscoreable.append(key)
+    flagged: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
+    for analysis in analyses:
+        result = analysis.get("last_result")
+        result = result if isinstance(result, Mapping) else {}
+        if not int(result.get("exception_count") or 0):
+            # A clean result is a test that ran and found nothing. It is a real
+            # answer about the data and it names no record.
             continue
+        rows = read(analysis)
+        if rows:
+            flagged.append((analysis, rows))
+
+    scored: list[ItemScore] = []
+    for key in ANSWER_KEY:
         hits: list[Hit] = []
         rejected: list[tuple[str, str]] = []
-        for analysis in analyses:
-            spec = analysis.get("spec")
-            spec = spec if isinstance(spec, Mapping) else {}
-            if not any(signature.matches(spec) for signature in key.signatures):
-                continue
-            table = str(analysis.get("table") or "")
-            root = _analysis_root(workspace, table)
-            if key.root is not None and root != key.root:
-                continue
+        for analysis, rows in flagged:
             result = analysis.get("last_result")
             result = result if isinstance(result, Mapping) else {}
             exceptions = int(result.get("exception_count") or 0)
             tested = result.get("tested")
-            tested = int(tested) if isinstance(tested, int) else None
-            if not exceptions:
-                # A clean result is a test that ran and found nothing. It is a
-                # real answer about the data and it is not this item.
+            population = result.get("population")
+            denominator = next(
+                (int(value) for value in (tested, population) if isinstance(value, int) and value),
+                None,
+            )
+            root = _analysis_root(workspace, str(analysis.get("table") or ""))
+            best: Hit | None = None
+            for reading in key.readings:
+                if reading.root is not None and reading.root != root:
+                    continue
+                found = len(reading.ids & _column_values(rows, reading.column))
+                if not found:
+                    continue
+                candidate = Hit(
+                    str(analysis.get("id") or ""),
+                    str(analysis.get("table") or ""),
+                    str(analysis.get("kind") or ""),
+                    found,
+                    len(reading.ids),
+                    max(exceptions, _flagged_count(rows)),
+                    denominator,
+                )
+                if best is None or (candidate.found / candidate.expected) > (best.found / best.expected):
+                    best = candidate
+            if best is None:
                 continue
             reason = analysis_results.uninformative_reason(
                 analysis,
                 exception_count=exceptions,
-                denominator=tested,
-                rate=(exceptions / tested) if tested else None,
+                denominator=denominator,
+                rate=(exceptions / denominator) if denominator else None,
             )
-            identifier = str(analysis.get("id") or "")
             if reason:
-                rejected.append((identifier, reason))
+                rejected.append((best.analysis_id, reason))
                 continue
-            hits.append(Hit(identifier, table, root, exceptions, tested))
-        hits.sort(key=lambda hit: (-hit.exceptions, hit.analysis_id))
+            hits.append(best)
         scored.append(ItemScore(key, tuple(hits), tuple(rejected)))
     return Score(
         workspace_id=str(workspace.id),
         run_id=run_id,
         items=tuple(scored),
         analyses=len(analyses),
-        unscoreable=tuple(unscoreable),
     )
+
+
+_CELL = {"saturated": "*sat.*", "broad": "*broad*", "partial": "*partial*", "absent": "—"}
 
 
 def reach_table(scores: Sequence[Score], labels: Sequence[str]) -> str:
@@ -382,11 +400,11 @@ def reach_table(scores: Sequence[Score], labels: Sequence[str]) -> str:
         for score in scores:
             entry = score.items[index]
             if entry.reached:
-                cells.append(entry.hits[0].fraction)
-            elif entry.saturated:
-                cells.append("*sat.*")
+                cells.append(entry.best.fraction)
+            elif entry.status == "partial":
+                cells.append(f"*partial {entry.best.found}/{entry.best.expected}*")
             else:
-                cells.append("—")
+                cells.append(_CELL[entry.status])
         lines.append(f"| {key.item.id} {key.item.label} | " + " | ".join(cells) + " |")
     totals = " | ".join(f"**{len(score.reached)}**" for score in scores)
     lines.append(f"| **Reached** | {totals} |")
@@ -395,20 +413,13 @@ def reach_table(scores: Sequence[Score], labels: Sequence[str]) -> str:
 
 def _report(score: Score, label: str) -> str:
     lines = [
-        f"{label}: {len(score.reached)} of {score.addressable} scoreable items "
+        f"{label}: {len(score.reached)} of {score.addressable} items "
         f"from {score.analyses} analyses"
     ]
-    missing = [item.item.id for item in score.items if not item.reached]
-    if missing:
-        lines.append("  absent: " + ", ".join(missing))
-    saturated = [item.item.id for item in score.items if item.saturated]
-    if saturated:
-        lines.append("  rejected as saturated: " + ", ".join(saturated))
-    if score.unscoreable:
-        lines.append(
-            "  not scoreable by signature: "
-            + ", ".join(item.id for item in score.unscoreable)
-        )
+    for status in ("partial", "broad", "saturated", "absent"):
+        ids = [item.item.id for item in score.items if item.status == status]
+        if ids:
+            lines.append(f"  {status}: " + ", ".join(ids))
     return "\n".join(lines)
 
 

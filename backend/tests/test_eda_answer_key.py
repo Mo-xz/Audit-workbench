@@ -15,7 +15,6 @@ from types import SimpleNamespace
 from eda_answer_key import (
     ANSWER_KEY,
     OUT_OF_SCOPE,
-    Signature,
     reach_table,
     score_workspace,
 )
@@ -23,173 +22,161 @@ from eda_answer_key import (
 GUIDE = Path(__file__).resolve().parents[2] / "docs" / "sample-procurement" / "FACILITATOR_GUIDE.md"
 
 
-def _workspace(*analyses: dict, joins: list[dict] | None = None) -> object:
-    """A workspace stub carrying only what the scorer reads."""
-    return SimpleNamespace(
-        id="stub",
-        analyses=list(analyses),
-        tables=[{"name": name} for name in ("invoice_data", "requisitions",
-                                            "staff_details", "vendor_master_file",
-                                            "po_data")],
-        joins=list(joins or []),
-    )
+def _workspace(*analyses: dict) -> object:
+    """A workspace stub carrying only what the scorer reads.
+
+    No join is declared, so every frame is its own root: the table an analysis
+    names is the population its rows belong to.
+    """
+    return SimpleNamespace(id="stub", analyses=list(analyses), tables=[], joins=[])
 
 
 def _analysis(
     identifier: str,
-    test: str,
-    params: dict,
+    column: str,
+    flagged: list[str],
     *,
     table: str = "invoice_data",
-    exceptions: int = 1,
+    kind: str = "analytics",
     tested: int = 100,
 ) -> dict:
+    """An analysis whose flagged rows hold ``flagged`` in ``column``."""
     return {
         "id": identifier,
         "table": table,
-        "kind": "analytics",
-        "spec": {"test": test, "params": params},
+        "kind": kind,
+        "spec": {"test": "compare_columns", "params": {}} if kind == "analytics" else {"code": "result = df"},
+        **({"outcome_policy": {"mode": "exception_rows"}} if kind == "python" else {}),
         "last_result": {
-            "exception_count": exceptions,
+            "exception_count": len(flagged),
             "tested": tested,
-            "verdict": "fail" if exceptions else "ok",
+            "verdict": "fail" if flagged else "ok",
         },
+        "_evidence": {"frame": {"columns": [column], "rows": [[value] for value in flagged]}}
+        if flagged
+        else None,
     }
+
+
+def _score(*analyses: dict):
+    return score_workspace(_workspace(*analyses), evidence=lambda analysis: analysis["_evidence"])
 
 
 def _reached(score) -> set[str]:
     return {item.item.id for item in score.reached}
 
 
-def test_a_comparison_matches_in_either_direction():
-    """``A ≥ B`` and ``B ≤ A`` are one computation written two ways."""
-    forward = _workspace(
-        _analysis(
-            "A-1", "compare_columns",
-            {"column": "INVOICE_DATE", "other": "PO_DATE", "op": "ge"},
-            table="invoice_data_po_data_joined",
-        )
+def _status(score, item_id: str) -> str:
+    return next(item.status for item in score.items if item.item.id == item_id)
+
+
+def test_any_procedure_that_flags_the_records_reaches_the_item():
+    """The rows are the conclusion; the spec is only how it was reached.
+
+    Matching by library test and column set missed a completeness check over
+    three approval dates that flagged exactly P-08's invoices, and could not see
+    a python analysis at all.
+    """
+    p08 = ["INV2024104", "INV2024131", "INV2024154"]
+    assert "P-08" in _reached(_score(_analysis("A-1", "INVOICE_ID", p08)))
+    assert "P-08" in _reached(_score(_analysis("A-2", "INVOICE_ID", p08, kind="python")))
+
+
+def test_the_unit_price_item_is_scoreable():
+    """P-11 needs a derived ratio, which only code computes; it now counts."""
+    score = _score(_analysis("A-3", "PO_NUMBER", ["PO2024127"], table="po_data", kind="python"))
+    assert "P-11" in _reached(score)
+
+
+def test_the_population_decides_what_a_record_means():
+    """A requisition's own PO number on a requisition row is not the PO item.
+
+    A joined frame carries each chain's ids side by side. Without a root, the
+    limit check that flagged REQ2024127 scored as the unit-price item, because
+    the same row holds PO2024127.
+    """
+    on_requisitions = _score(
+        _analysis("A-4", "PO_NUMBER", ["PO2024127"], table="requisitions")
     )
-    reverse = _workspace(
-        _analysis(
-            "A-2", "compare_columns",
-            {"column": "PO_DATE", "other": "INVOICE_DATE", "op": "le"},
-            table="invoice_data_po_data_joined",
-        )
-    )
-    assert "P-12" in _reached(score_workspace(forward))
-    assert "P-12" in _reached(score_workspace(reverse))
+    assert "P-11" not in _reached(on_requisitions)
+    unordered = ["REQ2024124", "REQ2024138", "REQ2024153"]
+    assert "P-04" in _reached(_score(_analysis("A-5", "REQUISITION_ID", unordered, table="requisitions")))
+    assert "P-04" not in _reached(_score(_analysis("A-6", "REQUISITION_ID", unordered, table="po_data")))
 
 
 def test_a_value_filter_matches_only_the_side_it_flags():
-    """Flagging {Active} is the opposite finding from allowing it.
-
-    Nothing downstream catches this: ``value_filter`` is not in
-    ``SATURATION_SENSITIVE_TESTS``, so the ten vendors behaving correctly would
-    have scored as P-05 had the matcher ignored ``mode``.
-    """
-    inverted = _workspace(
-        _analysis(
-            "A-3", "value_filter",
-            {"column": "VENDOR_STATUS", "mode": "flag", "values": ["Active"]},
-            table="vendor_master_file", exceptions=10, tested=12,
-        )
+    """Flagging {Active} names the ten vendors behaving correctly, not P-05."""
+    active = [f"V10{n:02d}" for n in (1, 4, 7, 13, 19, 22, 25, 28, 31, 34)]
+    assert "P-05" not in _reached(
+        _score(_analysis("A-7", "VENDOR_ID", active, table="vendor_master_file", tested=12))
     )
-    correct = _workspace(
-        _analysis(
-            "A-4", "value_filter",
-            {"column": "VENDOR_STATUS", "mode": "allow", "values": ["Active"]},
-            table="vendor_master_file", exceptions=2, tested=12,
-        )
+    assert "P-05" in _reached(
+        _score(_analysis("A-8", "VENDOR_ID", ["V1010", "V1017"], table="vendor_master_file", tested=12))
     )
-    assert "P-05" not in _reached(score_workspace(inverted))
-    assert "P-05" in _reached(score_workspace(correct))
 
 
-def test_the_population_decides_what_a_blank_column_means():
-    """A blank ``PO_NUMBER`` is P-04 only on the requisitions' own rows.
-
-    The same completeness check over another table's rows names nothing about
-    approved requisitions left unordered, so it must not score as that item.
-    """
-    requisitions = _workspace(
-        _analysis("A-5", "completeness", {"columns": ["PO_NUMBER"]},
-                  table="requisitions", exceptions=3, tested=55)
-    )
-    orders = _workspace(
-        _analysis("A-6", "completeness", {"columns": ["PO_NUMBER"]},
-                  table="po_data", exceptions=3, tested=52)
-    )
-    assert _reached(score_workspace(requisitions)) == {"P-04"}
-    assert _reached(score_workspace(orders)) == set()
+def test_some_of_the_records_is_partial_not_reached():
+    score = _score(_analysis("A-9", "INVOICE_ID", ["INV2024104"]))
+    assert "P-08" not in _reached(score)
+    assert _status(score, "P-08") == "partial"
+    assert "*partial 1/3*" in reach_table([score], ["x"])
 
 
-def test_an_item_with_two_readings_is_reached_by_either():
-    """P-14 is billing before delivery, read on the invoice or the received date."""
-    for column in ("INVOICE_DATE", "DATE_RECEIVED"):
-        found = _workspace(
-            _analysis(
-                "A-14", "compare_columns",
-                {"column": column, "other": "GRN_DATE", "op": "ge"},
-                table="invoice_data_po_data_joined", exceptions=4, tested=52,
-            )
-        )
-        assert "P-14" in _reached(score_workspace(found)), column
+def test_a_capture_among_many_other_rows_is_broad_not_reached():
+    """Three over-billed invoices among forty flagged have not been isolated."""
+    flagged = ["INV2024106", "INV2024140", "INV2024122"] + [f"INV2025{n:03d}" for n in range(37)]
+    score = _score(_analysis("A-10", "INVOICE_ID", flagged, tested=200))
+    assert "P-07" not in _reached(score)
+    assert _status(score, "P-07") == "broad"
 
 
-def test_a_saturated_comparison_is_not_a_hit():
+def test_a_saturated_result_is_not_a_hit():
     """A result flagging its whole population establishes nothing about a row."""
-    saturated = _workspace(
-        _analysis(
-            "A-7", "compare_columns",
-            {"column": "INVOICE_DATE", "other": "PO_DATE", "op": "ge"},
-            table="invoice_data_po_data_joined", exceptions=52, tested=52,
-        )
-    )
-    score = score_workspace(saturated)
+    score = _score(_analysis("A-11", "INVOICE_ID", ["INV2024004"], tested=1))
     assert "P-12" not in _reached(score)
-    entry = next(item for item in score.items if item.item.id == "P-12")
-    assert entry.saturated
-    assert reach_table([score], ["x"]).count("*sat.*") == 1
+    assert _status(score, "P-12") == "saturated"
+    row = next(line for line in reach_table([score], ["x"]).splitlines() if "P-12" in line)
+    assert row.endswith("| *sat.* |")
 
 
 def test_a_clean_result_reaches_nothing():
-    """A test that ran and found nothing is a real answer and is not the item."""
-    clean = _workspace(
-        _analysis(
-            "A-9", "compare_columns",
-            {"column": "INVOICE_DATE", "other": "PO_DATE", "op": "ge"},
-            table="invoice_data_po_data_joined", exceptions=0, tested=52,
-        )
-    )
-    assert _reached(score_workspace(clean)) == set()
+    assert _reached(_score(_analysis("A-12", "INVOICE_ID", []))) == set()
 
 
-def test_unscoreable_items_are_reported_not_counted_absent():
-    score = score_workspace(_workspace())
-    assert {item.id for item in score.unscoreable} == {"P-11"}
-    assert all(item.item.id != "P-11" for item in score.items)
-
-
-def test_every_key_item_is_either_signed_or_explained():
+def test_every_key_item_names_its_records():
     for item in ANSWER_KEY:
-        assert bool(item.signatures) != bool(item.unscoreable), item.id
-        for signature in item.signatures:
-            assert isinstance(signature, Signature)
-            if signature.test == "value_filter":
-                # Established above: an unmoded value_filter matcher scores the
-                # inverse finding as a hit.
-                assert signature.mode in {"flag", "allow"}, item.id
+        assert item.readings, item.id
+        for reading in item.readings:
+            assert reading.column and reading.ids, item.id
+
+
+def _guide_records(cell: str) -> set[str]:
+    """Record ids a guide cell names, expanding ``REQ/PO/INV2024126``."""
+    found: set[str] = set()
+    for prefixes, number in re.findall(r"((?:REQ|PO|INV)(?:/(?:REQ|PO|INV))*)(\d{7})", cell):
+        found.update(f"{prefix}{number}" for prefix in prefixes.split("/"))
+    return found
 
 
 def test_the_key_is_the_facilitator_guide():
-    """Every exception the guide tables is keyed here, and nothing else is.
+    """Every exception the guide tables is keyed here, with the guide's records.
 
     The guide is what a run is scored against by hand; a scorer that drifted
     from it would report coverage of a key nobody reads.
     """
     text = GUIDE.read_text(encoding="utf-8")
-    tabled = set(re.findall(r"^\| (P-\d\d) \|", text, re.MULTILINE))
+    rows = dict(re.findall(r"^\| (P-\d\d) \|([^\n]*)$", text, re.MULTILINE))
     elsewhere = set(re.findall(r"^\| ([DJ]-\d\d) \|", text, re.MULTILINE))
-    assert {item.id for item in ANSWER_KEY} == tabled
+    assert {item.id for item in ANSWER_KEY} == set(rows)
     assert set(OUT_OF_SCOPE) == elsewhere
+    for item in ANSWER_KEY:
+        # The records column is the fourth cell; the value column after it can
+        # carry figures that look like nothing here.
+        cells = rows[item.id].split("|")
+        keyed = {
+            record
+            for reading in item.readings
+            if reading.column != "VENDOR_ID"
+            for record in reading.ids
+        }
+        assert keyed == _guide_records(cells[3]), item.id

@@ -37,7 +37,7 @@ from .. import (
 )
 from ..text import counted, verb
 from ..workspace_transactions import parent_hashes
-from ..planning_cycle import cycle_process_names
+from ..planning_cycle import cycle_process_names, cycle_record_coverage
 from ..workspaces import (
     Workspace,
     WorkspaceConflict,
@@ -45,7 +45,7 @@ from ..workspaces import (
     slugify,
 )
 from . import capabilities as audit_capabilities
-from . import narration, store, workflow
+from . import data_map, narration, store, workflow
 from .action_execution import ActionExecution
 from .analysis_execution import AnalysisWorkflowExecution
 from .capabilities.analysis import (
@@ -1845,6 +1845,10 @@ class AuditWorkflowExecution(ActionExecution):
         )
         task = self.add_task("cycle", "workflow:cycle", "Cycle design")
         stored_cycle = self.ws.planning.get("cycle") or {}
+        try:
+            data_steps = data_map.data_steps(data_map.build_data_map(self.ws))
+        except Exception:  # noqa: BLE001 - the map informs the shape; it never blocks it
+            data_steps = []
 
         def context_provider():
             return resolve_context(
@@ -1882,6 +1886,19 @@ class AuditWorkflowExecution(ActionExecution):
                     self.warn(
                         f"Cycle step '{step.get('name')}' has no document type "
                         "recording it, so no cycle test can reach it."
+                    )
+            committed = self.ws.planning.get("cycle") or {}
+            if data_steps:
+                unrecorded, unclaimed = cycle_record_coverage(committed, data_steps)
+                for name in unrecorded:
+                    self.warn(
+                        f"Cycle step '{name}' has no dated record of its own in the "
+                        "tables, so the data cannot show when or whether it happened."
+                    )
+                for step in unclaimed:
+                    self.warn(
+                        f"The tables record a step the cycle does not name: "
+                        f"{step['table']}.{step['columns'][0]}."
                     )
             if not any(
                 population.get("anchor")
@@ -1953,6 +1970,11 @@ class AuditWorkflowExecution(ActionExecution):
                     # groups its rows by orphans them, so both vocabularies in
                     # play are handed back to the turn that could break them.
                     "existing_steps": cycle_process_names(stored_cycle),
+                    # The dated steps the tables record, in the order the data
+                    # puts them, read from the data map with no model turn.
+                    # The turn names which of them each cycle step is; local
+                    # code writes the columns.
+                    "data_steps": data_steps,
                     "existing_processes": sorted(
                         {
                             str(row.get("process") or "").strip()
@@ -3613,6 +3635,10 @@ def build_audit_workflow_runner(
         "analysis.executed": (
             analysis_adapter._bind_execution,
             {"deterministic": "analysis.execution"},
+        ),
+        "analysis.profiled": (
+            analysis_adapter._bind_profile,
+            {"deterministic": "analysis.profile"},
         ),
     }
     # The three document generation capabilities ``planning.context_ready``

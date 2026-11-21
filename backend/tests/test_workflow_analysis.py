@@ -21,7 +21,7 @@ from app import analysis_payloads, analysis_results, analytics, llm, workspaces
 from app.agent import narration, runner, store, workflow
 from app.agent import capabilities as capability_registries
 from app.agent import joins as join_diagnostics
-from app.agent import probes
+from app.agent import data_map, probes
 from app.agent import register as assertion_register
 from app.agent.analysis_execution import build_analysis_workflow_runner
 from app.agent.audit_execution import build_audit_workflow_runner
@@ -226,9 +226,10 @@ def test_analysis_graph_declares_a_linear_closure_with_a_stable_hash():
         "data.relationships_inferred": (),
         "data.join_utility_ready": ("data.relationships_inferred",),
         "data.joins_ready": ("data.join_utility_ready",),
+        "analysis.profiled": ("data.relationships_inferred",),
         "analysis.register_ready": ("data.relationships_inferred",),
         "analysis.definitions_ready": ("analysis.register_ready",),
-        "analysis.inputs_ready": ("analysis.definitions_ready",),
+        "analysis.inputs_ready": ("analysis.definitions_ready", "analysis.profiled"),
         "analysis.executed": ("analysis.inputs_ready",),
         "analysis.summarized": ("analysis.executed",),
     }
@@ -247,6 +248,7 @@ def test_analysis_graph_declares_a_linear_closure_with_a_stable_hash():
         "data.relationships_inferred",
         "analysis.register_ready",
         "analysis.definitions_ready",
+        "analysis.profiled",
         "analysis.inputs_ready",
         "analysis.executed",
         "analysis.summarized",
@@ -285,6 +287,7 @@ def test_grouped_analysis_composition_is_validated_at_startup():
     ] == [
         "data.relationships_inferred",
         "data.joins_ready",
+        "analysis.profiled",
         "analysis.inputs_ready",
         "analysis.executed",
     ]
@@ -2667,7 +2670,7 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     assert completed["status"] == "completed"
     assert [stage["status"] for stage in completed["workflow"]["stages"]] == [
         "succeeded"
-    ] * 6
+    ] * 7
     fresh = workspaces.load_workspace(ws.id)
     # The run's answer is the memo, written over the results it just recorded
     # and current against them.
@@ -2691,10 +2694,15 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     # originating in ``transactions``: the same computation, so it is dropped
     # rather than saved twice. The join keeps only the analysis that is
     # genuinely its own.
-    assert len(fresh.analyses) == 5
-    assert sum(bool(item.get("alignment")) for item in fresh.analyses) == 1
+    # The population profile is saved beside them, written from the data map
+    # with no model turn, and executed with everything else.
+    profile = [item for item in fresh.analyses if data_map.is_profile(item)]
+    authored = [item for item in fresh.analyses if not data_map.is_profile(item)]
+    assert profile
+    assert len(authored) == 5
+    assert sum(bool(item.get("alignment")) for item in authored) == 1
     assert all(item["last_result"]["status"] == "ok" for item in fresh.analyses)
-    assert "Analyses executed: 5" in completed["summary_markdown"]
+    assert f"Analyses executed: {5 + len(profile)}" in completed["summary_markdown"]
     assert [item["capability"] for item in completed["milestones"]] == [
         "analysis.executed"
     ]
@@ -2703,7 +2711,7 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     assert next(
         item["value"] for item in milestone["metrics"]
         if item["label"] == "Checks executed"
-    ) == 5
+    ) == 5 + len(profile)
     assert "rows" not in milestone and "table_rows" not in milestone
     first_turns = len(fake.calls)
     # One reading, three authored frames, one memo. Candidate alignments and
@@ -2737,7 +2745,7 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     assert len(fake.calls) == first_turns, "a repeat run must not re-bill the provider"
     unchanged = workspaces.load_workspace(ws.id)
     assert not unchanged.joins
-    assert len(unchanged.analyses) == 5
+    assert len(unchanged.analyses) == 5 + len(profile)
 
 
 def test_analysis_and_audit_requests_use_one_scheduler_with_different_outcomes(
@@ -3426,7 +3434,43 @@ def test_a_joined_frame_with_only_one_sided_proposals_settles(workspace_with_dat
             _definition_request(ws, "tx_customers"),
         )
     assert analysis_worker.NOTHING_NEW_TO_ANALYSE in str(raised.value)
-    assert "only one of the tables this frame joins" in str(raised.value)
+    assert "reads only columns of transactions" in str(raised.value)
+
+
+def test_a_joined_side_s_column_asked_per_root_row_is_new_work(workspace_with_data):
+    """A check that reads only a joined-in side still runs over the root's rows.
+
+    Asked on the customer master it says which customers lack a name; asked on
+    the transaction frame it says which transactions were raised against a
+    customer with none. Procurement lost exactly this shape — a vendor status
+    read per invoice — to a rule that judged by where the columns came from.
+    """
+    ws = _joined(workspace_with_data)
+    request = _definition_request(ws, "tx_customers")
+    accepted = analysis_worker.validate_analysis_proposal(
+        {
+            "analyses": [
+                {
+                    "title": "Transactions whose customer has no name",
+                    "kind": "analytics",
+                    "spec": {"test": "completeness", "params": {"columns": ["customer"]}},
+                    "note": "Every transaction should be raised for a named customer.",
+                },
+                {
+                    "title": "Transactions whose customer has no name, in code",
+                    "kind": "python",
+                    "spec": {
+                        "code": 'result = tables["tx_customers"].filter(pl.col("customer").is_null())'
+                    },
+                    "outcome_policy": {"mode": "exception_rows"},
+                    "note": "Every transaction should be raised for a named customer.",
+                },
+            ]
+        },
+        request,
+    )
+    assert [item["kind"] for item in accepted["analyses"]] == ["analytics", "python"]
+    assert "declined" not in accepted
 
 
 # --------------------------------------------------------------------------- #

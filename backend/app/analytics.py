@@ -1552,6 +1552,12 @@ ANALYTICS: dict[str, dict] = {
     },
 }
 
+# The profile tests live in their own module and join the one registry here, so
+# every caller — the library form, the workflow, execution — sees one catalog.
+from .analytics_profile import PROFILE_ANALYTICS  # noqa: E402
+
+ANALYTICS.update(PROFILE_ANALYTICS)
+
 
 ANALYTICS_ALIASES = {
     # The model sometimes copies a library test's display label instead of

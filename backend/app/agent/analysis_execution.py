@@ -24,7 +24,7 @@ from ..analysis_inputs import InputWorkspace, for_analysis, saved_input, source_
 from ..text import counted, verb
 from ..workspace_transactions import parent_hashes
 from ..workspaces import Workspace, WorkspaceConflict
-from . import alignment_catalog, joins as join_diagnostics, narration, probes, register, store, workflow
+from . import alignment_catalog, data_map, joins as join_diagnostics, narration, probes, register, store, workflow
 from .base import BaseRunner
 from .capabilities.analysis import (
     ANALYSIS_SCOPE_CHECKPOINT,
@@ -1212,6 +1212,76 @@ class AnalysisWorkflowExecution(BaseRunner):
         self.task_status(task, "completed")
         return DeterministicUnitResult("succeeded", tuple(receipt.artifact_refs))
 
+    # ---------------------------------------------------- analysis.profiled
+    def _bind_profile(
+        self,
+        subject: Workspace,
+        run: dict,
+        capability: workflow.Capability,
+        stage: dict,
+        unit: dict,
+    ) -> DeterministicUnitResult:
+        """Save the population profile the data map calls for. No model runs.
+
+        The map and every definition are computed locally from the scoped
+        tables. Only definitions not already saved are committed, so an
+        auditor's edit to a profile analysis is never overwritten and a rerun
+        over unchanged data writes nothing.
+        """
+        self.ws = subject
+        table_scope = self.scope()
+        mapping = data_map.build_data_map(self.ws, table_scope.tables)
+        self._analysis_record()["data_map"] = mapping
+        self.save()
+        present = {str(item.get("semantic_id") or "") for item in self.ws.analyses}
+        definitions = [
+            item
+            for item in data_map.profile_definitions(self.ws, mapping)
+            if item["semantic_id"] not in present
+        ]
+        if not definitions:
+            return DeterministicUnitResult("skipped")
+        task = self.add_task("analysis_profile", "workflow:analysis_profile", "Population profile")
+        self.task_status(task, "running")
+        frames = tuple(dict.fromkeys(str(item["table"]) for item in definitions))
+        expected = parent_hashes(
+            self.ws,
+            sorted({
+                ref
+                for item in definitions
+                for ref in (
+                    source_refs(item["alignment"]) if item.get("alignment")
+                    else (frame_ref(self.ws, item["table"]),)
+                )
+            }),
+        )
+        target = AnalysisRegisterExecutorTarget(self.ws, self.run["id"], frames)
+        try:
+            receipt = self._commit_with_receipt(
+                capability=capability,
+                unit=unit,
+                executor_id="analysis.profile",
+                proposal={"analyses": definitions, "declined": []},
+                target=target,
+                expected_parents=expected,
+            )
+        except WorkspaceConflict as error:
+            self.task_status(task, "failed", str(error))
+            return DeterministicUnitResult("conflict", error=str(error))
+        self.ws = target.workspace
+        output = receipt.output
+        for item in output.get("analyses") or []:
+            self.record_artifact(
+                "analysis", str(item["id"]), str(item.get("semantic_id") or ""),
+                str(item.get("action") or "created"), task,
+            )
+        for reason in output.get("dropped") or []:
+            self.warn(f"Profile analysis not saved — {reason}")
+        written = len(output.get("analyses") or [])
+        self.task_detail(task, f"{counted(written, 'profile analysis', 'profile analyses')} saved.")
+        self.task_status(task, "completed")
+        return DeterministicUnitResult("succeeded", tuple(receipt.artifact_refs))
+
     # -------------------------------------------- analysis.definitions_ready
     def _bind_definitions(
         self,
@@ -2011,6 +2081,7 @@ def build_analysis_workflow_runner(
             {"deterministic": "analysis.join"},
         ),
         "analysis.inputs_ready": (adapter._bind_input, {"deterministic": "analysis.inputs"}),
+        "analysis.profiled": (adapter._bind_profile, {"deterministic": "analysis.profile"}),
         "analysis.executed": (
             adapter._bind_execution,
             {"deterministic": "analysis.execution"},

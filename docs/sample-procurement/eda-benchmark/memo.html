@@ -1,0 +1,2873 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Procurement FY2024 EDA Memo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: a working paper on a desk. One A4-width sheet, running text in serif at a reading measure,
+   exhibits full sheet width, every exhibit carrying its own data and the Polars that produced it. */
+:root {
+  --desk: #e9edf1;
+  --sheet: #ffffff;
+  --ink: #14181d;
+  --ink-2: #48505b;
+  --muted: #7a828d;
+  --rule: #dfe3e8;
+  --rule-2: #c7cdd5;
+  --accent: #1d5aa6;
+  --wash: #f3f6fa;
+  --s1: #2a78d6;
+  --s1-wash: rgba(42,120,214,0.16);
+  --s2: #eb6834;
+  --grid: #e8ebef;
+  --axis: #c3c9d1;
+  --mark-quiet: #b4bbc4;
+  --critical: #d03b3b;
+  --critical-ink: #a72a2a;
+  --critical-wash: #fbecec;
+  --seq-1: #cde2fb; --seq-2: #9ec5f4; --seq-3: #6da7ec; --seq-4: #3987e5; --seq-5: #256abf; --seq-6: #184f95;
+  --seq-ink-1: #14181d; --seq-ink-2: #14181d; --seq-ink-3: #14181d; --seq-ink-4: #ffffff; --seq-ink-5: #ffffff; --seq-ink-6: #ffffff;
+  --ord-1: #86b6ef; --ord-2: #5598e7; --ord-3: #2a78d6; --ord-4: #1c5cab; --ord-5: #104281;
+  --ord-ink-1: #14181d; --ord-ink-2: #14181d; --ord-ink-3: #ffffff; --ord-ink-4: #ffffff; --ord-ink-5: #ffffff;
+  --shadow: 0 1px 2px rgba(20,24,29,0.06), 0 8px 28px rgba(20,24,29,0.07);
+  --font-text: "Source Serif 4", "Source Serif Pro", Georgia, "Times New Roman", serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --measure: 66ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desk: #0d0f12; --sheet: #16191d; --ink: #eaedf1; --ink-2: #b6bdc7; --muted: #8a919b; --rule: #272c33; --rule-2: #39404a;
+    --accent: #84b3ee; --wash: #1c2026; --s1: #3987e5; --s1-wash: rgba(57,135,229,0.22); --s2: #d95926; --grid: #23282e; --axis: #3a414a;
+    --mark-quiet: #59616b; --critical: #e05c5c; --critical-ink: #f29393; --critical-wash: #3a1e21;
+    --seq-1: #173a66; --seq-2: #184f95; --seq-3: #256abf; --seq-4: #3987e5; --seq-5: #6da7ec; --seq-6: #9ec5f4;
+    --seq-ink-1: #eaedf1; --seq-ink-2: #ffffff; --seq-ink-3: #ffffff; --seq-ink-4: #ffffff; --seq-ink-5: #0b0d10; --seq-ink-6: #0b0d10;
+    --ord-1: #184f95; --ord-2: #256abf; --ord-3: #3987e5; --ord-4: #6da7ec; --ord-5: #9ec5f4;
+    --ord-ink-1: #ffffff; --ord-ink-2: #ffffff; --ord-ink-3: #ffffff; --ord-ink-4: #0b0d10; --ord-ink-5: #0b0d10;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 10px 30px rgba(0,0,0,0.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desk: #0d0f12; --sheet: #16191d; --ink: #eaedf1; --ink-2: #b6bdc7; --muted: #8a919b; --rule: #272c33; --rule-2: #39404a;
+  --accent: #84b3ee; --wash: #1c2026; --s1: #3987e5; --s1-wash: rgba(57,135,229,0.22); --s2: #d95926; --grid: #23282e; --axis: #3a414a;
+  --mark-quiet: #59616b; --critical: #e05c5c; --critical-ink: #f29393; --critical-wash: #3a1e21;
+  --seq-1: #173a66; --seq-2: #184f95; --seq-3: #256abf; --seq-4: #3987e5; --seq-5: #6da7ec; --seq-6: #9ec5f4;
+  --seq-ink-1: #eaedf1; --seq-ink-2: #ffffff; --seq-ink-3: #ffffff; --seq-ink-4: #ffffff; --seq-ink-5: #0b0d10; --seq-ink-6: #0b0d10;
+  --ord-1: #184f95; --ord-2: #256abf; --ord-3: #3987e5; --ord-4: #6da7ec; --ord-5: #9ec5f4;
+  --ord-ink-1: #ffffff; --ord-ink-2: #ffffff; --ord-ink-3: #ffffff; --ord-ink-4: #0b0d10; --ord-ink-5: #0b0d10;
+  --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 10px 30px rgba(0,0,0,0.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--desk); color: var(--ink); margin: 0;
+  font-family: var(--font-text); font-size: 17px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+  -webkit-font-smoothing: antialiased;
+}
+.sheet {
+  max-width: 980px; margin: 0 auto; background: var(--sheet); box-shadow: var(--shadow);
+  border-radius: 3px; padding: 56px clamp(20px, 6vw, 72px) 48px;
+}
+@media (max-width: 560px) { body { padding-block: 0 32px; } .sheet { padding: 28px 18px 32px; border-radius: 0; box-shadow: none; margin-inline: -16px; } }
+
+.running { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font: 500 12px/1.4 var(--font-ui); color: var(--muted); letter-spacing: 0.02em; border-bottom: 1px solid var(--rule); padding-bottom: 10px; }
+h1 { font: 600 clamp(28px, 4.4vw, 40px)/1.15 var(--font-text); letter-spacing: -0.01em; margin: 36px 0 10px; text-wrap: balance; }
+.dek { font-size: 19px; color: var(--ink-2); max-width: var(--measure); margin: 0 0 28px; }
+.control { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 28px; margin: 0 0 8px; padding: 16px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.control div { min-width: 0; }
+.control dt { font: 500 11px/1.3 var(--font-ui); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 3px; }
+.control dd { margin: 0; font: 400 14px/1.45 var(--font-ui); color: var(--ink); }
+
+h2 { font: 600 24px/1.25 var(--font-text); margin: 56px 0 14px; display: flex; gap: 14px; align-items: baseline; text-wrap: balance; }
+h2 .no { font: 500 15px/1 var(--font-mono); color: var(--muted); min-width: 1.6em; }
+h3 { font: 600 15px/1.35 var(--font-ui); margin: 30px 0 8px; color: var(--ink); }
+p, li { max-width: var(--measure); }
+p { margin: 0 0 14px; }
+ul.points { padding-left: 1.1em; margin: 0 0 14px; }
+ul.points li { margin-bottom: 8px; }
+strong { font-weight: 600; }
+.mono, code { font-family: var(--font-mono); font-size: 0.86em; }
+a { color: var(--accent); }
+.fig { font-variant-numeric: tabular-nums; }
+
+.summary { background: var(--wash); border-radius: 4px; padding: 22px 26px 10px; margin: 28px 0 0; }
+.summary h2 { margin-top: 0; }
+.summary ol { margin: 0; padding-left: 1.3em; }
+.summary li { margin-bottom: 12px; max-width: 72ch; }
+
+figure.exhibit { margin: 28px 0 32px; padding-top: 14px; border-top: 1px solid var(--rule-2); }
+.exhibit figcaption { display: grid; gap: 2px; margin-bottom: 14px; }
+.exhibit .label { font: 600 12px/1.3 var(--font-ui); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.exhibit .title { font: 600 16px/1.35 var(--font-ui); color: var(--ink); text-wrap: balance; }
+.exhibit .sub { font: 400 13.5px/1.45 var(--font-ui); color: var(--ink-2); max-width: 80ch; }
+.chart { width: 100%; min-width: 0; position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart text { font-family: var(--font-ui); }
+.t-axis { font-size: 11.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.t-label { font-size: 12.5px; fill: var(--ink); }
+.t-label2 { font-size: 12px; fill: var(--ink-2); }
+.t-value { font-size: 12px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+.t-strong { font-size: 12.5px; fill: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.t-crit { font-size: 12px; fill: var(--critical-ink); font-weight: 500; }
+.t-value, .t-crit, .t-label2 { paint-order: stroke; stroke: var(--sheet); stroke-width: 3px; stroke-linejoin: round; }
+.t-in { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.4 var(--font-ui); color: var(--ink-2); margin: 10px 0 0; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.legend i.line { height: 3px; border-radius: 2px; width: 16px; }
+[data-tip] { cursor: default; }
+[data-tip]:focus { outline: none; }
+[data-tip]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#tip { position: fixed; z-index: 30; pointer-events: none; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule-2); box-shadow: var(--shadow); border-radius: 6px; padding: 8px 10px; font: 400 12.5px/1.45 var(--font-ui); max-width: 300px; font-variant-numeric: tabular-nums; }
+#tip b { font-weight: 600; }
+#tip .k { color: var(--muted); }
+
+details.method { margin-top: 14px; font: 400 13px/1.5 var(--font-ui); color: var(--ink-2); }
+details.method summary { cursor: pointer; color: var(--accent); font-weight: 500; width: fit-content; }
+details.method summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.method .inner { display: grid; gap: 12px; padding-top: 10px; min-width: 0; }
+details.method .kind { font: 500 11px/1 var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+pre { margin: 0; background: var(--wash); border-radius: 4px; padding: 12px 14px; overflow-x: auto; font: 400 12px/1.55 var(--font-mono); color: var(--ink); }
+
+.scroll { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; font: 400 13px/1.4 var(--font-ui); font-variant-numeric: tabular-nums; }
+table.data { width: 100%; }
+table.data th { text-align: left; font-weight: 600; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule-2); white-space: nowrap; }
+table.data td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink); }
+table.data td.num, table.data th.num { text-align: right; }
+.heat th { font: 600 11px/1.25 var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 4px 6px; text-align: center; vertical-align: bottom; }
+.heat th.row { text-align: left; text-transform: none; letter-spacing: 0; font: 400 12.5px/1.3 var(--font-ui); color: var(--ink); padding-right: 12px; white-space: nowrap; }
+.heat th.row small { display: block; color: var(--muted); font-size: 11px; }
+.heat td { padding: 2px; }
+.cell { min-width: 52px; height: 34px; border-radius: 4px; display: grid; place-items: center; font: 600 12.5px/1 var(--font-ui); position: relative; }
+.cell.empty { background: transparent; color: var(--muted); font-weight: 400; }
+.cell.breach { box-shadow: inset 0 0 0 2px var(--critical); }
+.cell.breach::after { content: "!"; position: absolute; top: 2px; right: 5px; font: 700 10px/1 var(--font-ui); color: var(--critical-ink); }
+.cell.none { background: var(--critical-wash) !important; color: var(--critical-ink) !important; }
+.heat-note { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.4 var(--font-ui); color: var(--ink-2); margin-top: 10px; }
+.heat-note span { display: inline-flex; gap: 7px; align-items: center; }
+.swatch-breach { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 2px var(--critical); display: inline-block; }
+.swatch-none { width: 14px; height: 14px; border-radius: 3px; background: var(--critical-wash); display: inline-block; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 24px 36px; }
+.pair > div { min-width: 0; }
+.pair h4 { font: 600 13px/1.3 var(--font-ui); margin: 0 0 8px; color: var(--ink); }
+
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 4px; }
+.flow .node { border: 1px solid var(--rule-2); border-radius: 6px; padding: 12px 14px; display: grid; gap: 3px; min-width: 0; }
+.flow .node .k { font: 500 11px/1.2 var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.flow .node .v { font: 600 22px/1.15 var(--font-ui); color: var(--ink); }
+.flow .node .s { font: 400 12.5px/1.4 var(--font-ui); color: var(--ink-2); }
+.flow .node .s.bad { color: var(--critical-ink); }
+
+.register { width: 100%; }
+.register td.theme { white-space: nowrap; color: var(--ink-2); }
+.register td.rec { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); max-width: 230px; }
+.register tr.group td { padding-top: 16px; font: 600 11px/1.3 var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule-2); }
+.register .what { font-weight: 500; }
+.register .why { display: block; color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+
+.callout { border-left: 3px solid var(--critical); background: var(--critical-wash); padding: 14px 18px; border-radius: 0 4px 4px 0; margin: 22px 0; font: 400 14px/1.55 var(--font-ui); color: var(--ink); max-width: 80ch; }
+.callout b { font-weight: 600; }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 8px 0 6px; font: 500 12.5px/1.3 var(--font-mono); }
+.chain span.n { background: var(--sheet); border: 1px solid var(--rule-2); border-radius: 4px; padding: 4px 8px; }
+.chain span.a { color: var(--muted); font-family: var(--font-ui); }
+
+.cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px 40px; }
+.cols2 > div { min-width: 0; }
+.qa { padding-left: 1.2em; margin: 0; }
+.qa li { margin-bottom: 10px; font-size: 16px; }
+.endmark { text-align: center; color: var(--muted); font: 500 12px/1 var(--font-ui); letter-spacing: 0.2em; margin-top: 48px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="sheet">
+  <div class="running"><span>Global Bank · Procure-to-pay audit · FY2024</span><span>Exploratory data analysis · draft for discussion</span></div>
+
+  <h1>What the procurement data shows</h1>
+  <p class="dek">A reading of the six procure-to-pay tables before any test is designed: what the population is, where the money goes, how the cycle runs, who holds authority, and where the records break their own pattern.</p>
+
+  <dl class="control">
+    <div><dt>Population</dt><dd><span class="fig">55</span> requisitions, <span class="fig">52</span> POs, <span class="fig">52</span> invoices</dd></div>
+    <div><dt>Value</dt><dd>PKR <span class="fig">622.5M</span> paid against <span class="fig">645.4M</span> requisitioned</dd></div>
+    <div><dt>Period</dt><dd>Requisitions 8 Jan to 20 Dec 2024; payments to 10 Feb 2025</dd></div>
+    <div><dt>Sources</dt><dd>Requisitions, PO data, invoice data, staff, vendor master, approval matrix</dd></div>
+    <div><dt>Basis</dt><dd>Every figure computed locally in Polars; method under each exhibit</dd></div>
+  </dl>
+
+  <section class="summary" aria-labelledby="s0">
+    <h2 id="s0"><span class="no">§</span>Summary</h2>
+    <ol>
+      <li><strong>A small, complete, one-year cycle that reconciles on one line.</strong> Every requisition maps to at most one PO and every PO to exactly one invoice. PKR 645.4M was requisitioned, 35.4M of it was never ordered, invoices ran 12.6M above their POs, and 622.5M was paid. Nothing is open: every PO is closed, every GRN received, every invoice paid.</li>
+      <li><strong>Value sits in a few large purchases, one requester and five vendors.</strong> The 18 requisitions over 10M carry 86% of the value. The Facilities Manager alone raised 45% of it. Five of twelve vendors received 79% of payments.</li>
+      <li><strong>Authority is used by band, almost mechanically, which puts the CEO on most of the money.</strong> Approvals follow the matrix bands so closely that the CEO signed 77% of requisition value and 80% of payments. The five breaches are lower-limit approvers signing one band up; four of them are the Head of Treasury.</li>
+      <li><strong>The records behave like keyed data more than system events.</strong> Every PO equals its requisition estimate to the rupee. Thirteen of fourteen items carry a single unit price across every order and vendor. And 27% of all dates fall on a weekend, which is what dates ignoring the calendar would give. Tests built on estimates or day counts measure what was typed.</li>
+      <li><strong>Departments and vendors do not describe what was bought.</strong> Human Resources bought three data-centre UPS replacements (108.8M paid). A marketing agency supplied a branch fit-out and onboarding kits. The largest vendor, an IT hardware firm, was paid for seven different things, including security consulting.</li>
+      <li><strong>The cycle is fast and pays early.</strong> A requisition is paid a median 47 days after it is raised. Every invoice was paid before its due date, a median 13 days early on 30-day terms.</li>
+      <li><strong>The exceptions cluster at the payment step.</strong> Of fourteen exception patterns, four sit where an invoice is released: paid with no goods receipt reference, paid before the goods arrived, paid with no approval, and billed above the PO. One chain, 2024127, combines a unit price 37.5 times the norm with two authority breaches.</li>
+    </ol>
+  </section>
+
+  <h2 id="s1"><span class="no">1</span>The data received</h2>
+  <p>Six tables arrived: three transaction tables that form one chain, and three masters that the chain refers to. The chain is unusually clean. Requisition, PO and invoice numbers move in lockstep (REQ2024<em>n</em> becomes PO2024<em>n</em> and INV2024<em>n</em>), each PO cites exactly one requisition, and each invoice cites exactly one PO. There are no split orders, no part-invoicing and no credit notes.</p>
+
+  <div class="flow" aria-label="Population at each step of the chain">
+    <div class="node"><span class="k">Requisitions</span><span class="v fig">55</span><span class="s">PKR 645.4M requisitioned</span><span class="s bad">3 approved, never ordered</span></div>
+    <div class="node"><span class="k">Purchase orders</span><span class="v fig">52</span><span class="s">PKR 610.0M; all closed</span><span class="s">Each equals its estimate</span></div>
+    <div class="node"><span class="k">Goods receipts</span><span class="v fig">52</span><span class="s">One per PO; all received</span><span class="s bad">3 invoices cite none</span></div>
+    <div class="node"><span class="k">Invoices paid</span><span class="v fig">52</span><span class="s">PKR 622.5M; all paid</span><span class="s bad">3 above their PO</span></div>
+  </div>
+
+  <figure class="exhibit" id="ex-bridge">
+    <figcaption><span class="label">Exhibit 1</span><span class="title">From requisitioned to paid, PKR</span><span class="sub">The population reconciles exactly: the two movements are the three requisitions never ordered and the three invoices billed above their PO.</span></figcaption>
+    <div class="chart" data-chart="bridge"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Reconciliation across the chain</span>
+<pre>chain = (req.join(po, on="REQUISITION_ID", how="left")
+            .join(inv, left_on="PO_NUMBER", right_on="PO_NUMBER_LINK", how="left"))
+never_ordered = chain.filter(pl.col("PO_DATE").is_null())["ESTIMATED_TOTAL_COST"].sum()
+billed_above  = chain.select((pl.col("INVOICE_AMOUNT") - pl.col("PO_TOTAL_AMOUNT")).clip(0)).sum()</pre></div></details>
+  </figure>
+
+  <h3>What kind of data this is</h3>
+  <p>Four properties of the records matter more for test design than any single exception.</p>
+  <ul class="points">
+    <li><strong>The estimate is not an estimate.</strong> All 52 POs equal their requisition's estimated cost exactly. Either the PO value overwrites the estimate, or the PO is raised from it without negotiation. A test that the PO stays within the estimate will pass on every row and prove nothing.</li>
+    <li><strong>Prices are a catalogue.</strong> Thirteen of fourteen items have one unit price on every PO, whichever of two to five vendors supplied them (Exhibit 12). Price variance across vendors cannot be analysed here; only a price that breaks the catalogue stands out.</li>
+    <li><strong>Dates ignore the working week.</strong> Of 566 dated events across the chain, 155 (27.4%) fall on a Saturday or Sunday, against 28.6% if dates were spread at random across the week (Exhibit 2). Approval and payment dates look keyed rather than stamped by a system. Day-count tests remain useful for finding order breaks, but they measure the dates as entered.</li>
+    <li><strong>One chain sits outside every series.</strong> REQ2024009 became PO2024004 and INV2024004, while every other chain shares one number. Its vendor invoice number, VINV001-202404, is the only one not in the VINV<em>nnn</em>-2024 form. It is also the only chain where the invoice predates the PO, and the only requisition approved one band above its value (by the CEO, for 2.0M).</li>
+  </ul>
+
+  <figure class="exhibit" id="ex-weekend">
+    <figcaption><span class="label">Exhibit 2</span><span class="title">Share of each date field falling on a weekend</span><span class="sub">If business events followed a Monday to Friday week, these bars would sit near zero. They sit around the 28.6% that random dates produce.</span></figcaption>
+    <div class="chart" data-chart="weekend"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Calendar profile of every date column</span>
+<pre>for col in date_columns:
+    x = chain[col].drop_nulls()
+    share = (x.dt.weekday() &gt;= 6).mean()   # Saturday = 6, Sunday = 7</pre></div></details>
+  </figure>
+
+  <h2 id="s2"><span class="no">2</span>Where the money goes</h2>
+  <p>The requisition values run from 36,000 to 85M, with a median of 3.0M. The distribution is steep: a third of the requisitions carry almost nine tenths of the value, and the 17 requisitions under 1M add up to 1.1% of it. Any sample selected by value is, in effect, a review of 18 purchases.</p>
+
+  <figure class="exhibit" id="ex-bands">
+    <figcaption><span class="label">Exhibit 3</span><span class="title">Requisitions by size band: share of count against share of value</span><span class="sub">31 of 55 requisitions are 5M or less and hold 6.3% of the value. 18 are over 10M and hold 86.5%.</span></figcaption>
+    <div class="chart" data-chart="bands"></div>
+    <div class="legend" data-legend="bands"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Distribution by value band</span>
+<pre>req.with_columns(pl.col("ESTIMATED_TOTAL_COST")
+        .cut([1e6, 5e6, 10e6, 50e6], labels=["Up to 1M", "1M to 5M", "5M to 10M", "10M to 50M", "Over 50M"])
+        .alias("band"))
+   .group_by("band").agg(pl.len(), pl.col("ESTIMATED_TOTAL_COST").sum())</pre><div class="scroll" data-table="bands"></div></div></details>
+  </figure>
+
+  <h3>By department</h3>
+  <p>Facilities is the largest spender by a wide margin: nine requisitions, 291.8M, 45% of the total, all raised by one person, the Facilities Manager. That includes three of the four largest purchases in the year (85M, 74M and 74M). Procurement raises the most requisitions (19) but at a median of 1.9M; its two Requisition and PO Associates appear to raise orders on behalf of other functions.</p>
+
+  <figure class="exhibit" id="ex-dept">
+    <figcaption><span class="label">Exhibit 4</span><span class="title">Requisitioned value by requesting department, PKR</span><span class="sub">Label shows value, share and number of requisitions. Hover for the people who raised them.</span></figcaption>
+    <div class="chart" data-chart="dept"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Breakdown, value and count by category</span>
+<pre>req.group_by("REQUESTER_DEPARTMENT").agg(
+    pl.len().alias("requisitions"),
+    pl.col("ESTIMATED_TOTAL_COST").sum().alias("value"),
+    pl.col("REQUESTER_ID").n_unique().alias("requesters"),
+).with_columns((pl.col("value") / pl.col("value").sum()).alias("share")).sort("value", descending=True)</pre></div></details>
+  </figure>
+
+  <h3>By vendor</h3>
+  <p>Twelve vendors were paid. The top five took 79% of payments, and Vertex IT Hardware alone took 28% across seven invoices. Two vendors that the master marks as not active were ordered from and paid: RapidBuild Constructors (Under Review, 5.25M) and Express Courier Services (Inactive, 0.95M). The master records no date for either status, so it cannot say whether the status changed before or after the order.</p>
+
+  <figure class="exhibit" id="ex-vendor">
+    <figcaption><span class="label">Exhibit 5</span><span class="title">Payments by vendor, PKR</span><span class="sub">Vendors not marked Active in the master are flagged. Hover for the number of different items each supplied.</span></figcaption>
+    <div class="chart" data-chart="vendor"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Concentration with a master-data join</span>
+<pre>(inv.join(vendor_master, on="VENDOR_ID", how="left")
+    .join(po.select("PO_NUMBER", "ITEM_DESCRIPTION"), left_on="PO_NUMBER_LINK", right_on="PO_NUMBER")
+    .group_by("VENDOR_ID", "VENDOR_NAME", "VENDOR_STATUS")
+    .agg(pl.col("INVOICE_AMOUNT").sum(), pl.len(), pl.col("ITEM_DESCRIPTION").n_unique().alias("items"))
+    .with_columns((pl.col("INVOICE_AMOUNT").cum_sum() / pl.col("INVOICE_AMOUNT").sum()).alias("cumulative")))</pre></div></details>
+  </figure>
+
+  <h3>What each department bought</h3>
+  <p>Read against the items, neither the department nor the vendor describes the purchase. Human Resources bought three of the four data-centre UPS replacements, including the two largest (64M and 32M). Marketing bought a core banking licence renewal and a UPS replacement. Facilities bought two security consulting engagements worth 95.2M. On the supply side, every item came from two to five vendors, and vendors supplied up to seven unrelated items each. Before any test leans on department or vendor as a category, the client should say what the department field records: the function that needed the goods, the budget holder, or the person who keyed the requisition.</p>
+
+  <figure class="exhibit" id="ex-mix">
+    <figcaption><span class="label">Exhibit 6</span><span class="title">Number of purchases by item and requesting department</span><span class="sub">Shading follows the value paid. Rows are ordered by total value. Hover a cell for its value.</span></figcaption>
+    <div class="chart scroll" data-chart="mix"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Cross-tabulation of two categories</span>
+<pre>chain.group_by("ITEM_DESCRIPTION", "REQUESTER_DEPARTMENT").agg(pl.len(), pl.col("INVOICE_AMOUNT").sum())
+     .pivot(on="REQUESTER_DEPARTMENT", index="ITEM_DESCRIPTION", values="len")</pre></div></details>
+  </figure>
+
+  <h3>Over the year</h3>
+  <p>Commitments come in two waves: January to March, and September to November. May to August is quiet, and no requisition at all was raised in May. Payments follow commitments by about a month, so cash goes out in two peaks, March (205.7M) and October (166.2M). Nothing in the profile looks like a year-end rush. December commitments are modest (32.9M) and the payments made in January and February 2025 all relate to POs raised in November and December.</p>
+
+  <figure class="exhibit" id="ex-month">
+    <figcaption><span class="label">Exhibit 7</span><span class="title">Value committed and paid by month, PKR</span><span class="sub">Committed is the PO value by PO date. Paid is the invoice value by payment date. The extract holds no PO raised in 2025, so the committed line stops at December.</span></figcaption>
+    <div class="legend" data-legend="month"></div>
+    <div class="chart" data-chart="month"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Trend over time, two measures on one scale</span>
+<pre>committed = po.group_by(pl.col("PO_DATE").dt.truncate("1mo")).agg(pl.col("PO_TOTAL_AMOUNT").sum())
+paid      = inv.group_by(pl.col("PAYMENT_DATE").dt.truncate("1mo")).agg(pl.col("INVOICE_AMOUNT").sum())</pre><div class="scroll" data-table="month"></div></div></details>
+  </figure>
+
+  <h2 id="s3"><span class="no">3</span>How the cycle runs</h2>
+  <p>Each requisition approval step takes one to four days. Raising the PO after financial approval takes up to 13 days (median 6.5), delivery takes 5 to 25 days, and payment follows invoice approval by 3 to 20 days. End to end, a requisition is paid a median 47 days after it is raised, and never sooner than 19 or later than 64.</p>
+  <p>The value of a timing profile is that it says what normal is, and so how abnormal a break is. Two steps run backwards for some records. Four invoices are dated before the goods receipt, three of them by exactly 23 days. Two invoices were recorded as received before their own invoice date. And the normal range makes the three requisitions that were never ordered stand out: approved 87 to 154 days before year end, when every other requisition became a PO within 13 days.</p>
+
+  <figure class="exhibit" id="ex-cycle">
+    <figcaption><span class="label">Exhibit 8</span><span class="title">Days taken by each step of the chain</span><span class="sub">The line spans the fastest to slowest record, the bar the middle half, the dot the median. A step that falls left of zero ran before the step it should follow.</span></figcaption>
+    <div class="chart" data-chart="cycle"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Duration profile between consecutive events</span>
+<pre>steps = [("REQUISITION_DATE", "VERIFIED_DATE"), ("VERIFIED_DATE", "APPROVAL_DATE"), ...,
+         ("SUPERVISOR_APPROVAL_DATE", "PAYMENT_DATE")]
+for a, b in steps:
+    days = chain.select((pl.col(b) - pl.col(a)).dt.total_days()).drop_nulls().to_series()
+    profile = days.min(), days.quantile(0.25), days.median(), days.quantile(0.75), days.max(), (days &lt; 0).sum()</pre><div class="scroll" data-table="cycle"></div></div></details>
+  </figure>
+
+  <p>Every one of the 52 invoices was paid before its due date: between 4 and 21 days early, a median of 13 days, on 30-day terms. The bank is financing its suppliers for roughly two weeks on every invoice. That is a treasury question rather than a control failure. It also means there are no late payments to explain, and no pressure on the payment step that would excuse skipping a match.</p>
+
+  <figure class="exhibit" id="ex-early">
+    <figcaption><span class="label">Exhibit 9</span><span class="title">Invoices by days paid before the due date</span><span class="sub">Grouped in three-day bands. Nothing was paid on or after the due date.</span></figcaption>
+    <div class="chart" data-chart="early"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Distribution of a derived duration</span>
+<pre>inv.select((pl.col("DUE_DATE") - pl.col("PAYMENT_DATE")).dt.total_days().alias("days_early"))
+   .group_by((pl.col("days_early") // 3) * 3).len()</pre></div></details>
+  </figure>
+
+  <h2 id="s4"><span class="no">4</span>Who does what</h2>
+  <p>Twenty staff appear in the staff file and nineteen of them act in the chain. Each role is held by a small, fixed group (Exhibit 11). Nine people raise requisitions. Four Finance staff verify them. Two sourcing managers give every procurement approval. Four executives give every financial approval and every invoice approval, each within a value band. The Head of Procurement acts in no role at all during the year.</p>
+  <p>Two patterns run through the whole population rather than a few rows. First, in all 48 chains that Finance verified, the same person verified the requisition at the start and the invoice at the end. That is one person owning a chain end to end, which reduces the independence of the invoice check. Second, the four requisitions that Finance did not verify were verified by the person who raised them. That is the requester stepping into the Finance role, which is why those four are exceptions and not noise.</p>
+
+  <figure class="exhibit" id="ex-routing">
+    <figcaption><span class="label">Exhibit 10</span><span class="title">Who approved what, by value band</span><span class="sub">Columns are ordered by approval limit. Approvals follow the bands almost exactly; the flagged cells are approvals above the signer's limit, and the shaded cells have no approver at all.</span></figcaption>
+    <div class="pair">
+      <div><h4>Financial approval of requisitions</h4><div class="scroll" data-chart="routing_req"></div></div>
+      <div><h4>Approval of invoices for payment</h4><div class="scroll" data-chart="routing_inv"></div></div>
+    </div>
+    <div class="heat-note"><span><i class="swatch-breach"></i>Approved above the signer's limit</span><span><i class="swatch-none"></i>No approver recorded</span><span>Shading follows the number of approvals</span></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Routing matrix with a limit test</span>
+<pre>(req.join(staff, left_on="FIN_APPROVED_BY_ID", right_on="STAFF_ID", how="left")
+    .join(matrix, on="JOB_TITLE", how="left")
+    .with_columns(band=value_band("ESTIMATED_TOTAL_COST"),
+                  over_limit=pl.col("ESTIMATED_TOTAL_COST") &gt; pl.col("MAX_APPROVAL_AMOUNT"))
+    .group_by("band", "JOB_TITLE").agg(pl.len(), pl.col("over_limit").sum()))</pre></div></details>
+  </figure>
+
+  <p>Routing by band concentrates authority. The CEO gave 18 financial approvals worth 496.6M (77% of requisition value) and 16 invoice approvals worth 495.0M (80% of payments). Whatever evidence supports the CEO's approval is the most valuable single document in the file. The breaches are not random either: four of the five are the Head of Treasury, whose limit is 1M, signing requisitions and invoices of 2.3M to 4.2M. The fifth is the CFO approving a 64M requisition against a 10M limit, while the invoice for the same purchase went correctly to the CEO.</p>
+
+  <figure class="exhibit" id="ex-roles">
+    <figcaption><span class="label">Exhibit 11</span><span class="title">Number of actions by person and role</span><span class="sub">Flagged cells are requesters who verified their own requisitions. The limit column is the approval matrix; a blank means the title has no limit.</span></figcaption>
+    <div class="scroll" data-chart="roles"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Role matrix over every person-column</span>
+<pre>roles = {"Raised requisition": (req, "REQUESTER_ID"), "Verified requisition": (req, "VERIFIED_BY_ID"), ...}
+pl.concat([df.group_by(col).len().rename({col: "STAFF_ID"}).with_columns(role=pl.lit(name))
+           for name, (df, col) in roles.items()]).pivot(on="role", index="STAFF_ID", values="len")</pre></div></details>
+  </figure>
+
+  <h2 id="s5"><span class="no">5</span>Prices</h2>
+  <p>Because prices are a fixed catalogue, a price that departs from it is unmistakable. PO2024127 bought one New Hire Onboarding Kit for 3,000,000. The three other orders for the same kit paid 80,000 a unit, so this one is 37.5 times the price. The order went to Apex Marketing Group, and the same chain carries two of the authority breaches in Exhibit 10.</p>
+
+  <figure class="exhibit" id="ex-prices">
+    <figcaption><span class="label">Exhibit 12</span><span class="title">Unit price on every PO, by item, PKR (log scale)</span><span class="sub">Unit price is the PO total divided by the quantity ordered. Most items show one dot because every order paid the same price; the count beside it is the number of orders.</span></figcaption>
+    <div class="chart" data-chart="prices"></div>
+    <details class="method"><summary>Data and method</summary><div class="inner"><span class="kind">Derived measure, compared within a group</span>
+<pre>po.with_columns(unit=pl.col("PO_TOTAL_AMOUNT") / pl.col("ORDERED_QUANTITY"))
+  .with_columns(item_median=pl.col("unit").median().over("ITEM_DESCRIPTION"))
+  .filter(pl.col("unit") &gt; 3 * pl.col("item_median"))</pre></div></details>
+  </figure>
+
+  <h2 id="s6"><span class="no">6</span>Exceptions found</h2>
+  <p>These are the records that break the patterns above. Values are the full amount of each record unless stated, and a record can appear under more than one heading. They are listed for testing, not concluded: each needs the documents behind it before it is a finding.</p>
+
+  <div class="callout">
+    <b>One chain carries three exceptions.</b> The Head of Treasury approved REQ2024127 at 3.0M against a 1M limit. PO2024127 bought one onboarding kit at 37.5 times the catalogue price. The Head of Treasury then approved INV2024127, again above the limit. Each check, run alone, flags one row. Read together, they describe one purchase that passed three controls it should have failed.
+    <div class="chain"><span class="n">REQ2024127</span><span class="a">→</span><span class="n">PO2024127</span><span class="a">→</span><span class="n">INV2024127</span><span class="a">Apex Marketing Group · PKR 3,000,000</span></div>
+  </div>
+
+  <div class="scroll"><table class="data register" data-table="register"></table></div>
+
+  <h2 id="s7"><span class="no">7</span>What the data cannot answer</h2>
+  <p>Some questions an auditor would ask of a procure-to-pay cycle have no field anywhere in these tables. They are gaps in the evidence, not clean results.</p>
+  <div class="cols2">
+    <ul class="points">
+      <li><strong>Was what arrived what was ordered?</strong> There is an ordered quantity but no received quantity, so short or partial delivery cannot be seen.</li>
+      <li><strong>Was what was paid what was invoiced?</strong> There is no payment amount or payment reference, so over-payment and duplicate payment cannot be tested.</li>
+      <li><strong>Who raised the PO, and who keyed the invoice?</strong> Neither table names its preparer.</li>
+    </ul>
+    <ul class="points">
+      <li><strong>When did a vendor's status change?</strong> The master holds a current status only, with no bank, tax or onboarding details.</li>
+      <li><strong>Which limit applied on the day?</strong> The approval matrix has no effective dates.</li>
+      <li><strong>Was a requisition withdrawn?</strong> The status field has only Approved and Completed.</li>
+    </ul>
+  </div>
+
+  <h2 id="s8"><span class="no">8</span>Implications for the audit plan</h2>
+  <div class="cols2">
+    <div>
+      <h3>Where to point the testing</h3>
+      <ul class="points">
+        <li>Test the 18 requisitions over 10M individually; they are 86% of the value. Cover the other 37 with whole-population rules, which this data supports well.</li>
+        <li>Test the payment release step on every invoice: goods receipt link, approval, amount against PO, and payment date against receipt. That is where the exceptions cluster.</li>
+        <li>Obtain the evidence behind the CEO's approvals; 16 invoices worth 495M rest on them.</li>
+        <li>Corroborate the dates behind every timing exception to source documents before relying on them, since dates appear keyed.</li>
+        <li>Drop "PO within estimate" as a test. It cannot fail on this data.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Questions for management</h3>
+      <ol class="qa">
+        <li>Does the system enforce approval limits, or does the user choose the approver?</li>
+        <li>Is the requisition estimate overwritten when the PO is raised?</li>
+        <li>Are dates stamped by the system or keyed by staff?</li>
+        <li>What does the requesting department field record?</li>
+        <li>Are vendors approved for particular categories of goods and services?</li>
+        <li>Why does chain 2024009/2024004 sit outside the numbering series?</li>
+        <li>Is paying two weeks early a policy, or the result of a discount?</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="endmark">END OF MEMO</div>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+const D = {
+ "population": {
+  "req_n": 55,
+  "req_v": 645372000,
+  "po_n": 52,
+  "po_v": 609982000,
+  "grn_n": 52,
+  "inv_n": 52,
+  "inv_v": 622535800,
+  "paid_n": 52,
+  "staff": 20,
+  "vendors": 12,
+  "matrix": 4,
+  "req_from": "2024-01-08",
+  "req_to": "2024-12-20",
+  "po_to": "2024-12-31",
+  "inv_to": "2025-01-21",
+  "pay_to": "2025-02-10",
+  "po_eq_est": 52,
+  "inv_eq_po": 49,
+  "same_verifier": 48
+ },
+ "monthly": [
+  {
+   "m": "2024-01",
+   "committed": 107276000,
+   "pos": 4,
+   "paid": 0,
+   "payments": 0
+  },
+  {
+   "m": "2024-02",
+   "committed": 97880000,
+   "pos": 7,
+   "paid": 1276000,
+   "payments": 2
+  },
+  {
+   "m": "2024-03",
+   "committed": 52435000,
+   "pos": 6,
+   "paid": 205680000,
+   "payments": 8
+  },
+  {
+   "m": "2024-04",
+   "committed": 7970000,
+   "pos": 5,
+   "paid": 60885000,
+   "payments": 7
+  },
+  {
+   "m": "2024-05",
+   "committed": 355000,
+   "pos": 2,
+   "paid": 9065000,
+   "payments": 6
+  },
+  {
+   "m": "2024-06",
+   "committed": 5250000,
+   "pos": 1,
+   "paid": 247800,
+   "payments": 1
+  },
+  {
+   "m": "2024-07",
+   "committed": 20895000,
+   "pos": 3,
+   "paid": 5250000,
+   "payments": 1
+  },
+  {
+   "m": "2024-08",
+   "committed": 27210000,
+   "pos": 3,
+   "paid": 20895000,
+   "payments": 3
+  },
+  {
+   "m": "2024-09",
+   "committed": 92170000,
+   "pos": 5,
+   "paid": 27210000,
+   "payments": 3
+  },
+  {
+   "m": "2024-10",
+   "committed": 109095000,
+   "pos": 6,
+   "paid": 166170000,
+   "payments": 6
+  },
+  {
+   "m": "2024-11",
+   "committed": 56506000,
+   "pos": 5,
+   "paid": 26665000,
+   "payments": 5
+  },
+  {
+   "m": "2024-12",
+   "committed": 32940000,
+   "pos": 5,
+   "paid": 35670000,
+   "payments": 4
+  },
+  {
+   "m": "2025-01",
+   "committed": 0,
+   "pos": 0,
+   "paid": 59666000,
+   "payments": 4
+  },
+  {
+   "m": "2025-02",
+   "committed": 0,
+   "pos": 0,
+   "paid": 3856000,
+   "payments": 2
+  }
+ ],
+ "bands": [
+  {
+   "band": "Up to 1M",
+   "n": 17,
+   "v": 6887000
+  },
+  {
+   "band": "1M to 5M",
+   "n": 14,
+   "v": 34085000
+  },
+  {
+   "band": "5M to 10M",
+   "n": 6,
+   "v": 45850000
+  },
+  {
+   "band": "10M to 50M",
+   "n": 14,
+   "v": 261550000
+  },
+  {
+   "band": "Over 50M",
+   "n": 4,
+   "v": 297000000
+  }
+ ],
+ "departments": [
+  {
+   "dept": "Facilities",
+   "n": 9,
+   "v": 291790000,
+   "requesters": [
+    "Tom Hayes"
+   ],
+   "max": 85000000
+  },
+  {
+   "dept": "Human Resources",
+   "n": 10,
+   "v": 110620000,
+   "requesters": [
+    "Hina Raza",
+    "Zara Sheikh"
+   ],
+   "max": 64000000
+  },
+  {
+   "dept": "Procurement",
+   "n": 19,
+   "v": 102430000,
+   "requesters": [
+    "Ethan Smith",
+    "Sana Malik"
+   ],
+   "max": 24800000
+  },
+  {
+   "dept": "Branch Operations",
+   "n": 3,
+   "v": 54650000,
+   "requesters": [
+    "Michael Chen"
+   ],
+   "max": 40800000
+  },
+  {
+   "dept": "Marketing",
+   "n": 4,
+   "v": 46416000,
+   "requesters": [
+    "Fatima Noor"
+   ],
+   "max": 17800000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "n": 5,
+   "v": 21481000,
+   "requesters": [
+    "James Okafor"
+   ],
+   "max": 11750000
+  },
+  {
+   "dept": "Information Technology",
+   "n": 4,
+   "v": 15985000,
+   "requesters": [
+    "Priya Nair"
+   ],
+   "max": 8900000
+  },
+  {
+   "dept": "Finance",
+   "n": 1,
+   "v": 2000000,
+   "requesters": [
+    "Ethan Smith"
+   ],
+   "max": 2000000
+  }
+ ],
+ "vendors": [
+  {
+   "id": "V1034",
+   "name": "Vertex IT Hardware",
+   "status": "Active",
+   "n": 7,
+   "v": 176086000,
+   "items": 7,
+   "invoices": [
+    "INV2024105",
+    "INV2024110",
+    "INV2024112",
+    "INV2024116",
+    "INV2024120",
+    "INV2024131",
+    "INV2024145"
+   ]
+  },
+  {
+   "id": "V1025",
+   "name": "Horizon Learning Partners",
+   "status": "Active",
+   "n": 6,
+   "v": 85263800,
+   "items": 6,
+   "invoices": [
+    "INV2024109",
+    "INV2024121",
+    "INV2024122",
+    "INV2024132",
+    "INV2024134",
+    "INV2024136"
+   ]
+  },
+  {
+   "id": "V1013",
+   "name": "BlueRiver Consulting",
+   "status": "Active",
+   "n": 7,
+   "v": 81655000,
+   "items": 5,
+   "invoices": [
+    "INV2024102",
+    "INV2024108",
+    "INV2024111",
+    "INV2024117",
+    "INV2024129",
+    "INV2024146",
+    "INV2024151"
+   ]
+  },
+  {
+   "id": "V1031",
+   "name": "Northgate Interiors",
+   "status": "Active",
+   "n": 8,
+   "v": 79480000,
+   "items": 6,
+   "invoices": [
+    "INV2024101",
+    "INV2024103",
+    "INV2024115",
+    "INV2024125",
+    "INV2024128",
+    "INV2024135",
+    "INV2024139",
+    "INV2024141"
+   ]
+  },
+  {
+   "id": "V1019",
+   "name": "SecureNet Advisory",
+   "status": "Active",
+   "n": 4,
+   "v": 70550000,
+   "items": 4,
+   "invoices": [
+    "INV2024142",
+    "INV2024147",
+    "INV2024149",
+    "INV2024154"
+   ]
+  },
+  {
+   "id": "V1004",
+   "name": "PrimeCore Systems",
+   "status": "Active",
+   "n": 4,
+   "v": 47526000,
+   "items": 2,
+   "invoices": [
+    "INV2024106",
+    "INV2024123",
+    "INV2024140",
+    "INV2024152"
+   ]
+  },
+  {
+   "id": "V1022",
+   "name": "OfficeSupply Co.",
+   "status": "Active",
+   "n": 5,
+   "v": 29595000,
+   "items": 5,
+   "invoices": [
+    "INV2024004",
+    "INV2024107",
+    "INV2024119",
+    "INV2024130",
+    "INV2024144"
+   ]
+  },
+  {
+   "id": "V1028",
+   "name": "Apex Marketing Group",
+   "status": "Active",
+   "n": 4,
+   "v": 21700000,
+   "items": 3,
+   "invoices": [
+    "INV2024104",
+    "INV2024127",
+    "INV2024137",
+    "INV2024148"
+   ]
+  },
+  {
+   "id": "V1007",
+   "name": "Metro Facilities Services",
+   "status": "Active",
+   "n": 3,
+   "v": 12840000,
+   "items": 3,
+   "invoices": [
+    "INV2024114",
+    "INV2024118",
+    "INV2024143"
+   ]
+  },
+  {
+   "id": "V1001",
+   "name": "TechSolutions Ltd",
+   "status": "Active",
+   "n": 2,
+   "v": 11640000,
+   "items": 2,
+   "invoices": [
+    "INV2024113",
+    "INV2024133"
+   ]
+  },
+  {
+   "id": "V1010",
+   "name": "RapidBuild Constructors",
+   "status": "Under Review",
+   "n": 1,
+   "v": 5250000,
+   "items": 1,
+   "invoices": [
+    "INV2024126"
+   ]
+  },
+  {
+   "id": "V1017",
+   "name": "Express Courier Services",
+   "status": "Inactive",
+   "n": 1,
+   "v": 950000,
+   "items": 1,
+   "invoices": [
+    "INV2024150"
+   ]
+  }
+ ],
+ "dept_item": [
+  {
+   "dept": "Branch Operations",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 4450000
+  },
+  {
+   "dept": "Branch Operations",
+   "item": "Security consulting engagement",
+   "n": 1,
+   "v": 40800000
+  },
+  {
+   "dept": "Branch Operations",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 9400000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Branch fit-out \u2014 Gulberg",
+   "n": 2,
+   "v": 148000000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Marketing campaign \u2014 digital",
+   "n": 1,
+   "v": 6250000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Network switches \u2014 data centre",
+   "n": 1,
+   "v": 4200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 3200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Security consulting engagement",
+   "n": 2,
+   "v": 95200000
+  },
+  {
+   "dept": "Facilities",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 2256000
+  },
+  {
+   "dept": "Finance",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 2000000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "ATM cash cassettes",
+   "n": 1,
+   "v": 950000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Compliance advisory retainer",
+   "n": 1,
+   "v": 2250000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Data centre UPS replacement",
+   "n": 3,
+   "v": 108800000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Laptop refresh \u2014 branch staff",
+   "n": 1,
+   "v": 2900000
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Network switches \u2014 data centre",
+   "n": 2,
+   "v": 5497800
+  },
+  {
+   "dept": "Human Resources",
+   "item": "Signage \u2014 new branches",
+   "n": 1,
+   "v": 520000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "ATM cash cassettes",
+   "n": 2,
+   "v": 285000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 8900000
+  },
+  {
+   "dept": "Information Technology",
+   "item": "Security consulting engagement",
+   "n": 1,
+   "v": 6800000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Core banking licence renewal",
+   "n": 1,
+   "v": 12400000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Data centre UPS replacement",
+   "n": 1,
+   "v": 16000000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Office furniture \u2014 head office",
+   "n": 1,
+   "v": 17800000
+  },
+  {
+   "dept": "Marketing",
+   "item": "Printer toner \u2014 bulk order",
+   "n": 1,
+   "v": 216000
+  },
+  {
+   "dept": "Procurement",
+   "item": "ATM cash cassettes",
+   "n": 2,
+   "v": 2470000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Compliance advisory retainer",
+   "n": 1,
+   "v": 750000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Core banking licence renewal",
+   "n": 5,
+   "v": 44640000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Laptop refresh \u2014 branch staff",
+   "n": 2,
+   "v": 580000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Marketing campaign \u2014 digital",
+   "n": 2,
+   "v": 13750000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Network switches \u2014 data centre",
+   "n": 1,
+   "v": 2520000
+  },
+  {
+   "dept": "Procurement",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 3000000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Signage \u2014 new branches",
+   "n": 3,
+   "v": 33800000
+  },
+  {
+   "dept": "Procurement",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 470000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "ATM cash cassettes",
+   "n": 1,
+   "v": 285000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Branch fit-out \u2014 Gulberg",
+   "n": 1,
+   "v": 9250000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "New Hire Onboarding Kits",
+   "n": 1,
+   "v": 160000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Printer toner \u2014 bulk order",
+   "n": 1,
+   "v": 36000
+  },
+  {
+   "dept": "Risk & Compliance",
+   "item": "Staff training programme",
+   "n": 1,
+   "v": 11750000
+  }
+ ],
+ "items_order": [
+  "Branch fit-out \u2014 Gulberg",
+  "Security consulting engagement",
+  "Data centre UPS replacement",
+  "Core banking licence renewal",
+  "Signage \u2014 new branches",
+  "Office furniture \u2014 head office",
+  "Staff training programme",
+  "Marketing campaign \u2014 digital",
+  "Network switches \u2014 data centre",
+  "New Hire Onboarding Kits",
+  "ATM cash cassettes",
+  "Laptop refresh \u2014 branch staff",
+  "Compliance advisory retainer",
+  "Printer toner \u2014 bulk order"
+ ],
+ "unit_prices": [
+  {
+   "PO_NUMBER": "PO2024004",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 2000000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024101",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 1250000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024102",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 1860000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024103",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 12500000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024104",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 9250000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024105",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 2900000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024106",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 32000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024107",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 8900000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024108",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 95000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024109",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 160000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024110",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 85000000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024111",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 2375000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024112",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 4200000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024113",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1001",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 10400000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024114",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 190000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024115",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 435000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024116",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 15500000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024117",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 285000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024118",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 10400000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024119",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 11750000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024120",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 4450000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024121",
+   "ITEM_DESCRIPTION": "Printer toner \u2014 bulk order",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 216000,
+   "unit": 18000.0
+  },
+  {
+   "PO_NUMBER": "PO2024122",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 210000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024123",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 1600000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024125",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 10200000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024126",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1010",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 5250000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024127",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 3000000,
+   "unit": 3000000.0
+  },
+  {
+   "PO_NUMBER": "PO2024128",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 95000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024129",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 74000000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024130",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 6800000,
+   "unit": 3400000.0
+  },
+  {
+   "PO_NUMBER": "PO2024131",
+   "ITEM_DESCRIPTION": "Printer toner \u2014 bulk order",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 36000,
+   "unit": 18000.0
+  },
+  {
+   "PO_NUMBER": "PO2024132",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 9400000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024133",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1001",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 1240000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024134",
+   "ITEM_DESCRIPTION": "Branch fit-out \u2014 Gulberg",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 74000000,
+   "unit": 1850000.0
+  },
+  {
+   "PO_NUMBER": "PO2024135",
+   "ITEM_DESCRIPTION": "Office furniture \u2014 head office",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 17800000,
+   "unit": 890000.0
+  },
+  {
+   "PO_NUMBER": "PO2024136",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1025",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 1240000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024137",
+   "ITEM_DESCRIPTION": "New Hire Onboarding Kits",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 3200000,
+   "unit": 80000.0
+  },
+  {
+   "PO_NUMBER": "PO2024139",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 20,
+   "PO_TOTAL_AMOUNT": 12400000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024140",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 2,
+   "PO_TOTAL_AMOUNT": 940000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024141",
+   "ITEM_DESCRIPTION": "Core banking licence renewal",
+   "VENDOR_ID": "V1031",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 24800000,
+   "unit": 620000.0
+  },
+  {
+   "PO_NUMBER": "PO2024142",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 16000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024143",
+   "ITEM_DESCRIPTION": "Compliance advisory retainer",
+   "VENDOR_ID": "V1007",
+   "ORDERED_QUANTITY": 3,
+   "PO_TOTAL_AMOUNT": 2250000,
+   "unit": 750000.0
+  },
+  {
+   "PO_NUMBER": "PO2024144",
+   "ITEM_DESCRIPTION": "Laptop refresh \u2014 branch staff",
+   "VENDOR_ID": "V1022",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 145000,
+   "unit": 145000.0
+  },
+  {
+   "PO_NUMBER": "PO2024145",
+   "ITEM_DESCRIPTION": "Data centre UPS replacement",
+   "VENDOR_ID": "V1034",
+   "ORDERED_QUANTITY": 40,
+   "PO_TOTAL_AMOUNT": 64000000,
+   "unit": 1600000.0
+  },
+  {
+   "PO_NUMBER": "PO2024146",
+   "ITEM_DESCRIPTION": "Network switches \u2014 data centre",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 2520000,
+   "unit": 210000.0
+  },
+  {
+   "PO_NUMBER": "PO2024147",
+   "ITEM_DESCRIPTION": "Compliance advisory retainer",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 750000,
+   "unit": 750000.0
+  },
+  {
+   "PO_NUMBER": "PO2024148",
+   "ITEM_DESCRIPTION": "Marketing campaign \u2014 digital",
+   "VENDOR_ID": "V1028",
+   "ORDERED_QUANTITY": 5,
+   "PO_TOTAL_AMOUNT": 6250000,
+   "unit": 1250000.0
+  },
+  {
+   "PO_NUMBER": "PO2024149",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 25,
+   "PO_TOTAL_AMOUNT": 13000000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024150",
+   "ITEM_DESCRIPTION": "ATM cash cassettes",
+   "VENDOR_ID": "V1017",
+   "ORDERED_QUANTITY": 10,
+   "PO_TOTAL_AMOUNT": 950000,
+   "unit": 95000.0
+  },
+  {
+   "PO_NUMBER": "PO2024151",
+   "ITEM_DESCRIPTION": "Signage \u2014 new branches",
+   "VENDOR_ID": "V1013",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 520000,
+   "unit": 520000.0
+  },
+  {
+   "PO_NUMBER": "PO2024152",
+   "ITEM_DESCRIPTION": "Staff training programme",
+   "VENDOR_ID": "V1004",
+   "ORDERED_QUANTITY": 1,
+   "PO_TOTAL_AMOUNT": 470000,
+   "unit": 470000.0
+  },
+  {
+   "PO_NUMBER": "PO2024154",
+   "ITEM_DESCRIPTION": "Security consulting engagement",
+   "VENDOR_ID": "V1019",
+   "ORDERED_QUANTITY": 12,
+   "PO_TOTAL_AMOUNT": 40800000,
+   "unit": 3400000.0
+  }
+ ],
+ "cycle": [
+  {
+   "stage": "Requisition verified",
+   "frm": "REQUISITION_DATE",
+   "to": "VERIFIED_DATE",
+   "n": 52,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Procurement approval",
+   "frm": "VERIFIED_DATE",
+   "to": "APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Financial approval",
+   "frm": "APPROVAL_DATE",
+   "to": "FIN_APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 4,
+   "neg": 0
+  },
+  {
+   "stage": "PO raised",
+   "frm": "FIN_APPROVAL_DATE",
+   "to": "PO_DATE",
+   "n": 52,
+   "min": 2,
+   "p25": 3.0,
+   "med": 6.5,
+   "p75": 9.0,
+   "max": 13,
+   "neg": 0
+  },
+  {
+   "stage": "Goods received",
+   "frm": "PO_DATE",
+   "to": "GRN_DATE",
+   "n": 52,
+   "min": 5,
+   "p25": 9.0,
+   "med": 12.5,
+   "p75": 18.0,
+   "max": 25,
+   "neg": 0
+  },
+  {
+   "stage": "Invoice dated",
+   "frm": "GRN_DATE",
+   "to": "INVOICE_DATE",
+   "n": 52,
+   "min": -23,
+   "p25": 2.0,
+   "med": 3.0,
+   "p75": 5.0,
+   "max": 6,
+   "neg": 4
+  },
+  {
+   "stage": "Invoice received",
+   "frm": "INVOICE_DATE",
+   "to": "DATE_RECEIVED",
+   "n": 52,
+   "min": -3,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 4,
+   "neg": 2
+  },
+  {
+   "stage": "Invoice verified",
+   "frm": "DATE_RECEIVED",
+   "to": "VERIFICATION_DATE",
+   "n": 52,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 8,
+   "neg": 0
+  },
+  {
+   "stage": "Invoice approved",
+   "frm": "VERIFICATION_DATE",
+   "to": "SUPERVISOR_APPROVAL_DATE",
+   "n": 49,
+   "min": 1,
+   "p25": 1.0,
+   "med": 2.0,
+   "p75": 3.0,
+   "max": 3,
+   "neg": 0
+  },
+  {
+   "stage": "Paid",
+   "frm": "SUPERVISOR_APPROVAL_DATE",
+   "to": "PAYMENT_DATE",
+   "n": 49,
+   "min": 3,
+   "p25": 8.0,
+   "med": 12.0,
+   "p75": 16.0,
+   "max": 20,
+   "neg": 0
+  }
+ ],
+ "e2e": {
+  "min": 19,
+  "med": 47.0,
+  "max": 64
+ },
+ "early": {
+  "all_early": 52,
+  "median": 13.0,
+  "min": 4,
+  "max": 21,
+  "terms": 30,
+  "hist": [
+   {
+    "bin": 3,
+    "n": 6,
+    "v": 50000000
+   },
+   {
+    "bin": 6,
+    "n": 7,
+    "v": 91405000
+   },
+   {
+    "bin": 9,
+    "n": 10,
+    "v": 77277000
+   },
+   {
+    "bin": 12,
+    "n": 5,
+    "v": 14835000
+   },
+   {
+    "bin": 15,
+    "n": 14,
+    "v": 186507800
+   },
+   {
+    "bin": 18,
+    "n": 9,
+    "v": 192311000
+   },
+   {
+    "bin": 21,
+    "n": 1,
+    "v": 10200000
+   }
+  ]
+ },
+ "routing_req": [
+  {
+   "band": "1M to 5M",
+   "title": "CEO",
+   "n": 1,
+   "v": 2000000,
+   "over": 0,
+   "ids": [
+    "REQ2024009"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Financial Controller",
+   "n": 11,
+   "v": 24885000,
+   "over": 0,
+   "ids": [
+    "REQ2024101",
+    "REQ2024102",
+    "REQ2024105",
+    "REQ2024111",
+    "REQ2024120",
+    "REQ2024123",
+    "REQ2024133",
+    "REQ2024136",
+    "REQ2024137",
+    "REQ2024143",
+    "REQ2024146"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Head of Treasury",
+   "n": 2,
+   "v": 7200000,
+   "over": 2,
+   "ids": [
+    "REQ2024112",
+    "REQ2024127"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "CFO",
+   "n": 6,
+   "v": 45850000,
+   "over": 0,
+   "ids": [
+    "REQ2024104",
+    "REQ2024107",
+    "REQ2024126",
+    "REQ2024130",
+    "REQ2024132",
+    "REQ2024148"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CEO",
+   "n": 17,
+   "v": 494550000,
+   "over": 0,
+   "ids": [
+    "REQ2024103",
+    "REQ2024106",
+    "REQ2024110",
+    "REQ2024113",
+    "REQ2024116",
+    "REQ2024118",
+    "REQ2024119",
+    "REQ2024125",
+    "REQ2024129",
+    "REQ2024134",
+    "REQ2024135",
+    "REQ2024138",
+    "REQ2024139",
+    "REQ2024141",
+    "REQ2024142",
+    "REQ2024149",
+    "REQ2024154"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CFO",
+   "n": 1,
+   "v": 64000000,
+   "over": 1,
+   "ids": [
+    "REQ2024145"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "Head of Treasury",
+   "n": 17,
+   "v": 6887000,
+   "over": 0,
+   "ids": [
+    "REQ2024108",
+    "REQ2024109",
+    "REQ2024114",
+    "REQ2024115",
+    "REQ2024117",
+    "REQ2024121",
+    "REQ2024122",
+    "REQ2024124",
+    "REQ2024128",
+    "REQ2024131",
+    "REQ2024140",
+    "REQ2024144",
+    "REQ2024147",
+    "REQ2024150",
+    "REQ2024151",
+    "REQ2024152",
+    "REQ2024153"
+   ]
+  }
+ ],
+ "routing_inv": [
+  {
+   "band": "1M to 5M",
+   "title": "Financial Controller",
+   "n": 13,
+   "v": 31085000,
+   "over": 0,
+   "ids": [
+    "INV2024004",
+    "INV2024101",
+    "INV2024102",
+    "INV2024105",
+    "INV2024111",
+    "INV2024112",
+    "INV2024120",
+    "INV2024123",
+    "INV2024133",
+    "INV2024136",
+    "INV2024137",
+    "INV2024143",
+    "INV2024146"
+   ]
+  },
+  {
+   "band": "1M to 5M",
+   "title": "Head of Treasury",
+   "n": 2,
+   "v": 5256000,
+   "over": 2,
+   "ids": [
+    "INV2024127",
+    "INV2024140"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "CFO",
+   "n": 5,
+   "v": 36600000,
+   "over": 0,
+   "ids": [
+    "INV2024107",
+    "INV2024126",
+    "INV2024130",
+    "INV2024132",
+    "INV2024148"
+   ]
+  },
+  {
+   "band": "5M to 10M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 9250000,
+   "over": 0,
+   "ids": [
+    "INV2024104"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "CEO",
+   "n": 16,
+   "v": 494950000,
+   "over": 0,
+   "ids": [
+    "INV2024103",
+    "INV2024106",
+    "INV2024110",
+    "INV2024113",
+    "INV2024116",
+    "INV2024118",
+    "INV2024119",
+    "INV2024125",
+    "INV2024129",
+    "INV2024134",
+    "INV2024135",
+    "INV2024139",
+    "INV2024141",
+    "INV2024142",
+    "INV2024145",
+    "INV2024149"
+   ]
+  },
+  {
+   "band": "Over 10M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 40800000,
+   "over": 0,
+   "ids": [
+    "INV2024154"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "Head of Treasury",
+   "n": 13,
+   "v": 4558800,
+   "over": 0,
+   "ids": [
+    "INV2024108",
+    "INV2024109",
+    "INV2024114",
+    "INV2024115",
+    "INV2024117",
+    "INV2024121",
+    "INV2024122",
+    "INV2024128",
+    "INV2024144",
+    "INV2024147",
+    "INV2024150",
+    "INV2024151",
+    "INV2024152"
+   ]
+  },
+  {
+   "band": "Up to 1M",
+   "title": "No approver recorded",
+   "n": 1,
+   "v": 36000,
+   "over": 0,
+   "ids": [
+    "INV2024131"
+   ]
+  }
+ ],
+ "matrix": [
+  {
+   "JOB_TITLE": "Head of Treasury",
+   "MAX_APPROVAL_AMOUNT": 1000000
+  },
+  {
+   "JOB_TITLE": "Financial Controller",
+   "MAX_APPROVAL_AMOUNT": 5000000
+  },
+  {
+   "JOB_TITLE": "CFO",
+   "MAX_APPROVAL_AMOUNT": 10000000
+  },
+  {
+   "JOB_TITLE": "CEO",
+   "MAX_APPROVAL_AMOUNT": 999999999999
+  }
+ ],
+ "ceo": {
+  "req_n": 18,
+  "req_v": 496550000,
+  "inv_n": 16,
+  "inv_v": 494950000
+ },
+ "roles": [
+  {
+   "role": "Raised requisition",
+   "staff": 1041,
+   "n": 10
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1042,
+   "n": 10
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1050,
+   "n": 4
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1051,
+   "n": 9
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1052,
+   "n": 5
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1053,
+   "n": 3
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1054,
+   "n": 4
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1055,
+   "n": 5
+  },
+  {
+   "role": "Raised requisition",
+   "staff": 1056,
+   "n": 5
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1010,
+   "n": 15
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1011,
+   "n": 9
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1012,
+   "n": 12
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1013,
+   "n": 15
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1042,
+   "n": 2
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1051,
+   "n": 1
+  },
+  {
+   "role": "Verified requisition",
+   "staff": 1053,
+   "n": 1
+  },
+  {
+   "role": "Procurement approval",
+   "staff": 1023,
+   "n": 30
+  },
+  {
+   "role": "Procurement approval",
+   "staff": 1024,
+   "n": 22
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1001,
+   "n": 18
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1002,
+   "n": 7
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1003,
+   "n": 11
+  },
+  {
+   "role": "Financial approval",
+   "staff": 1004,
+   "n": 19
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1010,
+   "n": 15
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1011,
+   "n": 12
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1012,
+   "n": 12
+  },
+  {
+   "role": "Verified invoice",
+   "staff": 1013,
+   "n": 13
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1001,
+   "n": 16
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1002,
+   "n": 5
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1003,
+   "n": 13
+  },
+  {
+   "role": "Approved invoice",
+   "staff": 1004,
+   "n": 15
+  }
+ ],
+ "roles_order": [
+  "Raised requisition",
+  "Verified requisition",
+  "Procurement approval",
+  "Financial approval",
+  "Verified invoice",
+  "Approved invoice"
+ ],
+ "staff": [
+  {
+   "STAFF_ID": 1001,
+   "NAME": "John Doe",
+   "JOB_TITLE": "CEO",
+   "SUPERVISOR_ID": null,
+   "MAX_APPROVAL_AMOUNT": 999999999999
+  },
+  {
+   "STAFF_ID": 1002,
+   "NAME": "Emily White",
+   "JOB_TITLE": "CFO",
+   "SUPERVISOR_ID": 1001,
+   "MAX_APPROVAL_AMOUNT": 10000000
+  },
+  {
+   "STAFF_ID": 1003,
+   "NAME": "Daniel Reed",
+   "JOB_TITLE": "Financial Controller",
+   "SUPERVISOR_ID": 1002,
+   "MAX_APPROVAL_AMOUNT": 5000000
+  },
+  {
+   "STAFF_ID": 1004,
+   "NAME": "Aisha Karim",
+   "JOB_TITLE": "Head of Treasury",
+   "SUPERVISOR_ID": 1002,
+   "MAX_APPROVAL_AMOUNT": 1000000
+  },
+  {
+   "STAFF_ID": 1005,
+   "NAME": "David Miller",
+   "JOB_TITLE": "Head of Procurement",
+   "SUPERVISOR_ID": 1001,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1023,
+   "NAME": "Max Baker",
+   "JOB_TITLE": "General Goods & Services Sourcing Mgr",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1024,
+   "NAME": "Nadia Hussain",
+   "JOB_TITLE": "General Goods & Services Sourcing Mgr",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1010,
+   "NAME": "Olivia Smith",
+   "JOB_TITLE": "Senior Accountant",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1011,
+   "NAME": "Bilal Ahmed",
+   "JOB_TITLE": "Senior Accountant",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1012,
+   "NAME": "Grace Lin",
+   "JOB_TITLE": "Invoice Processing Specialist",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1013,
+   "NAME": "Omar Farooq",
+   "JOB_TITLE": "Invoice Processing Specialist",
+   "SUPERVISOR_ID": 1003,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1041,
+   "NAME": "Ethan Smith",
+   "JOB_TITLE": "Requisition & PO Associate",
+   "SUPERVISOR_ID": 1024,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1042,
+   "NAME": "Sana Malik",
+   "JOB_TITLE": "Requisition & PO Associate",
+   "SUPERVISOR_ID": 1024,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1050,
+   "NAME": "Priya Nair",
+   "JOB_TITLE": "IT Business Partner",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1051,
+   "NAME": "Tom Hayes",
+   "JOB_TITLE": "Facilities Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1052,
+   "NAME": "Zara Sheikh",
+   "JOB_TITLE": "HR Business Partner",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1053,
+   "NAME": "Michael Chen",
+   "JOB_TITLE": "Branch Operations Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1054,
+   "NAME": "Fatima Noor",
+   "JOB_TITLE": "Marketing Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1055,
+   "NAME": "James Okafor",
+   "JOB_TITLE": "Risk & Compliance Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  },
+  {
+   "STAFF_ID": 1056,
+   "NAME": "Hina Raza",
+   "JOB_TITLE": "Learning & Development Manager",
+   "SUPERVISOR_ID": 1005,
+   "MAX_APPROVAL_AMOUNT": null
+  }
+ ],
+ "weekend": [
+  {
+   "field": "Requisition",
+   "col": "REQUISITION_DATE",
+   "n": 52,
+   "weekend": 13
+  },
+  {
+   "field": "Requisition verified",
+   "col": "VERIFIED_DATE",
+   "n": 52,
+   "weekend": 14
+  },
+  {
+   "field": "Procurement approval",
+   "col": "APPROVAL_DATE",
+   "n": 49,
+   "weekend": 13
+  },
+  {
+   "field": "Financial approval",
+   "col": "FIN_APPROVAL_DATE",
+   "n": 52,
+   "weekend": 10
+  },
+  {
+   "field": "PO",
+   "col": "PO_DATE",
+   "n": 52,
+   "weekend": 17
+  },
+  {
+   "field": "Goods receipt",
+   "col": "GRN_DATE",
+   "n": 52,
+   "weekend": 15
+  },
+  {
+   "field": "Invoice date",
+   "col": "INVOICE_DATE",
+   "n": 52,
+   "weekend": 16
+  },
+  {
+   "field": "Invoice received",
+   "col": "DATE_RECEIVED",
+   "n": 52,
+   "weekend": 17
+  },
+  {
+   "field": "Invoice verified",
+   "col": "VERIFICATION_DATE",
+   "n": 52,
+   "weekend": 15
+  },
+  {
+   "field": "Invoice approved",
+   "col": "SUPERVISOR_APPROVAL_DATE",
+   "n": 49,
+   "weekend": 14
+  },
+  {
+   "field": "Payment",
+   "col": "PAYMENT_DATE",
+   "n": 52,
+   "weekend": 11
+  }
+ ],
+ "breaches": {
+  "req": [
+   {
+    "REQUISITION_ID": "REQ2024112",
+    "ESTIMATED_TOTAL_COST": 4200000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "REQUISITION_ID": "REQ2024127",
+    "ESTIMATED_TOTAL_COST": 3000000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "REQUISITION_ID": "REQ2024145",
+    "ESTIMATED_TOTAL_COST": 64000000,
+    "NAME": "Emily White",
+    "JOB_TITLE": "CFO",
+    "MAX_APPROVAL_AMOUNT": 10000000
+   }
+  ],
+  "inv": [
+   {
+    "INVOICE_ID": "INV2024127",
+    "INVOICE_AMOUNT": 3000000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   },
+   {
+    "INVOICE_ID": "INV2024140",
+    "INVOICE_AMOUNT": 2256000,
+    "NAME": "Aisha Karim",
+    "JOB_TITLE": "Head of Treasury",
+    "MAX_APPROVAL_AMOUNT": 1000000
+   }
+  ]
+ },
+ "stale": [
+  {
+   "REQUISITION_ID": "REQ2024124",
+   "ESTIMATED_TOTAL_COST": 450000,
+   "FIN_APPROVAL_DATE": "2024-07-30",
+   "age": 154
+  },
+  {
+   "REQUISITION_ID": "REQ2024138",
+   "ESTIMATED_TOTAL_COST": 34000000,
+   "FIN_APPROVAL_DATE": "2024-09-20",
+   "age": 102
+  },
+  {
+   "REQUISITION_ID": "REQ2024153",
+   "ESTIMATED_TOTAL_COST": 940000,
+   "FIN_APPROVAL_DATE": "2024-10-05",
+   "age": 87
+  }
+ ],
+ "exceptions": [
+  {
+   "theme": "Authority",
+   "title": "Requisition financially approved above the approver's limit",
+   "records": [
+    "REQ2024112",
+    "REQ2024127",
+    "REQ2024145"
+   ],
+   "n": 3,
+   "value": 71200000,
+   "note": "Head of Treasury (limit 1M) approved 4.2M and 3.0M; the CFO (limit 10M) approved 64M.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Authority",
+   "title": "Invoice approved above the approver's limit",
+   "records": [
+    "INV2024127",
+    "INV2024140"
+   ],
+   "n": 2,
+   "value": 5256000,
+   "note": "Both approved by the Head of Treasury, limit 1M.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Approval",
+   "title": "Procurement approval not recorded, requisition completed and ordered",
+   "records": [
+    "REQ2024116",
+    "REQ2024130",
+    "REQ2024152"
+   ],
+   "n": 3,
+   "value": 22770000,
+   "note": "Approver and approval date both blank; all three went on to financial approval and a PO.",
+   "exhibit": "roles"
+  },
+  {
+   "theme": "Approval",
+   "title": "Invoice paid with no approval recorded",
+   "records": [
+    "INV2024104",
+    "INV2024131",
+    "INV2024154"
+   ],
+   "n": 3,
+   "value": 50086000,
+   "note": "Approver and approval date both blank; all three paid.",
+   "exhibit": "routing"
+  },
+  {
+   "theme": "Segregation",
+   "title": "Requisition verified by the person who raised it",
+   "records": [
+    "REQ2024108",
+    "REQ2024120",
+    "REQ2024134",
+    "REQ2024149"
+   ],
+   "n": 4,
+   "value": 91545000,
+   "note": "Every other requisition is verified by Finance; here the requester took the Finance step.",
+   "exhibit": "roles"
+  },
+  {
+   "theme": "Matching",
+   "title": "Invoice paid with no goods receipt reference",
+   "records": [
+    "INV2024110",
+    "INV2024132",
+    "INV2024147"
+   ],
+   "n": 3,
+   "value": 95150000,
+   "note": "Each PO does carry a GRN, so the goods may have arrived; the invoice was paid without being matched to it.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Matching",
+   "title": "Invoice amount above the PO total (value shown is the excess)",
+   "records": [
+    "INV2024106",
+    "INV2024122",
+    "INV2024140"
+   ],
+   "n": 3,
+   "value": 12553800,
+   "note": "Excess of 11.2M (35%), 1.3M (140%) and 37,800 (18%). Every other invoice equals its PO exactly.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Timing",
+   "title": "Payment released before the goods receipt",
+   "records": [
+    "INV2024114",
+    "INV2024129",
+    "INV2024143"
+   ],
+   "n": 3,
+   "value": 76440000,
+   "note": "Paid 8, 13 and 9 days before the GRN date.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice dated before the goods were received",
+   "records": [
+    "INV2024004",
+    "INV2024114",
+    "INV2024129",
+    "INV2024143"
+   ],
+   "n": 4,
+   "value": 78440000,
+   "note": "Billing in advance of delivery; three of the four are also the payments above.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice dated before its purchase order",
+   "records": [
+    "INV2024004"
+   ],
+   "n": 1,
+   "value": 2000000,
+   "note": "Dated 9 April against a PO of 19 April; the same chain sits outside every numbering series.",
+   "exhibit": "chain"
+  },
+  {
+   "theme": "Timing",
+   "title": "Invoice recorded as received before its own invoice date",
+   "records": [
+    "INV2024118",
+    "INV2024136"
+   ],
+   "n": 2,
+   "value": 11640000,
+   "note": "Received 2 and 3 days before the date printed on the invoice.",
+   "exhibit": "cycle"
+  },
+  {
+   "theme": "Master data",
+   "title": "Vendor not Active, yet ordered from and paid",
+   "records": [
+    "INV2024126",
+    "INV2024150"
+   ],
+   "n": 2,
+   "value": 6200000,
+   "note": "V1010 is Under Review and V1017 Inactive. The master holds no status-change date.",
+   "exhibit": "vendors"
+  },
+  {
+   "theme": "Pricing",
+   "title": "Unit price far above every other order for the same item",
+   "records": [
+    "PO2024127"
+   ],
+   "n": 1,
+   "value": 3000000,
+   "note": "One kit at 3,000,000 against 80,000 on the three other orders, 37.5 times the price.",
+   "exhibit": "prices"
+  },
+  {
+   "theme": "Completeness",
+   "title": "Approved requisition never ordered and never withdrawn",
+   "records": [
+    "REQ2024124",
+    "REQ2024138",
+    "REQ2024153"
+   ],
+   "n": 3,
+   "value": 35390000,
+   "note": "87 to 154 days old at year end; every other requisition became a PO within 13 days.",
+   "exhibit": "cycle"
+  }
+ ],
+ "fin_to_po_max": 13
+};
+const NS = "http://www.w3.org/2000/svg";
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in (attrs || {})) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function text(parent, x, y, s, cls, anchor, extra) { const t = el("text", Object.assign({ x, y, class: cls, "text-anchor": anchor || "start" }, extra || {}), parent); t.textContent = s; return t; }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function fmtM(v) { const a = Math.abs(v); if (a >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M"; if (a >= 1e3) return Math.round(v / 1e3) + "k"; return String(Math.round(v)); }
+function fmtFull(v) { return Math.round(v).toLocaleString("en-US"); }
+function pct(v, t) { return (100 * v / t).toFixed(1).replace(/\.0$/, "") + "%"; }
+function tipAttr(node, html) { node.setAttribute("data-tip", html); node.setAttribute("tabindex", "0"); }
+function measure(svg, s, cls) { const t = text(svg, -9999, -9999, s, cls); const w = t.getComputedTextLength(); t.remove(); return w; }
+function svgFor(container, width, height, label) {
+  container.innerHTML = "";
+  const svg = el("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": label }, container);
+  return svg;
+}
+function roundedBar(parent, x, y, w, h, side, fill, r) {
+  // A bar with a 4px rounded data end and a square baseline. side: "right" (horizontal) or "top" (vertical).
+  r = Math.min(r === undefined ? 4 : r, side === "right" ? w / 2 : h / 2, side === "right" ? h / 2 : w / 2);
+  if (w <= 0 || h <= 0) return null;
+  let d;
+  if (side === "right") d = `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x}Z`;
+  else d = `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  return el("path", { d, fill }, parent);
+}
+function niceTicks(max, n) { const raw = max / n; const mag = Math.pow(10, Math.floor(Math.log10(raw))); const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw); const out = []; for (let v = 0; v <= max + 1e-9; v += step) out.push(v); if (out[out.length - 1] < max) out.push(out[out.length - 1] + step); return out; }
+
+/* ---------- Exhibit 1: bridge (horizontal waterfall) ---------- */
+function drawBridge(c, W) {
+  const p = D.population, notOrdered = p.req_v - p.po_v, above = p.inv_v - p.po_v;
+  const steps = [
+    { label: "Requisitioned", from: 0, to: p.req_v, kind: "total", tip: `<b>Requisitioned</b><br>${p.req_n} requisitions · PKR ${fmtFull(p.req_v)}` },
+    { label: "Never ordered", from: p.po_v, to: p.req_v, kind: "down", tip: `<b>Never ordered</b><br>3 approved requisitions · PKR ${fmtFull(notOrdered)}<br><span class="k">REQ2024124, REQ2024138, REQ2024153</span>` },
+    { label: "Ordered", from: 0, to: p.po_v, kind: "total", tip: `<b>Ordered</b><br>${p.po_n} POs · PKR ${fmtFull(p.po_v)}` },
+    { label: "Billed above PO", from: p.po_v, to: p.inv_v, kind: "up", tip: `<b>Billed above PO</b><br>3 invoices · PKR ${fmtFull(above)} excess<br><span class="k">INV2024106, INV2024122, INV2024140</span>` },
+    { label: "Paid", from: 0, to: p.inv_v, kind: "total", tip: `<b>Paid</b><br>${p.paid_n} invoices · PKR ${fmtFull(p.inv_v)}` },
+  ];
+  const narrow = W < 520, labelW = narrow ? 0 : 130, rowH = narrow ? 46 : 36, bh = 22, top = 6, right = 120;
+  const H = top + steps.length * rowH + 26;
+  const svg = svgFor(c, W, H, "Bridge from requisitioned to paid value");
+  const x0 = labelW, x1 = W - right, max = 700e6, sx = v => x0 + (x1 - x0) * v / max;
+  for (const t of niceTicks(max, narrow ? 3 : 6)) { if (t > max) continue; el("line", { x1: sx(t), x2: sx(t), y1: top, y2: H - 22, stroke: css("--grid") }, svg); text(svg, sx(t), H - 6, t === 0 ? "0" : fmtM(t), "t-axis", "middle"); }
+  steps.forEach((s, i) => {
+    const yRow = top + i * rowH, y = yRow + (narrow ? 18 : (rowH - bh) / 2);
+    if (narrow) text(svg, x0, yRow + 12, s.label, "t-label"); else text(svg, labelW - 12, y + bh / 2 + 4, s.label, "t-label", "end");
+    const fill = s.kind === "total" ? css("--s1") : s.kind === "down" ? css("--mark-quiet") : css("--critical");
+    const xa = sx(Math.min(s.from, s.to)), xb = sx(Math.max(s.from, s.to));
+    const g = el("g", {}, svg);
+    if (s.kind === "total") roundedBar(g, xa, y, Math.max(xb - xa, 2), bh, "right", fill);
+    else el("rect", { x: xa, y, width: Math.max(xb - xa, 3), height: bh, rx: 2, fill }, g);
+    el("rect", { x: x0, y: yRow, width: x1 - x0 + right, height: rowH, fill: "transparent" }, g);
+    tipAttr(g, s.tip);
+    const v = s.kind === "total" ? fmtM(s.to) : (s.kind === "down" ? "−" : "+") + fmtM(Math.abs(s.to - s.from));
+    text(svg, xb + 8, y + bh / 2 + 4, v, s.kind === "up" ? "t-crit" : "t-strong");
+    if (i < steps.length - 1) { const nx = s.kind === "down" ? sx(s.from) : xb; el("line", { x1: nx, x2: nx, y1: y + bh, y2: y + rowH, stroke: css("--axis") }, svg); }
+  });
+}
+
+/* ---------- Exhibit 2: weekend share ---------- */
+function drawWeekend(c, W) {
+  const rows = D.weekend, narrow = W < 520, labelW = narrow ? 0 : 150, rowH = narrow ? 38 : 26, bh = 12, top = 18, right = 64;
+  const H = top + rows.length * rowH + 26, svg = svgFor(c, W, H, "Weekend share by date field");
+  const x0 = labelW, x1 = W - right, max = 0.4, sx = v => x0 + (x1 - x0) * v / max;
+  [0, 0.1, 0.2, 0.3, 0.4].forEach(t => { el("line", { x1: sx(t), x2: sx(t), y1: top, y2: H - 22, stroke: css("--grid") }, svg); text(svg, sx(t), H - 6, Math.round(t * 100) + "%", "t-axis", "middle"); });
+  const xr = sx(2 / 7); el("line", { x1: xr, x2: xr, y1: top - 4, y2: H - 22, stroke: css("--ink-2"), "stroke-width": 1.5 }, svg);
+  text(svg, xr, top - 8, "28.6%: dates at random", "t-label2", xr > W - 150 ? "end" : "middle");
+  rows.forEach((r, i) => {
+    const yRow = top + i * rowH, y = yRow + (narrow ? 18 : (rowH - bh) / 2), share = r.weekend / r.n;
+    if (narrow) text(svg, x0, yRow + 12, r.field, "t-label2"); else text(svg, labelW - 12, y + bh / 2 + 4, r.field, "t-label2", "end");
+    const g = el("g", {}, svg); roundedBar(g, x0, y, sx(share) - x0, bh, "right", css("--s1"));
+    el("rect", { x: x0, y: yRow, width: x1 - x0 + right, height: rowH, fill: "transparent" }, g);
+    tipAttr(g, `<b>${esc(r.field)}</b><br>${r.weekend} of ${r.n} dates on a Saturday or Sunday<br><span class="k">${r.col}</span>`);
+    text(svg, sx(share) + 6, y + bh / 2 + 4, pct(r.weekend, r.n), "t-value");
+  });
+}
+
+/* ---------- Exhibit 3: size bands (two tall segmented bars) ---------- */
+function drawBands(c, W) {
+  const b = D.bands, totN = b.reduce((a, r) => a + r.n, 0), totV = b.reduce((a, r) => a + r.v, 0);
+  const rows = [{ label: `Number of requisitions (${totN})`, key: "n", tot: totN }, { label: `Value (PKR ${fmtM(totV)})`, key: "v", tot: totV }];
+  const H = 2 * 62 + 6, svg = svgFor(c, W, H, "Requisitions by size band, count and value shares");
+  rows.forEach((r, i) => {
+    const y0 = i * 62; text(svg, 0, y0 + 14, r.label, "t-label");
+    let x = 0; const bh = 28, y = y0 + 22, gap = 2, avail = W - gap * (b.length - 1);
+    b.forEach((s, j) => {
+      const w = avail * s[r.key] / r.tot; if (w <= 0) return;
+      const g = el("g", {}, svg);
+      el("rect", { x, y, width: w, height: bh, rx: 4, fill: `var(--ord-${j + 1})` }, g);
+      tipAttr(g, `<b>${esc(s.band)}</b><br>${s.n} requisitions · PKR ${fmtFull(s.v)}<br><span class="k">${pct(s.n, totN)} of count · ${pct(s.v, totV)} of value</span>`);
+      const lab = pct(s[r.key], r.tot), lw = measure(svg, lab, "t-in");
+      if (lw + 14 < w) text(g, x + 7, y + bh / 2 + 4, lab, "t-in", "start", { fill: `var(--ord-ink-${j + 1})` });
+      x += w + gap;
+    });
+  });
+}
+function legendBands(node) { node.innerHTML = D.bands.map((s, j) => `<span><i style="background:var(--ord-${j + 1})"></i>${esc(s.band)}</span>`).join(""); }
+
+/* ---------- Horizontal bar (departments, vendors) ---------- */
+function hbar(c, W, rows, opts) {
+  const narrow = W < 560, labelW = narrow ? 0 : (opts.labelW || 180), rowH = narrow ? 42 : 30, bh = 14, top = 4, right = narrow ? 128 : 150;
+  const H = top + rows.length * rowH + 24, svg = svgFor(c, W, H, opts.aria);
+  const max = opts.max, x0 = labelW, x1 = W - right, sx = v => x0 + (x1 - x0) * v / max;
+  niceTicks(max, narrow ? 3 : 5).filter(t => t <= max).forEach(t => { el("line", { x1: sx(t), x2: sx(t), y1: top, y2: H - 20, stroke: css("--grid") }, svg); text(svg, sx(t), H - 5, t === 0 ? "0" : fmtM(t), "t-axis", "middle"); });
+  rows.forEach((r, i) => {
+    const yRow = top + i * rowH, y = yRow + (narrow ? 20 : (rowH - bh) / 2);
+    const lx = narrow ? x0 : labelW - 12, anchor = narrow ? "start" : "end", ly = narrow ? yRow + 13 : y + bh / 2 + 4;
+    const lt = text(svg, lx, ly, r.label, "t-label", anchor);
+    if (r.flag) { const fw = measure(svg, r.flag, "t-crit"); if (narrow) { text(svg, lx + lt.getComputedTextLength() + 8, ly, r.flag, "t-crit"); } else { lt.setAttribute("y", ly - 6); lt.setAttribute("class", "t-label"); text(svg, lx, ly + 8, r.flag, "t-crit", "end"); } }
+    const g = el("g", {}, svg); roundedBar(g, x0, y, Math.max(sx(r.v) - x0, 2), bh, "right", r.flag ? css("--critical") : css("--s1"));
+    el("rect", { x: 0, y: yRow, width: W, height: rowH, fill: "transparent" }, g);
+    tipAttr(g, r.tip);
+    text(svg, sx(r.v) + 8, y + bh / 2 + 4, r.value, "t-value");
+  });
+}
+function drawDept(c, W) {
+  const tot = D.departments.reduce((a, r) => a + r.v, 0);
+  hbar(c, W, D.departments.map(r => ({ label: r.dept, v: r.v, value: `${fmtM(r.v)} · ${pct(r.v, tot)} · ${r.n}`,
+    tip: `<b>${esc(r.dept)}</b><br>${r.n} requisitions · PKR ${fmtFull(r.v)}<br>Largest ${fmtM(r.max)}<br><span class="k">Raised by ${esc(r.requesters.join(", "))}</span>` })),
+    { max: 300e6, labelW: 170, aria: "Requisitioned value by department" });
+}
+function drawVendor(c, W) {
+  const tot = D.vendors.reduce((a, r) => a + r.v, 0); let cum = 0;
+  hbar(c, W, D.vendors.map(r => { cum += r.v; return { label: r.name, v: r.v, flag: r.status !== "Active" ? r.status : null, value: `${fmtM(r.v)} · ${pct(r.v, tot)}`,
+    tip: `<b>${esc(r.name)}</b> <span class="k">${r.id}</span><br>${r.n} invoices · PKR ${fmtFull(r.v)}<br>${r.items} different items supplied<br><span class="k">Cumulative share ${pct(cum, tot)} · status ${esc(r.status)}</span>` }; }),
+    { max: 200e6, labelW: 190, aria: "Payments by vendor" });
+}
+
+/* ---------- Exhibit 6: item x department heat table ---------- */
+function seqStep(v, max, min) { if (!v) return 0; const r = (Math.log10(v) - Math.log10(min)) / (Math.log10(max) - Math.log10(min)); return Math.min(6, Math.max(1, 1 + Math.floor(r * 5.999))); }
+function drawMix(c) {
+  const short = { "Facilities": "Facilities", "Human Resources": "HR", "Procurement": "Procurement", "Branch Operations": "Branch ops", "Marketing": "Marketing", "Risk & Compliance": "Risk", "Information Technology": "IT", "Finance": "Finance" };
+  const depts = D.departments.map(r => r.dept), items = D.items_order, cell = {}, itemTot = {};
+  D.dept_item.forEach(r => { cell[r.item + "|" + r.dept] = r; itemTot[r.item] = (itemTot[r.item] || 0) + r.v; });
+  const max = Math.max(...D.dept_item.map(r => r.v)), min = Math.min(...D.dept_item.map(r => r.v));
+  let h = `<table class="heat"><thead><tr><th></th>${depts.map(d => `<th scope="col">${esc(short[d] || d)}</th>`).join("")}</tr></thead><tbody>`;
+  items.forEach(it => {
+    h += `<tr><th class="row" scope="row">${esc(it)}<small>PKR ${fmtM(itemTot[it] || 0)}</small></th>`;
+    depts.forEach(d => { const r = cell[it + "|" + d]; if (!r) { h += `<td><div class="cell empty">·</div></td>`; return; }
+      const s = seqStep(r.v, max, min); h += `<td><div class="cell" tabindex="0" style="background:var(--seq-${s});color:var(--seq-ink-${s})" data-tip="<b>${esc(it)}</b><br>${esc(d)}<br>${r.n} purchase${r.n > 1 ? "s" : ""} · PKR ${fmtFull(r.v)}">${r.n}</div></td>`; });
+    h += `</tr>`;
+  });
+  c.innerHTML = h + `</tbody></table>`;
+}
+
+/* ---------- Exhibit 7: monthly lines ---------- */
+function drawMonth(c, W) {
+  const m = D.monthly, narrow = W < 560, left = 44, right = 16, top = 22, bottom = 28, H = narrow ? 240 : 280;
+  const svg = svgFor(c, W, H, "Committed and paid value by month");
+  const n = m.length, x = i => left + (W - left - right) * (i + 0.5) / n, max = 250e6, y = v => top + (H - top - bottom) * (1 - v / max);
+  [0, 50e6, 100e6, 150e6, 200e6, 250e6].forEach(t => { el("line", { x1: left, x2: W - right, y1: y(t), y2: y(t), stroke: t === 0 ? css("--axis") : css("--grid") }, svg); text(svg, left - 8, y(t) + 4, t === 0 ? "0" : fmtM(t), "t-axis", "end"); });
+  const mon = s => new Date(s + "-01T00:00:00").toLocaleString("en-GB", { month: "short" });
+  m.forEach((r, i) => { if (narrow && i % 2) return; text(svg, x(i), H - 10, mon(r.m) + (r.m.endsWith("-01") ? " " + r.m.slice(2, 4) : ""), "t-axis", "middle"); });
+  const series = [{ key: "committed", color: css("--s1"), upto: 11 }, { key: "paid", color: css("--s2"), upto: n - 1 }];
+  series.forEach(s => {
+    const pts = m.slice(0, s.upto + 1).map((r, i) => `${x(i)},${y(r[s.key])}`).join(" ");
+    el("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    m.slice(0, s.upto + 1).forEach((r, i) => el("circle", { cx: x(i), cy: y(r[s.key]), r: 3.5, fill: s.color, stroke: css("--sheet"), "stroke-width": 2 }, svg));
+  });
+  const peak = m.reduce((a, r, i) => r.paid > m[a].paid ? i : a, 0);
+  text(svg, x(peak) + 8, y(m[peak].paid) + 4, `Paid ${fmtM(m[peak].paid)} in March`, "t-label2");
+  m.forEach((r, i) => {
+    const g = el("g", {}, svg), bw = (W - left - right) / n;
+    el("rect", { x: x(i) - bw / 2, y: top, width: bw, height: H - top - bottom, fill: "transparent" }, g);
+    const label = new Date(r.m + "-01T00:00:00").toLocaleString("en-GB", { month: "long", year: "numeric" });
+    tipAttr(g, `<b>${label}</b><br><i style="display:inline-block;width:10px;height:3px;background:var(--s1);vertical-align:middle;margin-right:6px"></i>Committed ${i <= 11 ? `PKR ${fmtM(r.committed)} · ${r.pos} POs` : "outside the extract"}<br><i style="display:inline-block;width:10px;height:3px;background:var(--s2);vertical-align:middle;margin-right:6px"></i>Paid PKR ${fmtM(r.paid)} · ${r.payments} invoices`);
+  });
+}
+function legendMonth(node) { node.innerHTML = `<span><i class="line" style="background:var(--s1)"></i>Committed (PO value by PO date)</span><span><i class="line" style="background:var(--s2)"></i>Paid (invoice value by payment date)</span>`; }
+
+/* ---------- Exhibit 8: cycle range plot ---------- */
+function drawCycle(c, W) {
+  const rows = D.cycle, narrow = W < 560, labelW = narrow ? 0 : 160, rowH = narrow ? 44 : 30, top = 6, right = 20;
+  const H = top + rows.length * rowH + 28, svg = svgFor(c, W, H, "Days taken by each step");
+  const lo = -25, hi = 30, x0 = labelW, x1 = W - right, sx = v => x0 + (x1 - x0) * (v - lo) / (hi - lo);
+  [-20, -10, 0, 10, 20, 30].forEach(t => { el("line", { x1: sx(t), x2: sx(t), y1: top, y2: H - 22, stroke: t === 0 ? css("--ink-2") : css("--grid"), "stroke-width": t === 0 ? 1.25 : 1 }, svg); text(svg, sx(t), H - 6, t + (t === 30 ? " days" : ""), "t-axis", "middle"); });
+  rows.forEach((r, i) => {
+    const yRow = top + i * rowH, yc = yRow + (narrow ? 30 : rowH / 2);
+    if (narrow) text(svg, x0, yRow + 13, r.stage, "t-label2"); else text(svg, labelW - 12, yc + 4, r.stage, "t-label2", "end");
+    const g = el("g", {}, svg);
+    if (r.min < 0) { el("line", { x1: sx(r.min), x2: sx(0), y1: yc, y2: yc, stroke: css("--critical"), "stroke-width": 2, "stroke-linecap": "round" }, g); el("circle", { cx: sx(r.min), cy: yc, r: 4, fill: css("--critical"), stroke: css("--sheet"), "stroke-width": 2 }, g); }
+    el("line", { x1: sx(Math.max(r.min, 0)), x2: sx(r.max), y1: yc, y2: yc, stroke: css("--mark-quiet"), "stroke-width": 2, "stroke-linecap": "round" }, g);
+    el("rect", { x: sx(Math.max(r.p25, r.min)), y: yc - 5, width: Math.max(sx(r.p75) - sx(Math.max(r.p25, r.min)), 3), height: 10, rx: 3, fill: css("--s1-wash"), stroke: css("--s1"), "stroke-width": 1 }, g);
+    el("circle", { cx: sx(r.med), cy: yc, r: 4.5, fill: css("--s1"), stroke: css("--sheet"), "stroke-width": 2 }, g);
+    el("rect", { x: 0, y: yRow, width: W, height: rowH, fill: "transparent" }, g);
+    tipAttr(g, `<b>${esc(r.stage)}</b><br>Median ${r.med} days · middle half ${r.p25} to ${r.p75}<br>Range ${r.min} to ${r.max} days over ${r.n} records${r.neg ? `<br><span style="color:var(--critical-ink)">${r.neg} record${r.neg > 1 ? "s" : ""} ran before the previous step</span>` : ""}`);
+    if (r.neg) text(svg, (sx(r.min) + sx(0)) / 2, yc - 7, `${r.neg} before the prior step`, "t-crit", "middle");
+  });
+}
+
+/* ---------- Exhibit 9: early payment histogram ---------- */
+function drawEarly(c, W) {
+  const bins = [0, 3, 6, 9, 12, 15, 18, 21].map(b => ({ bin: b, n: (D.early.hist.find(h => h.bin === b) || { n: 0 }).n, v: (D.early.hist.find(h => h.bin === b) || { v: 0 }).v }));
+  const left = 34, right = 10, top = 20, bottom = 40, H = 220, svg = svgFor(c, W, H, "Invoices by days paid early");
+  const n = bins.length, slot = (W - left - right) / n, bw = Math.min(24, slot * 0.6), max = 16, y = v => top + (H - top - bottom) * (1 - v / max);
+  [0, 4, 8, 12, 16].forEach(t => { el("line", { x1: left, x2: W - right, y1: y(t), y2: y(t), stroke: t === 0 ? css("--axis") : css("--grid") }, svg); text(svg, left - 8, y(t) + 4, t, "t-axis", "end"); });
+  bins.forEach((b, i) => {
+    const cx = left + slot * (i + 0.5), g = el("g", {}, svg);
+    if (b.n) roundedBar(g, cx - bw / 2, y(b.n), bw, y(0) - y(b.n), "top", css("--s1"));
+    el("rect", { x: cx - slot / 2, y: top, width: slot, height: H - top - bottom, fill: "transparent" }, g);
+    tipAttr(g, `<b>${b.bin} to ${b.bin + 2} days early</b><br>${b.n} invoices · PKR ${fmtM(b.v)}`);
+    text(svg, cx, y(b.n) - 6, b.n, "t-value", "middle");
+    text(svg, cx, H - bottom + 16, `${b.bin}–${b.bin + 2}`, "t-axis", "middle");
+  });
+  text(svg, left + (W - left - right) / 2, H - 6, "Days paid before the due date", "t-axis", "middle");
+}
+
+/* ---------- Exhibit 10: routing heat tables ---------- */
+function drawRouting(c, cells) {
+  const bands = ["Up to 1M", "1M to 5M", "5M to 10M", "Over 10M"];
+  const lim = Object.fromEntries(D.matrix.map(m => [m.JOB_TITLE, m.MAX_APPROVAL_AMOUNT]));
+  const titles = ["Head of Treasury", "Financial Controller", "CFO", "CEO"]; if (cells.some(r => r.title === "No approver recorded")) titles.push("No approver recorded");
+  const short = { "Head of Treasury": "Head of Treasury", "Financial Controller": "Fin. Controller", "CFO": "CFO", "CEO": "CEO", "No approver recorded": "None" };
+  const max = Math.max(...cells.map(r => r.n));
+  let h = `<table class="heat"><thead><tr><th></th>${titles.map(t => `<th scope="col">${esc(short[t])}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${lim[t] ? (lim[t] > 1e11 ? "no limit" : "limit " + fmtM(lim[t])) : "&nbsp;"}</span></th>`).join("")}</tr></thead><tbody>`;
+  bands.forEach(b => {
+    h += `<tr><th class="row" scope="row">${b}</th>`;
+    titles.forEach(t => {
+      const r = cells.find(x => x.band === b && x.title === t);
+      if (!r) { h += `<td><div class="cell empty">·</div></td>`; return; }
+      const s = Math.max(1, Math.ceil(6 * r.n / max)), cls = ["cell", r.over ? "breach" : "", t === "No approver recorded" ? "none" : ""].join(" ");
+      const ids = r.ids.length > 6 ? r.ids.slice(0, 6).join(", ") + ` and ${r.ids.length - 6} more` : r.ids.join(", ");
+      h += `<td><div class="${cls}" tabindex="0" style="background:var(--seq-${s});color:var(--seq-ink-${s})" data-tip="<b>${esc(t)} · ${b}</b><br>${r.n} approvals · PKR ${fmtFull(r.v)}${r.over ? `<br><span style='color:var(--critical-ink)'>${r.over} above the ${fmtM(lim[t])} limit</span>` : ""}<br><span class='k'>${esc(ids)}</span>">${r.n}</div></td>`;
+    });
+    h += `</tr>`;
+  });
+  c.innerHTML = h + `</tbody></table>`;
+}
+
+/* ---------- Exhibit 11: roles ---------- */
+function drawRoles(c) {
+  const roles = D.roles_order, byStaff = {}, max = Math.max(...D.roles.map(r => r.n));
+  D.roles.forEach(r => { (byStaff[r.staff] = byStaff[r.staff] || {})[r.role] = r.n; });
+  const raised = new Set(D.roles.filter(r => r.role === "Raised requisition").map(r => r.staff));
+  const firstRole = s => { const m = byStaff[s.STAFF_ID] || {}; const i = roles.findIndex(r => m[r]); return i < 0 ? 99 : i; };
+  const staff = D.staff.slice().sort((a, b) => firstRole(a) - firstRole(b) || a.STAFF_ID - b.STAFF_ID);
+  const head = { "Raised requisition": "Raised req.", "Verified requisition": "Verified req.", "Procurement approval": "Procure. approval", "Financial approval": "Financial approval", "Verified invoice": "Verified invoice", "Approved invoice": "Approved invoice" };
+  let h = `<table class="heat"><thead><tr><th></th>${roles.map(r => `<th scope="col">${head[r]}</th>`).join("")}<th scope="col">Limit</th></tr></thead><tbody>`;
+  staff.forEach(s => {
+    const m = byStaff[s.STAFF_ID] || {};
+    h += `<tr><th class="row" scope="row">${esc(s.NAME)}<small>${esc(s.JOB_TITLE)} · ${s.STAFF_ID}</small></th>`;
+    roles.forEach(r => {
+      const n = m[r]; if (!n) { h += `<td><div class="cell empty">·</div></td>`; return; }
+      const st = Math.max(1, Math.ceil(6 * n / max)), self = r === "Verified requisition" && raised.has(s.STAFF_ID);
+      h += `<td><div class="cell${self ? " breach" : ""}" tabindex="0" style="background:var(--seq-${st});color:var(--seq-ink-${st})" data-tip="<b>${esc(s.NAME)}</b><br>${esc(r)}: ${n}${self ? "<br><span style='color:var(--critical-ink)'>Verified own requisitions</span>" : ""}">${n}</div></td>`;
+    });
+    const lim = s.MAX_APPROVAL_AMOUNT; h += `<td style="font:400 12px/1 var(--font-ui);color:var(--ink-2);padding:0 8px;white-space:nowrap">${lim ? (lim > 1e11 ? "No limit" : fmtM(lim)) : ""}</td></tr>`;
+  });
+  c.innerHTML = h + `</tbody></table>`;
+}
+
+/* ---------- Exhibit 12: unit prices (log dot plot) ---------- */
+function drawPrices(c, W) {
+  const items = D.items_order.slice().sort((a, b) => { const ua = D.unit_prices.find(p => p.ITEM_DESCRIPTION === a).unit, ub = D.unit_prices.find(p => p.ITEM_DESCRIPTION === b).unit; return ub - ua; });
+  const narrow = W < 560, labelW = narrow ? 0 : 210, rowH = narrow ? 40 : 28, top = 6, right = 40;
+  const H = top + items.length * rowH + 26, svg = svgFor(c, W, H, "Unit price by item");
+  const lo = Math.log10(1e4), hi = Math.log10(1e7), x0 = labelW + 8, x1 = W - right, sx = v => x0 + (x1 - x0) * (Math.log10(v) - lo) / (hi - lo);
+  [1e4, 1e5, 1e6, 1e7].forEach(t => { el("line", { x1: sx(t), x2: sx(t), y1: top, y2: H - 22, stroke: css("--grid") }, svg); text(svg, sx(t), H - 6, fmtM(t), "t-axis", "middle"); });
+  items.forEach((it, i) => {
+    const yRow = top + i * rowH, yc = yRow + (narrow ? 28 : rowH / 2);
+    if (narrow) text(svg, 0, yRow + 12, it, "t-label2"); else text(svg, labelW - 4, yc + 4, it, "t-label2", "end");
+    el("line", { x1: x0, x2: x1, y1: yc, y2: yc, stroke: css("--grid") }, svg);
+    const pos = D.unit_prices.filter(p => p.ITEM_DESCRIPTION === it), groups = {};
+    pos.forEach(p => (groups[p.unit] = groups[p.unit] || []).push(p));
+    const units = Object.keys(groups).map(Number), med = units.length > 1 ? Math.min(...units) : units[0];
+    units.forEach(u => {
+      const ps = groups[u], out = u > 3 * med, g = el("g", {}, svg);
+      el("circle", { cx: sx(u), cy: yc, r: 5, fill: out ? css("--critical") : css("--s1"), stroke: css("--sheet"), "stroke-width": 2 }, g);
+      el("rect", { x: sx(u) - 12, y: yRow, width: 24, height: rowH, fill: "transparent" }, g);
+      tipAttr(g, `<b>${esc(it)}</b><br>Unit price PKR ${fmtFull(u)}<br>${ps.map(p => `${p.PO_NUMBER} · ${p.ORDERED_QUANTITY} × · ${p.VENDOR_ID}`).join("<br>")}`);
+      if (out) { const lab = `${ps[0].PO_NUMBER}: 37.5×`, lw = measure(svg, lab, "t-crit"); if (sx(u) + 10 + lw > W) text(svg, sx(u) - 10, yc + 4, lab, "t-crit", "end"); else text(svg, sx(u) + 10, yc + 4, lab, "t-crit"); }
+      else text(svg, sx(u) + 10, yc + 4, `×${ps.length}`, "t-axis");
+    });
+  });
+}
+
+/* ---------- Tables ---------- */
+function tables() {
+  const t = (cols, rows) => `<table class="data"><thead><tr>${cols.map(c => `<th class="${c.num ? "num" : ""}">${c.h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(c => `<td class="${c.num ? "num" : ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const totN = D.bands.reduce((a, r) => a + r.n, 0), totV = D.bands.reduce((a, r) => a + r.v, 0);
+  document.querySelector('[data-table="bands"]').innerHTML = t([{ h: "Band", f: r => r.band }, { h: "Requisitions", num: 1, f: r => r.n }, { h: "Share", num: 1, f: r => pct(r.n, totN) }, { h: "Value", num: 1, f: r => fmtFull(r.v) }, { h: "Share", num: 1, f: r => pct(r.v, totV) }], D.bands);
+  document.querySelector('[data-table="month"]').innerHTML = t([{ h: "Month", f: r => r.m }, { h: "POs", num: 1, f: r => r.pos }, { h: "Committed", num: 1, f: r => fmtFull(r.committed) }, { h: "Payments", num: 1, f: r => r.payments }, { h: "Paid", num: 1, f: r => fmtFull(r.paid) }], D.monthly);
+  document.querySelector('[data-table="cycle"]').innerHTML = t([{ h: "Step", f: r => r.stage }, { h: "Records", num: 1, f: r => r.n }, { h: "Min", num: 1, f: r => r.min }, { h: "Median", num: 1, f: r => r.med }, { h: "Max", num: 1, f: r => r.max }, { h: "Before prior step", num: 1, f: r => r.neg }], D.cycle);
+  let h = `<thead><tr><th>Exception</th><th class="num">Records</th><th class="num">PKR</th><th>Records affected</th></tr></thead><tbody>`, last = null;
+  D.exceptions.forEach(e => {
+    if (e.theme !== last) { h += `<tr class="group"><td colspan="4">${esc(e.theme)}</td></tr>`; last = e.theme; }
+    h += `<tr><td><span class="what">${esc(e.title)}</span><span class="why">${esc(e.note)}</span></td><td class="num">${e.n}</td><td class="num">${fmtFull(e.value)}</td><td class="rec">${e.records.join(", ")}</td></tr>`;
+  });
+  document.querySelector('[data-table="register"]').innerHTML = h + `</tbody>`;
+}
+
+/* ---------- Render and tooltip ---------- */
+const charts = { bridge: drawBridge, weekend: drawWeekend, bands: drawBands, dept: drawDept, vendor: drawVendor, month: drawMonth, cycle: drawCycle, early: drawEarly, prices: drawPrices };
+function renderAll() {
+  document.querySelectorAll("[data-chart]").forEach(node => {
+    const k = node.dataset.chart;
+    if (charts[k]) charts[k](node, Math.max(280, node.clientWidth));
+  });
+}
+drawMix(document.querySelector('[data-chart="mix"]'));
+drawRouting(document.querySelector('[data-chart="routing_req"]'), D.routing_req);
+drawRouting(document.querySelector('[data-chart="routing_inv"]'), D.routing_inv);
+drawRoles(document.querySelector('[data-chart="roles"]'));
+legendBands(document.querySelector('[data-legend="bands"]'));
+legendMonth(document.querySelector('[data-legend="month"]'));
+tables();
+renderAll();
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 120); });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderAll);
+try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll); } catch (e) {}
+new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+const tip = document.getElementById("tip");
+function place(x, y) { const r = tip.getBoundingClientRect(); let px = x + 14, py = y + 14; if (px + r.width > innerWidth - 8) px = x - r.width - 14; if (py + r.height > innerHeight - 8) py = y - r.height - 14; tip.style.left = Math.max(8, px) + "px"; tip.style.top = Math.max(8, py) + "px"; }
+document.addEventListener("pointermove", e => { const t = e.target.closest && e.target.closest("[data-tip]"); if (!t) { tip.hidden = true; return; } tip.innerHTML = t.getAttribute("data-tip"); tip.hidden = false; place(e.clientX, e.clientY); });
+document.addEventListener("focusin", e => { const t = e.target.closest && e.target.closest("[data-tip]"); if (!t) { tip.hidden = true; return; } tip.innerHTML = t.getAttribute("data-tip"); tip.hidden = false; const r = t.getBoundingClientRect(); place(r.right, r.top); });
+document.addEventListener("focusout", () => { tip.hidden = true; });
+document.addEventListener("scroll", () => { tip.hidden = true; }, { passive: true });
+</script>
+
+</html>

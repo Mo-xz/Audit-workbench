@@ -907,7 +907,12 @@ def test_a_requirement_about_one_record_is_answered_by_a_one_sided_rule():
         _match_proposal(coverage=[_covered(
             reads=["payment"], assertion_ids=["as_signed"],
         )]),
-        _match_request(),
+        _Request(
+            schemas=MATCH_SCHEMAS,
+            requirements=[_requirement(
+                requirement="The payment voucher is signed before it is paid.",
+            )],
+        ),
     )
 
     assert proposal["coverage"][0]["reads"] == ["payment"]

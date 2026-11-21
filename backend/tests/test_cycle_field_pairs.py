@@ -253,6 +253,7 @@ class _Request:
 
 
 QUANTITY = "pair_order_quantity_receipt_quantity_received"
+TOTAL = "pair_order_po_total_invoice_invoice_amount"
 VENDOR_ADDRESS_TO_NAME = "pair_order_vendor_address_receipt_vendor_name"
 
 
@@ -338,13 +339,14 @@ def test_an_authored_rule_over_a_pair_s_fields_replaces_it():
         _response(
             assertions=[authored],
             coverage=[{"rcm_id": "RCM-1", "control_attribute": "match",
-                       "reads": ["order", "receipt"], "assertion_ids": [QUANTITY]}],
+                       "reads": ["order", "receipt", "invoice"],
+                       "assertion_ids": [QUANTITY, TOTAL]}],
         ),
         _Request(requirements=[requirement]),
     )
     assert "received_quantity_agrees" in _ids(proposal)
     assert QUANTITY not in _ids(proposal)
-    assert proposal["coverage"][0]["assertion_ids"] == ["received_quantity_agrees"]
+    assert proposal["coverage"][0]["assertion_ids"] == ["received_quantity_agrees", TOTAL]
 
 
 def test_a_pair_both_declined_and_written_is_refused():
@@ -390,18 +392,59 @@ def test_coverage_citing_a_declined_pair_is_refused():
 
 
 def test_a_kept_pair_answers_the_reach_check():
-    """Citing the floor's pair reads the receipt, which is what the match needs."""
+    """Citing the floor's pairs reads every document the match names."""
 
     requirement = {"rcm_id": "RCM-1", "control_attribute": "match",
                    "requirement": "The invoice is matched to the order and receipt."}
     proposal = validate_linkage_proposal(
         _response(coverage=[{
             "rcm_id": "RCM-1", "control_attribute": "match",
-            "reads": ["order", "receipt"], "assertion_ids": [QUANTITY],
+            "reads": ["order", "receipt", "invoice"], "assertion_ids": [QUANTITY, TOTAL],
         }]),
         _Request(requirements=[requirement]),
     )
-    assert proposal["coverage"][0]["assertion_ids"] == [QUANTITY]
+    assert proposal["coverage"][0]["assertion_ids"] == [QUANTITY, TOTAL]
+
+
+def test_a_match_answered_from_the_invoice_alone_is_refused():
+    """Measured live: "matched to the purchase order and the goods receipt
+    note" answered by two checks that the invoice cites them, with reads naming
+    the invoice and nothing else."""
+
+    requirement = {"rcm_id": "RCM-1", "control_attribute": "match",
+                   "requirement": "The invoice is matched to the purchase order and "
+                                  "the goods receipt note."}
+    cites = {
+        "id": "invoice_cites_po", "label": "Invoice cites its order",
+        "left": {"role": "invoice", "field": "purchase_reference"}, "right": None,
+        "requirement": "The invoice states its PO.", "rationale": "x",
+    }
+    with pytest.raises(WorkerResponseValidationError) as raised:
+        validate_linkage_proposal(
+            _response(assertions=[cites], coverage=[{
+                "rcm_id": "RCM-1", "control_attribute": "match",
+                "reads": ["invoice"], "assertion_ids": ["invoice_cites_po"],
+            }]),
+            _Request(requirements=[requirement]),
+        )
+    message = str(raised.value)
+    assert "names the purchase order (roles 'order')" in message
+    assert "names the goods receipt (roles 'receipt')" in message
+    assert "names the vendor invoice" not in message
+
+
+def test_a_named_document_may_be_stated_as_a_gap():
+    requirement = {"rcm_id": "RCM-1", "control_attribute": "match",
+                   "requirement": "The invoice is matched to the order and receipt."}
+    proposal = validate_linkage_proposal(
+        _response(coverage=[{
+            "rcm_id": "RCM-1", "control_attribute": "match",
+            "reads": ["order", "receipt", "invoice"], "assertion_ids": [QUANTITY],
+            "gaps": [{"role": "invoice", "reason": "No invoice field states what was billed."}],
+        }]),
+        _Request(requirements=[requirement]),
+    )
+    assert proposal["coverage"][0]["gaps"][0]["role"] == "invoice"
 
 
 def test_pairs_on_a_role_the_proposal_cannot_reach_are_dropped():
@@ -498,3 +541,33 @@ def test_declines_are_stored_beside_the_rules_and_outside_their_hash():
     assert declined["declined_pairs"][0]["reason"] == "A name is not a currency."
     assert declined["ruleset_hash"] == plain["ruleset_hash"]
     assert declined["assertions"][0]["proposed_by"] == "schema_names"
+
+
+# ------------------------------------------------- documents a requirement names
+_P2P = ["purchase_requisition", "purchase_order", "goods_receipt", "vendor_invoice",
+        "payment_voucher"]
+
+
+@pytest.mark.parametrize("sentence, expected", [
+    ("The invoice is matched to the purchase order and the goods receipt note.",
+     ["purchase_order", "goods_receipt", "vendor_invoice"]),
+    ("The GRN is signed by the receiving department.", ["goods_receipt"]),
+    ("The vendor on the PO is the vendor on the requisition.",
+     ["purchase_requisition", "purchase_order"]),
+    ("Invoices are approved before vouchers are paid.",
+     ["vendor_invoice", "payment_voucher"]),
+    # "order", "note" and "request" are ordinary words; "po" is not the PO.
+    ("In order to pay, note the request; the po box is stated.", []),
+])
+def test_the_documents_a_requirement_names_are_read_from_its_words(sentence, expected):
+    from app import document_types
+
+    assert document_types.mentioned(sentence, _P2P) == expected
+
+
+def test_a_local_type_is_named_by_its_own_words():
+    from app import document_types
+
+    assert document_types.mentioned(
+        "The loan agreement states the facility limit.", ["local.loan_agreement"]
+    ) == ["local.loan_agreement"]

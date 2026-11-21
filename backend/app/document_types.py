@@ -443,6 +443,52 @@ def label(document_type: object, *, local_types: Mapping[str, str] | None = None
     return definition.label if definition else value
 
 
+# A label's last word stands for the type on its own ("the invoice", "the
+# voucher") except where it is an ordinary English word that a sentence uses
+# for something else: "in order to", "note that", "on request".
+_AMBIGUOUS_HEADS = frozenset({"order", "note", "request", "advice", "report", "record"})
+
+
+def _phrases(document_type: str) -> tuple[str, ...]:
+    """What a sentence may call one document type: label, aliases, id, head noun."""
+
+    definition = BY_ID.get(document_type)
+    stem = document_type[len(LOCAL_PREFIX):] if is_local(document_type) else document_type
+    named = [stem.replace("_", " ")]
+    if definition is not None:
+        named += [definition.label, *definition.aliases]
+    head = named[-1 if definition is None else 1].split()[-1].lower()
+    if head not in _AMBIGUOUS_HEADS:
+        named.append(head)
+    return tuple(dict.fromkeys(phrase for phrase in named if phrase.strip()))
+
+
+def _phrase_pattern(phrase: str) -> re.Pattern:
+    # A short capitalized alias — PO, GRN, ITT — is an abbreviation and is
+    # read only in capitals; "po" in running text is not a purchase order.
+    if len(phrase) <= 4 and phrase.isupper():
+        return re.compile(rf"(?<![A-Za-z]){re.escape(phrase)}s?(?![A-Za-z])")
+    words = r"\s+".join(re.escape(word) for word in phrase.split())
+    return re.compile(rf"(?<![A-Za-z]){words}(?:s|es)?(?![A-Za-z])", re.IGNORECASE)
+
+
+def mentioned(text: object, document_types: Iterable[str]) -> list[str]:
+    """The given document types a sentence names, in the order given.
+
+    Used to hold a cycle requirement to the documents it is about: "the invoice
+    is matched to the purchase order and the goods receipt note" names three,
+    and an answer reading only the invoice does not answer it. Matching is by
+    the type's label, aliases, id and head noun, as whole words.
+    """
+
+    sentence = str(text or "")
+    found: list[str] = []
+    for document_type in dict.fromkeys(str(value) for value in document_types):
+        if any(_phrase_pattern(phrase).search(sentence) for phrase in _phrases(document_type)):
+            found.append(document_type)
+    return found
+
+
 def catalog() -> list[dict]:
     return [definition.identity() for definition in DEFINITIONS if definition.active]
 

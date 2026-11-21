@@ -1052,10 +1052,26 @@ procurement proposal answered "the invoice is matched to the order and the goods
 receipt" with a rule that the payment voucher is signed, so a receipt recording 17
 laptops against 20 billed and paid was never compared; and a treasury proposal
 answered a five-term confirmation match with its rate alone, because coverage
-then held one assertion per requirement. The check is over role names only: it
-does not count roles (a single-document cycle reads one), does not refuse a
-one-sided assertion (a field that must be stated is one), and never reads the
-requirement's words. What it cannot catch is a requirement whose assertions read
+then held one assertion per requirement. The check does not count roles (a
+single-document cycle reads one), and does not refuse a one-sided assertion (a
+field that must be stated is one).
+
+`reads` is still the entry's own account, and it can leave a document out.
+Procurement's next proposal answered the same three-way match with two checks
+that the invoice cites a PO and a GRN, and `reads: ["invoice_approval"]`. It
+validated, and the row recorded a matching control as tested by references that
+agree with nothing. So the documents are also taken from the requirement's
+words. `document_types.mentioned` finds every cycle document type the sentence
+names, by label, alias ("PO", "GRN", "goods receipt note"), id or head noun
+("invoice"), as whole words. The head nouns "order", "note", "request",
+"advice", "report" and "record" are skipped, and a short abbreviation counts
+only in capitals. `_named_document_problems` then requires one role of each
+named type to be read by a named assertion, stated as a gap with a reason, or
+unreachable. A name matched where the sentence meant something else costs a
+visible gap; a document left out costs the control's test. Replayed, the stored
+response is refused on that requirement alone, naming the order and the receipt,
+and the other four procurement requirements pass. What it cannot catch is a
+requirement whose assertions read
 the right roles but leave out terms — that is the prompt's to ask for, by
 listing them all. The prompt also says what a join key is not: that two records
 cite each other shows they belong together, never that what they state agrees.

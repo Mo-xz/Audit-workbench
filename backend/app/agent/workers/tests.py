@@ -34,6 +34,7 @@ from ... import (
     cycle_vouching,
     doc_tests,
     document_population,
+    document_types,
     sandbox,
 )
 from ...text import counted, relevance_tokens, verb
@@ -2082,6 +2083,11 @@ requirement that the confirmation match the deal on five terms is five
 assertions; a requirement that one record be matched to two others needs
 assertions reading all three. Every role in reads must be read by at least one
 of the assertions named, and every assertion named must read a role in reads.
+Every document a requirement names is in reads: the validator finds them in
+the requirement's own words, by each type's name and abbreviations, so "matched
+to the purchase order and the goods receipt note" is about the order and the
+receipt as well as the invoice, and checks that the invoice cites them do not
+read them.
 
 Where what is asked of a role cannot be written as a pair of its fields — a
 value that must equal a product or a sum of others, a comparison against
@@ -2768,8 +2774,9 @@ def _reach_problems(
     Nothing here counts roles or asks for a comparison: a requirement can be
     about one record, and a field that must merely be stated is a one-sided
     assertion on that record. What it refuses is a declaration the named
-    rules do not live up to — which is a structural check over role names,
-    the same in any cycle, and never a reading of the requirement's words.
+    rules do not live up to — a structural check over role names, the same in
+    any cycle. The declaration itself can still leave a document out, which is
+    what ``_named_document_problems`` answers from the requirement's words.
     """
 
     label = f"Requirement {target[0]}/{target[1]}"
@@ -2838,6 +2845,62 @@ def _reach_problems(
     return problems
 
 
+def _named_document_problems(
+    target: tuple[str, str],
+    requirement: str,
+    entry: Mapping[str, Any],
+    named: list[str],
+    *,
+    assertion_roles: Mapping[str, set[str]],
+    role_types: Mapping[str, str],
+    unreachable_roles: set[str],
+) -> list[str]:
+    """Hold an entry to every document its requirement names, from the words.
+
+    ``reads`` is the entry's own account of what the requirement is about, and
+    the reach check above holds the entry only to that account. Procurement's
+    three-way match — "the invoice is matched to the purchase order and the
+    goods receipt note" — was answered reading the invoice alone: two checks
+    that it cites a PO and a GRN, with ``reads`` naming the invoice and nothing
+    else. It validated, and the matrix recorded a matching control as tested by
+    two references that agree with nothing.
+
+    So the documents are taken from the requirement as well. Each cycle
+    document type the sentence names (by label, alias or head noun) must have
+    one of its roles read by a named assertion, stated as a gap, or be
+    unreachable. A name read where the sentence meant something else costs a
+    gap with a reason, which the approver sees; a document left out costs the
+    control's test.
+    """
+
+    by_type: dict[str, list[str]] = {}
+    for role, document_type in role_types.items():
+        if document_type:
+            by_type.setdefault(document_type, []).append(role)
+    gap_roles = {
+        str(gap.get("role") or "").strip()
+        for gap in entry.get("gaps") or []
+        if isinstance(gap, Mapping)
+    }
+    read = set().union(*(assertion_roles.get(value, set()) for value in named))
+    problems: list[str] = []
+    for document_type in document_types.mentioned(requirement, by_type):
+        roles = by_type[document_type]
+        if any(role in read or role in gap_roles or role in unreachable_roles for role in roles):
+            continue
+        label = document_types.label(document_type)
+        listed = ", ".join(f"'{role}'" for role in roles)
+        problems.append(
+            f"Requirement {target[0]}/{target[1]} names the {label.lower()} "
+            f"(roles {listed}), and none of its assertions reads it. Add the "
+            "role to reads, and either an assertion comparing what that record "
+            "states with the records it is matched to, or a gap with the reason "
+            "no field of it can express what the requirement asks. A check that "
+            "another document cites it shows only that they refer to each other."
+        )
+    return problems
+
+
 def _require_every_requirement_answered(
     proposal: Mapping[str, Any], request: WorkerRequest
 ) -> None:
@@ -2886,6 +2949,20 @@ def _require_every_requirement_answered(
     known_roles = {
         str(role.get("name") or "") for role in proposal.get("roles") or []
     } | unreachable_roles
+    # Every role's document type: the proposal's own, then the cycle's for a
+    # role the proposal lists as unreachable rather than declaring.
+    role_types = {
+        role: kind
+        for role, kind in {
+            **_supplied_cycle_roles(request),
+            **{
+                str(role.get("name") or ""): str(role.get("document_type") or "")
+                for role in proposal.get("roles") or []
+                if isinstance(role, Mapping)
+            },
+        }.items()
+        if role in known_roles
+    }
     answered: dict[tuple[str, str], Mapping[str, Any]] = {}
     problems: list[str] = []
     # Counted over the requirements, not over the problems: one requirement can
@@ -2970,6 +3047,17 @@ def _require_every_requirement_answered(
                 named,
                 assertion_roles=assertion_roles,
                 known_roles=known_roles,
+                unreachable_roles=unreachable_roles,
+            )
+        )
+        problems.extend(
+            _named_document_problems(
+                target,
+                requirement,
+                entry,
+                named,
+                assertion_roles=assertion_roles,
+                role_types=role_types,
                 unreachable_roles=unreachable_roles,
             )
         )

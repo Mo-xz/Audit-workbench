@@ -429,12 +429,14 @@ describe('EngagementRecordTab', () => {
   })
 
   // ---------------------------------------------------------------- forward
-  it('names the single most blocking thing under the record', async () => {
-    const wrapper = await render([filed()], { next: { kind: 'open_point', ...point() } })
+  it('shows open review gates once on their owning row rather than duplicating a banner', async () => {
+    const wrapper = await render([filed({ open_points: [point()] })], {
+      next: { kind: 'open_point', ...point() },
+    })
 
-    const brief = wrapper.find('.brief')
-    expect(brief.attributes('data-kind')).toBe('open_point')
-    expect(brief.text()).toContain('41 of 60 conclusions')
+    expect(wrapper.find('.brief[data-kind="open_point"]').exists()).toBe(false)
+    expect(wrapper.find('.row .open').text()).toContain('41 of 60 conclusions')
+    expect(wrapper.find('.progress .pgate').text()).toBe('1 review')
   })
 
   it('hangs an open point off the row that created it', async () => {
@@ -1002,17 +1004,14 @@ describe('EngagementRecordTab', () => {
     expect(wrapper.find('.phase[data-state="current"] .row.lead').exists()).toBe(true)
   })
 
-  it('keeps a review debt on screen while a run is in flight', async () => {
-    // Work under way replaces proposed work, because proposing what is already
-    // running is stale. It does not replace a debt: only a person can read what
-    // the assistant decided, and the run is not doing it for them.
+  it('keeps an inline review debt on screen while a run is in flight', async () => {
     liveRun([{ capability: 'report.working_draft', status: 'running' }])
-    const wrapper = await render([filed(), owed()], {
+    const wrapper = await render([filed({ open_points: [point()] }), owed()], {
       next: { kind: 'open_point', ...point() },
     })
 
     expect(wrapper.find('.brief.live').exists()).toBe(true)
-    expect(wrapper.find('.brief[data-kind="open_point"]').text()).toContain('41 of 60 conclusions')
+    expect(wrapper.find('.row .open').text()).toContain('41 of 60 conclusions')
     wrapper.unmount()
   })
 
@@ -1114,17 +1113,23 @@ describe('EngagementRecordTab', () => {
       .toEqual(['done', 'current', 'later', 'later'])
   })
 
-  it('folds away only the phases whose turn has not come', async () => {
-    // What is done is what the engagement holds, and the reader came to check
-    // it. What cannot start yet has nothing to read but its own header.
+  it('folds completed phases without open review gates and keeps the active phase open', async () => {
     const wrapper = await render(spine(HELD), {}, { phases: 'as drawn' })
 
     expect(wrapper.findAll('.phead').map(header => header.attributes('aria-expanded')))
-      .toEqual(['true', 'true', 'false', 'false'])
+      .toEqual(['false', 'true', 'false', 'false'])
     expect(wrapper.findAll('.row .wp').map(label => label.text())).toEqual([
-      'Sources', 'Analysis library', 'Document analyses',
       'Audit planning memorandum', 'Risk and control matrix', 'Test programme',
     ])
+  })
+
+  it('keeps a completed phase expanded by default when it carries an open review gate', async () => {
+    const stages = spine(HELD)
+    stages[0].open_points = [point({ capability: stages[0].capability })]
+    const wrapper = await render(stages, {}, { phases: 'as drawn' })
+
+    expect(wrapper.findAll('.phead').map(header => header.attributes('aria-expanded')))
+      .toEqual(['true', 'true', 'false', 'false'])
   })
 
   it('marks the phase being worked, and it holds the only call to action', async () => {
@@ -1172,13 +1177,16 @@ describe('EngagementRecordTab', () => {
     expect(wrapper.findAll('.phase')[2].findAll('.row')).toHaveLength(3)
   })
 
-  it('folds a finished phase away when its header is clicked', async () => {
+  it('opens a folded finished phase when its header is clicked, and folds it again', async () => {
     const wrapper = await render(spine(HELD), {}, { phases: 'as drawn' })
     const header = wrapper.findAll('.phead')[0]
-    expect(header.attributes('aria-expanded')).toBe('true')
+    expect(header.attributes('aria-expanded')).toBe('false')
 
     await header.trigger('click')
+    expect(header.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.findAll('.phase')[0].findAll('.row')).toHaveLength(3)
 
+    await header.trigger('click')
     expect(header.attributes('aria-expanded')).toBe('false')
     expect(wrapper.findAll('.phase')[0].findAll('.row')).toHaveLength(0)
   })
@@ -1194,52 +1202,38 @@ describe('EngagementRecordTab', () => {
     expect(wrapper.findAll('.phase')[3].find('.pnow').text()).toBe('In progress')
   })
 
-  /* --- executive posture, provenance & phase navigation ------------------- */
+  /* --- unified phase deck & navigation ------------------------------------ */
 
-  it('summarises evidence, controls, findings and human sign-off gates in the posture strip', async () => {
+  it('folds each phase headline metric and open review count into the single phase deck', async () => {
+    const stages = spine([...HELD, 'planning.apm_ready', 'planning.rcm_ready', 'tests.specified'])
+    stages[4].open_points = [point({ key: 'draft_rcm', capability: 'planning.rcm_ready', destination: 'rcm' })]
     const wrapper = await render(
-      [
-        filed({
-          capability: 'findings.drafted',
-          summary: '10 findings in the register: 2 critical, 5 high, 3 medium.',
-        }),
-      ],
+      stages,
       {
         counts: {
-          documents: 84,
-          document_analyses: 84,
-          tables: 25,
+          documents: 13,
+          tables: 6,
           analyses: 24,
-          rcm: 22,
-          tests: 54,
-          data_test_results: 32,
-          document_test_results: 22,
-          findings: 10,
+          rcm: 34,
+          tests: 48,
+          data_test_results: 39,
+          document_test_results: 9,
+          findings: 0,
         },
-        open_points: [point(), point({ key: 'draft_rcm', destination: 'rcm' })],
       },
+      { phases: 'as drawn' },
     )
 
-    const cards = wrapper.findAll('.posture .pcard')
-    expect(cards).toHaveLength(4)
-    expect(cards[0].text()).toContain('84 docs · 25 tables')
-    expect(cards[0].text()).toContain('84 analysed · 24 data checks')
-    expect(cards[1].text()).toContain('22 controls')
-    expect(cards[1].text()).toContain('54 of 54 tests executed')
-    expect(cards[2].text()).toContain('10 findings')
-    expect(cards[2].text()).toContain('2 critical, 5 high, 3 medium')
-    expect(cards[3].text()).toContain('2 review gates')
-    expect(cards[3].attributes('data-tone')).toBe('warn')
-  })
-
-  it('labels each stage with its execution provenance (Auditor, AI, AI + Local Polars, Deterministic)', async () => {
-    const wrapper = await render(spine(PLAN.map(([, capability]) => capability)))
-    const modes = wrapper.findAll('.row .mode').map(el => `${el.attributes('data-kind')}:${el.text().trim()}`)
-
-    expect(modes).toContain('human:Auditor')
-    expect(modes).toContain('hybrid:AI + Local Polars')
-    expect(modes).toContain('ai:AI')
-    expect(modes).toContain('deterministic:Deterministic')
+    expect(wrapper.find('.posture').exists()).toBe(false)
+    const cols = wrapper.findAll('.progress .pcol')
+    expect(cols.map(col => col.find('.pmetric').text())).toEqual([
+      '13 docs · 6 tables · 24 analyses',
+      '34 controls · 48 tests',
+      '48 of 48 tests run',
+      'No findings yet',
+    ])
+    expect(cols[1].find('.pgate').text()).toBe('1 review')
+    expect(wrapper.find('.row .mode').exists()).toBe(false)
   })
 
   it('opens a folded phase when its column in the progress bar is clicked', async () => {

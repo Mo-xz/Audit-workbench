@@ -61,22 +61,6 @@ const KNOWN_DESTINATIONS: readonly string[] = [
   'findings', 'report', 'documents', 'data', 'query', 'analysis',
 ]
 
-/** An icon per work product, chosen from what the artifact *is*. */
-const FILED_ICONS: Record<string, string> = {
-  Sources: 'aw-icon aw-icon-folder-open',
-  'Audit planning memorandum': 'aw-icon aw-icon-map',
-  'Cycle design': 'aw-icon aw-icon-network',
-  'Risk and control matrix': 'aw-icon aw-icon-table',
-  'Control conclusions': 'aw-icon aw-icon-square-check',
-  'Test programme': 'aw-icon aw-icon-shield',
-  'Fieldwork results': 'aw-icon aw-icon-briefcase',
-  'Findings register': 'aw-icon aw-icon-flag',
-  'Document analyses': 'aw-icon aw-icon-file',
-  'Analysis library': 'aw-icon aw-icon-chart-column',
-  Report: 'aw-icon aw-icon-file-pen',
-  Verification: 'aw-icon aw-icon-layout-grid',
-}
-
 // A stored stage status that is out of date comes back marked `refreshing`
 // while the server draws the next one. The page shows the last states and asks
 // again shortly, rather than holding the whole record on the redraw. Bounded,
@@ -141,7 +125,6 @@ onUnmounted(() => window.clearInterval(ticker))
 
 const stages = computed(() => data.value?.stages ?? [])
 const totals = computed(() => data.value?.totals ?? null)
-const next = computed(() => data.value?.next ?? null)
 
 /**
  * `2h 14m`, `47s`. Sub-minute work is stated in seconds rather than rounded to
@@ -296,10 +279,6 @@ function destinationFor(target: string): WorkspaceDestination | null {
 
 function destinationOf(stage: EngagementStage): WorkspaceDestination | null {
   return destinationFor(stage.filed?.destination ?? '')
-}
-
-function icon(label: string): string {
-  return FILED_ICONS[label] ?? 'aw-icon aw-icon-box'
 }
 
 /** `27 rows`, or '' where the work product has no meaningful size. */
@@ -497,15 +476,12 @@ interface PhaseGroup {
   total: number
   /** Whether the run in flight is writing one of this phase's stages. */
   live: boolean
+  /** Open human review gates attached to stages in this phase. */
+  openPoints: number
 }
 
 /**
- * The ledger, cut into the five phases an auditor recognises.
- *
- * The sections come from the payload's `phases` rather than from a list of
- * titles kept here, so a phase renamed or reordered on the server moves on the
- * screen by itself. Row order inside a phase is the plan's order, untouched:
- * the phase groups the ledger, it does not re-sort it.
+ * The ledger, cut into the phases an auditor recognises.
  */
 const groups = computed<PhaseGroup[]>(() => {
   const phases = data.value?.phases ?? []
@@ -516,11 +492,6 @@ const groups = computed<PhaseGroup[]>(() => {
     else byPhase.set(stage.phase, [stage])
   }
 
-  // Exactly one phase is current, and which one is decided once over the whole
-  // list rather than per phase: work in flight names it, the first runnable
-  // stage names it otherwise, and an engagement with nothing left owed and
-  // nothing running has none. Deciding it per phase is how two of them end up
-  // wearing the NEXT badge.
   const owns = (id: string, test: (stage: EngagementStage) => boolean) =>
     (byPhase.get(id) ?? []).some(test)
   const currentId =
@@ -543,6 +514,7 @@ const groups = computed<PhaseGroup[]>(() => {
       held: rows.filter(stage => stage.held).length,
       total: rows.length,
       live: rows.some(stage => Boolean(liveState(stage.capability))),
+      openPoints: rows.reduce((sum, stage) => sum + stage.open_points.length, 0),
     }
   })
 })
@@ -550,25 +522,22 @@ const groups = computed<PhaseGroup[]>(() => {
 const currentPhase = computed(() => groups.value.find(group => group.state === 'current')?.id ?? '')
 
 /**
- * Which phases are open: everything except the ones whose turn has not come.
- *
- * A phase that is done is worth reading — it is what the engagement holds, and
- * what the reader came to check. A phase that cannot start yet has nothing to
- * read: four rows of work not done was three quarters of the old screen, and
- * its header already names the stages and what they wait for.
- *
- * Seeded when the record first arrives and reseeded when the current phase
- * moves — finishing a phase should open the phase that follows it — but not on
- * every load, so the toggles a reader makes survive the refresh that follows
- * every commit. The choice is for the visit; nothing stores it.
+ * Open only the phases that need attention right now: the active phase, any
+ * phase with a live run, and any phase carrying an open human review gate.
+ * Completed phases with no open gates start folded to a single summary line,
+ * keeping the active work above the fold. When every phase is finished with no
+ * open gates, all phases open so the completed record reads immediately.
  */
 const openPhases = ref<Set<string>>(new Set())
 const phaseSeed = computed(
-  () => `${currentPhase.value}|${groups.value.map(group => group.id).join(',')}`,
+  () => `${currentPhase.value}|${groups.value.map(group => `${group.id}:${group.openPoints}`).join(',')}`,
 )
 watch(phaseSeed, () => {
+  const active = groups.value.filter(
+    group => group.state === 'current' || group.live || group.openPoints > 0,
+  )
   openPhases.value = new Set(
-    groups.value.filter(group => group.state !== 'later').map(group => group.id),
+    (active.length ? active : groups.value).map(group => group.id),
   )
 }, { immediate: true })
 
@@ -615,6 +584,37 @@ type ProgressState = 'done' | 'current' | 'live' | 'later'
  * A phase the run is writing is drawn in the run's blue rather than the teal
  * of settled work: work under way is news, and teal would hide it.
  */
+/** One headline figure per phase, folded directly into the top phase bar. */
+function phaseHeadline(phaseId: string): string {
+  const counts = data.value?.counts ?? {}
+  if (phaseId === 'sources') {
+    const parts: string[] = []
+    if (counts.documents) parts.push(plural(counts.documents, 'doc'))
+    if (counts.tables) parts.push(plural(counts.tables, 'table'))
+    if (counts.analyses) parts.push(plural(counts.analyses, 'analysis', 'analyses'))
+    return parts.length ? parts.join(' · ') : 'No sources yet'
+  }
+  if (phaseId === 'planning') {
+    const parts: string[] = []
+    if (counts.rcm) parts.push(plural(counts.rcm, 'control'))
+    if (counts.tests) parts.push(plural(counts.tests, 'test'))
+    return parts.length ? parts.join(' · ') : 'Not planned yet'
+  }
+  if (phaseId === 'fieldwork') {
+    const tests = counts.tests ?? 0
+    const results = (counts.data_test_results ?? 0) + (counts.document_test_results ?? 0)
+    if (tests) return `${results} of ${plural(tests, 'test')} run`
+    return 'Not started'
+  }
+  if (phaseId === 'writeup') {
+    const findingsCount = counts.findings ?? 0
+    if (findingsCount) return plural(findingsCount, 'finding')
+    const reportHeld = stages.value.some(stage => stage.capability === 'report.working_draft' && stage.held)
+    return reportHeld ? 'Report drafted' : 'No findings yet'
+  }
+  return ''
+}
+
 const progress = computed(() => groups.value.map(group => {
   const done = group.total > 0 && group.held === group.total
   const state: ProgressState = group.live
@@ -626,6 +626,8 @@ const progress = computed(() => groups.value.map(group => {
     state,
     status: group.live ? 'Running' : done ? 'Done' : phaseTally(group),
     fill: group.total ? group.held / group.total : 0,
+    headline: phaseHeadline(group.id),
+    openPoints: group.openPoints,
   }
 }))
 
@@ -718,122 +720,6 @@ function phaseNames(group: PhaseGroup): string {
   return group.stages.map(stage => stage.filed?.label || stage.capability).join(' · ')
 }
 
-/* --- executive posture & execution provenance ------------------------------ */
-
-type ExecutionKind = 'human' | 'ai' | 'hybrid' | 'deterministic'
-
-interface ExecutionMode {
-  kind: ExecutionKind
-  icon: string
-  label: string
-}
-
-const EXECUTION_MODES: Record<string, ExecutionMode> = {
-  'sources.imported': { kind: 'human', icon: 'aw-icon-user-pen', label: 'Auditor' },
-  'documents.analysis_generated': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'analysis.executed': { kind: 'hybrid', icon: 'aw-icon-shield', label: 'AI + Local Polars' },
-  'planning.apm_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'planning.cycle_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'planning.rcm_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'tests.specified': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'fieldwork.executed': { kind: 'hybrid', icon: 'aw-icon-shield', label: 'AI + Local Polars' },
-  'results.rolled_up': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
-  'working_papers.generated': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
-  'findings.drafted': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'report.working_draft': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
-  'audit.verified': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
-}
-
-function executionMode(capability: string): ExecutionMode | null {
-  return EXECUTION_MODES[capability] ?? null
-}
-
-const openPoints = computed(() => data.value?.open_points ?? [])
-
-interface PostureCard {
-  key: string
-  label: string
-  value: string
-  detail: string
-  icon: string
-  tone: 'neutral' | 'teal' | 'warn' | 'danger' | 'ok'
-  to: WorkspaceDestination | null
-}
-
-const posture = computed<PostureCard[]>(() => {
-  const counts = data.value?.counts ?? {}
-  const docs = counts.documents ?? 0
-  const tables = counts.tables ?? 0
-  const docAnalyses = counts.document_analyses ?? 0
-  const analyses = counts.analyses ?? 0
-  const rcm = counts.rcm ?? 0
-  const tests = counts.tests ?? 0
-  const results = (counts.data_test_results ?? 0) + (counts.document_test_results ?? 0)
-  const findingsCount = counts.findings ?? 0
-  const heldCount = stages.value.filter(stage => stage.held).length
-
-  const evidenceParts: string[] = []
-  if (docs) evidenceParts.push(plural(docs, 'doc'))
-  if (tables) evidenceParts.push(plural(tables, 'table'))
-  const evidenceDetailParts: string[] = []
-  if (docAnalyses) evidenceDetailParts.push(`${docAnalyses} analysed`)
-  if (analyses) evidenceDetailParts.push(plural(analyses, 'data check'))
-
-  const findingsStage = stages.value.find(stage => stage.capability === 'findings.drafted')
-  const findingsDist = findingsStage?.summary.includes(': ')
-    ? findingsStage.summary.split(': ')[1].replace(/\.$/, '')
-    : ''
-  const hasCritical = /\bcritical\b/i.test(findingsDist)
-
-  const gates = openPoints.value.length
-
-  return [
-    {
-      key: 'evidence',
-      label: 'Evidence ingested',
-      value: evidenceParts.length ? evidenceParts.join(' · ') : 'No sources yet',
-      detail: evidenceDetailParts.length ? evidenceDetailParts.join(' · ') : 'Import audit files to start',
-      icon: 'aw-icon-folder-open',
-      tone: evidenceParts.length ? 'teal' : 'neutral',
-      to: 'documents',
-    },
-    {
-      key: 'controls',
-      label: 'Controls & fieldwork',
-      value: rcm ? plural(rcm, 'control') : 'Not planned yet',
-      detail: tests
-        ? `${results} of ${plural(tests, 'test')} executed`
-        : rcm ? 'Test programme pending' : 'Builds after planning',
-      icon: 'aw-icon-shield',
-      tone: rcm ? 'teal' : 'neutral',
-      to: 'rcm',
-    },
-    {
-      key: 'findings',
-      label: 'Findings',
-      value: findingsCount ? plural(findingsCount, 'finding') : 'None raised',
-      detail: findingsDist
-        || (findingsCount ? 'Drafted from fieldwork exceptions' : 'Pending fieldwork review'),
-      icon: 'aw-icon-flag',
-      tone: findingsCount ? (hasCritical ? 'danger' : 'warn') : 'neutral',
-      to: 'findings',
-    },
-    {
-      key: 'signoff',
-      label: 'Human sign-off',
-      value: gates
-        ? plural(gates, 'review gate')
-        : heldCount ? 'All signed off' : 'Awaiting work',
-      detail: gates
-        ? 'Auditor judgment required'
-        : heldCount ? 'Ready for final sign-off' : 'Gates appear as AI drafts',
-      icon: gates ? 'aw-icon-user-pen' : heldCount ? 'aw-icon-circle-check' : 'aw-icon-user-pen',
-      tone: gates ? 'warn' : heldCount ? 'ok' : 'neutral',
-      to: gates ? destinationFor(openPoints.value[0].destination) : 'report',
-    },
-  ]
-})
-
 function jumpToPhase(phaseId: string) {
   if (!openPhases.value.has(phaseId)) {
     const next = new Set(openPhases.value)
@@ -850,13 +736,7 @@ function jumpToPhase(phaseId: string) {
     <div class="bar">
       <div class="bar-title">
         <h2>Engagement record</h2>
-        <span class="gov-pill" aria-label="Operating model: AI-assisted, local Polars compute, human sign-off">
-          <span class="gov-seg" data-kind="ai"><i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI-assisted</span>
-          <span class="gov-dot" aria-hidden="true">·</span>
-          <span class="gov-seg" data-kind="local"><i class="aw-icon aw-icon-lock" aria-hidden="true" />Local Polars</span>
-          <span class="gov-dot" aria-hidden="true">·</span>
-          <span class="gov-seg" data-kind="human"><i class="aw-icon aw-icon-user-pen" aria-hidden="true" />Human sign-off</span>
-        </span>
+        <span class="subtitle">Local Polars compute · Human-gated sign-off</span>
       </div>
       <span v-if="data?.refreshing" class="updating" role="status">
         <i class="aw-icon aw-icon-spin aw-icon-loader-circle" aria-hidden="true" />Updating status…
@@ -896,34 +776,15 @@ function jumpToPhase(phaseId: string) {
     />
 
     <template v-else>
-      <!-- Executive audit posture: evidence ingested, controls tested, findings
-           raised, and remaining human sign-off gates — one click to each surface. -->
-      <section class="posture" aria-label="Engagement posture">
-        <component
-          :is="card.to ? RouterLink : 'div'"
-          v-for="card in posture"
-          :key="card.key"
-          :to="card.to ? nav.to(card.to) : undefined"
-          class="pcard"
-          :data-tone="card.tone"
-        >
-          <div class="pcard-top">
-            <span class="pcard-ico"><i :class="`aw-icon ${card.icon}`" aria-hidden="true" /></span>
-            <span class="pcard-lbl">{{ card.label }}</span>
-            <i v-if="card.to" class="aw-icon aw-icon-arrow-right pcard-go" aria-hidden="true" />
-          </div>
-          <strong class="pcard-val">{{ card.value }}</strong>
-          <span class="pcard-sub">{{ card.detail }}</span>
-        </component>
-      </section>
-
-      <!-- The whole plan at once, clickable to jump to any phase in the spine. -->
+      <!-- Unified 4-phase deck: progress, key headline metric, and any open
+           human review gate per phase — clickable to jump straight to it. -->
       <section class="progress" aria-label="Progress through the engagement">
         <div
           v-for="(phase, idx) in progress"
           :key="phase.id"
           class="pcol"
           :data-state="phase.state"
+          :data-review="phase.openPoints ? '1' : null"
           role="button"
           tabindex="0"
           @click="jumpToPhase(phase.id)"
@@ -933,6 +794,12 @@ function jumpToPhase(phaseId: string) {
             <span class="pnum" aria-hidden="true">{{ idx + 1 }}</span>
             <span class="ptl">{{ phase.title }}</span>
             <span class="pss">{{ phase.status }}</span>
+          </div>
+          <div class="pstat">
+            <span class="pmetric">{{ phase.headline }}</span>
+            <span v-if="phase.openPoints" class="pgate">
+              {{ plural(phase.openPoints, 'review') }}
+            </span>
           </div>
           <span
             class="ptrack"
@@ -945,9 +812,7 @@ function jumpToPhase(phaseId: string) {
         </div>
       </section>
 
-      <!-- While a run is in flight it, not the next step, is the news. The two
-           never show together: proposing work that is under way is exactly the
-           staleness this band exists to remove. -->
+      <!-- While a run is in flight it, not the next step, is the news. -->
       <section
         v-if="live"
         class="brief live"
@@ -964,8 +829,6 @@ function jumpToPhase(phaseId: string) {
             ><template v-if="liveElapsed"> · {{ liveElapsed }} so far</template>
           </span>
         </div>
-        <!-- How much of the run is behind it. A step count is a reading; the
-             bar is the same fact at a glance, and the two are the same number. -->
         <span v-if="live.progress !== null" class="pbar">
           <i :style="{ width: `${Math.round(live.progress * 100)}%` }" />
         </span>
@@ -979,29 +842,8 @@ function jumpToPhase(phaseId: string) {
         />
       </section>
 
-      <!-- Human-in-the-loop review gate promoted above the spine so required
-           auditor sign-offs are immediately visible without scrolling. -->
-      <section v-if="next && next.kind === 'open_point'" class="brief" data-kind="open_point">
-        <span class="brief-pill">
-          <i class="aw-icon aw-icon-user-pen" aria-hidden="true" />Human sign-off
-        </span>
-        <div class="txt">
-          <strong>{{ next.message }}</strong>
-          <span v-if="openPoints.length > 1" class="gate-count">
-            +{{ openPoints.length - 1 }} more {{ openPoints.length - 1 === 1 ? 'gate' : 'gates' }}
-          </span>
-        </div>
-        <Button
-          :label="next.action"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="openPoint(next)"
-        />
-      </section>
-
-      <!-- The spine: every phase in plan order. A phase whose turn has not come
-           folds to its header, which names the work products it covers. -->
+      <!-- The spine: every phase in plan order. Completed phases without open
+           review gates fold to a single summary line, keeping active work in view. -->
       <section class="spine" aria-label="The engagement file">
         <section
           v-for="(group, index) in groups"
@@ -1010,9 +852,6 @@ function jumpToPhase(phaseId: string) {
           :data-state="group.state"
           :data-phase-section="group.id"
         >
-          <!-- The plan runs one phase after another, so the phases are
-               numbered and joined: a rail that is teal through the work behind
-               the engagement and grey through the work ahead of it. -->
           <span class="rail" aria-hidden="true">
             <span class="disc">{{ index + 1 }}</span>
             <span v-if="index < groups.length - 1" class="track"></span>
@@ -1034,6 +873,9 @@ function jumpToPhase(phaseId: string) {
               :title="PHASE_STATE_LABEL.done"
             />
             <span v-else-if="group.state === 'current'" class="pnow">{{ PHASE_STATE_LABEL.current }}</span>
+            <span v-if="!phaseOpen(group) && group.openPoints" class="pgate">
+              {{ plural(group.openPoints, 'review') }}
+            </span>
             <span v-if="!phaseOpen(group) && group.total" class="pnames">{{ phaseNames(group) }}</span>
             <span class="grow"></span>
             <i class="aw-icon aw-icon-chevron-down pchev" aria-hidden="true" />
@@ -1047,19 +889,10 @@ function jumpToPhase(phaseId: string) {
                 :data-status="stageStatus(stage) || null"
                 :data-live="liveState(stage.capability) || null"
               >
-                <!-- What state the stage is in, said once, in the one column a
-                     reader scanning the phase is looking down. A live run keeps
-                     its dot: it is the one state that moves. -->
                 <span v-if="liveState(stage.capability)" class="dot" aria-hidden="true"></span>
                 <UiStateIcon v-else class="state" :state="rowState(stage)" />
 
-                <!-- What the work product is, beside what it is: the icon is
-                     the artifact's, the state icon before it is the stage's. -->
-                <i v-if="stage.filed" :class="icon(stage.filed.label)" class="wpi" aria-hidden="true" />
-                <span v-else class="wpi" aria-hidden="true"></span>
-
                 <span class="name">
-                  <!-- Where the stage sits in the plan: phase, then step. -->
                   <span class="sn" aria-hidden="true">{{ index + 1 }}.{{ step + 1 }}</span>
                   <component
                     :is="destinationOf(stage) ? RouterLink : 'span'"
@@ -1071,8 +904,6 @@ function jumpToPhase(phaseId: string) {
                   <span v-else class="none">&#8212;</span>
                 </span>
 
-                <!-- What it amounts to, as one line of facts. The doors are the
-                     same links they were, set as the phrase they are. -->
                 <span class="meta">
                   <template v-for="(fact, index) in facts(stage)" :key="`${fact.kind}:${index}`">
                     <span v-if="index" class="sep" aria-hidden="true">·</span>
@@ -1095,78 +926,47 @@ function jumpToPhase(phaseId: string) {
                   </template>
                 </span>
 
-                <span class="end">
-                  <span
-                    v-if="executionMode(stage.capability)"
-                    class="mode"
-                    :data-kind="executionMode(stage.capability)!.kind"
+                <span class="act">
+                  <Button
+                    v-if="stage.action === 'import' && stage.capability === leadStage"
+                    label="Import"
+                    size="small"
+                    @click="start(stage)"
+                  />
+                  <button
+                    v-else-if="stage.action === 'import'"
+                    type="button"
+                    class="rowlink"
+                    @click="start(stage)"
+                  >{{ stage.held ? 'Import more' : 'Import' }}</button>
+                  <SplitButton
+                    v-else-if="stage.capability === leadStage && stage.start?.alternates.length"
+                    label="Run"
+                    size="small"
+                    :disabled="starting === stage.capability"
+                    :model="startOptions(stage)"
+                    @click="start(stage)"
                   >
-                    <i :class="`aw-icon ${executionMode(stage.capability)!.icon}`" aria-hidden="true" />
-                    {{ executionMode(stage.capability)!.label }}
-                  </span>
-
-                  <span class="act">
-                    <!-- Sources is the one stage the assistant cannot begin.
-                         Bringing in the audit file is the auditor's own act, so
-                         the row hands back the shell's dialog. Drawn as a link
-                         unless it is the next step, because importing more is
-                         always possible and never the thing to do. -->
-                    <Button
-                      v-if="stage.action === 'import' && stage.capability === leadStage"
-                      label="Import"
-                      size="small"
-                      @click="start(stage)"
-                    />
-                    <button
-                      v-else-if="stage.action === 'import'"
-                      type="button"
-                      class="rowlink"
-                      @click="start(stage)"
-                    >{{ stage.held ? 'Import more' : 'Import' }}</button>
-                    <!-- Only the lead stage is drawn as a call to action: a tail
-                         of six buttons is a menu, not a next step. A stage
-                         offering narrower runs draws them under the button, never
-                         beside it - the click stays the complete answer. -->
-                    <SplitButton
-                      v-else-if="stage.capability === leadStage && stage.start?.alternates.length"
-                      label="Run"
-                      size="small"
-                      :disabled="starting === stage.capability"
-                      :model="startOptions(stage)"
-                      @click="start(stage)"
-                    >
-                      <template #item="{ item, props }">
-                        <a class="alt" v-bind="props.action">
-                          <span>{{ item.label }}</span>
-                          <small v-if="item.note">{{ item.note }}</small>
-                        </a>
-                      </template>
-                    </SplitButton>
-                    <Button
-                      v-else-if="stage.capability === leadStage"
-                      label="Run"
-                      size="small"
-                      :loading="starting === stage.capability"
-                      @click="start(stage)"
-                    />
-                    <RouterLink
-                      v-else-if="stage.held && destinationOf(stage)"
-                      :to="nav.to(destinationOf(stage)!)"
-                      class="row-open"
-                      :aria-label="`Open ${stage.filed?.label || stage.capability}`"
-                    >
-                      <i class="aw-icon aw-icon-arrow-right" aria-hidden="true" />
-                    </RouterLink>
-                  </span>
+                    <template #item="{ item, props }">
+                      <a class="alt" v-bind="props.action">
+                        <span>{{ item.label }}</span>
+                        <small v-if="item.note">{{ item.note }}</small>
+                      </a>
+                    </template>
+                  </SplitButton>
+                  <Button
+                    v-else-if="stage.capability === leadStage"
+                    label="Run"
+                    size="small"
+                    :loading="starting === stage.capability"
+                    @click="start(stage)"
+                  />
                 </span>
 
                 <span v-if="hasBody(stage)" class="body">
-                  <!-- Being produced right now, whether or not it was filed before. -->
                   <span v-if="liveState(stage.capability)" class="again" :data-live="liveState(stage.capability)">
                     <i :class="liveState(stage.capability) === 'running' ? 'aw-icon aw-icon-spin aw-icon-loader-circle' : 'aw-icon aw-icon-clock'" aria-hidden="true" />
                     <template v-if="liveState(stage.capability) === 'running'">
-                      <!-- A stage that already filed is being produced *again*,
-                           which is a different thing from one being produced. -->
                       {{ stage.held ? 'Running again' : 'The assistant is working on it now.'
                       }}{{ liveSince(stage.capability) ? ` · ${liveSince(stage.capability)}` : '' }}<template
                         v-if="soleRunning === stage.capability && activityLine"> · {{ activityLine }}</template>
@@ -1176,9 +976,6 @@ function jumpToPhase(phaseId: string) {
                     </template>
                   </span>
 
-                  <!-- What this stage left open behind it. Every debt has a row
-                       to sit on now, because the stage that owes it is always
-                       drawn. -->
                   <button
                     v-for="point in stage.open_points"
                     :key="point.key"
@@ -1213,26 +1010,13 @@ function jumpToPhase(phaseId: string) {
 .loading { display: grid; place-content: center; gap: .4rem; padding: 3rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 
 /* --- the toolbar --------------------------------------------------------- */
-.bar { display: flex; align-items: center; flex-wrap: wrap; gap: .625rem .875rem; }
-.bar-title { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; min-width: 0; }
+.bar { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .875rem; }
+.bar-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: .25rem .75rem; min-width: 0; }
 .bar h2 {
   margin: 0; color: var(--aw-ink-strong); font-size: var(--aw-text-lg); font-weight: var(--aw-weight-title);
   letter-spacing: -.01em;
 }
-.gov-pill {
-  display: inline-flex; align-items: center; gap: .4rem;
-  padding: .2rem .6rem;
-  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-pill);
-  background: var(--aw-panel);
-  font-size: var(--aw-text-xs); font-weight: 600; color: var(--aw-ink-soft);
-  white-space: nowrap;
-}
-.gov-seg { display: inline-flex; align-items: center; gap: .25rem; }
-.gov-seg .aw-icon { font-size: var(--aw-text-xs); }
-.gov-seg[data-kind='ai'] { color: var(--aw-accent); }
-.gov-seg[data-kind='local'] { color: var(--aw-teal-strong); }
-.gov-seg[data-kind='human'] { color: var(--aw-ink); }
-.gov-dot { color: var(--aw-border-strong); }
+.subtitle { color: var(--aw-muted); font-size: var(--aw-text-xs); }
 .grow { flex: 1; }
 
 .bar :deep(.refresh) { width: 30px; height: 30px; padding: 0; }
@@ -1250,79 +1034,15 @@ function jumpToPhase(phaseId: string) {
 .chain:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 2px; }
 .chain .aw-icon { font-size: var(--aw-text-sm); }
 
-/* --- executive audit posture (4 KPI tiles) ------------------------------- */
-.posture {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: .625rem;
-}
-.pcard {
-  display: flex; flex-direction: column; gap: .2rem; min-width: 0;
-  padding: .75rem .875rem;
-  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
-  background: var(--aw-panel);
-  color: inherit; text-decoration: none;
-  transition: border-color .14s ease, background-color .14s ease;
-}
-a.pcard:hover { border-color: var(--aw-teal-line); background: color-mix(in srgb, var(--aw-teal-soft) 30%, var(--aw-panel)); }
-a.pcard:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 2px; }
-
-.pcard[data-tone='warn'] { border-color: var(--aw-warn-line); background: color-mix(in srgb, var(--aw-warn-soft) 65%, var(--aw-panel)); }
-a.pcard[data-tone='warn']:hover { border-color: var(--aw-warn); background: var(--aw-warn-soft); }
-.pcard[data-tone='danger'] { border-color: var(--aw-danger-line); background: color-mix(in srgb, var(--aw-danger-soft) 45%, var(--aw-panel)); }
-a.pcard[data-tone='danger']:hover { border-color: var(--aw-danger); background: var(--aw-danger-soft); }
-.pcard[data-tone='ok'] { border-color: var(--aw-ok-line); background: color-mix(in srgb, var(--aw-ok-soft) 55%, var(--aw-panel)); }
-a.pcard[data-tone='ok']:hover { border-color: var(--aw-ok); background: var(--aw-ok-soft); }
-
-.pcard-top { display: flex; align-items: center; gap: .4rem; min-width: 0; }
-.pcard-ico {
-  display: grid; place-items: center; flex: 0 0 auto;
-  width: 1.375rem; height: 1.375rem; border-radius: 6px;
-  background: var(--aw-raised); color: var(--aw-muted);
-  font-size: var(--aw-text-xs);
-}
-.pcard[data-tone='teal'] .pcard-ico { background: var(--aw-teal-soft); color: var(--aw-teal-strong); }
-.pcard[data-tone='warn'] .pcard-ico { background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
-.pcard[data-tone='danger'] .pcard-ico { background: var(--aw-danger-soft); color: var(--aw-danger-ink); }
-.pcard[data-tone='ok'] .pcard-ico { background: var(--aw-ok-soft); color: var(--aw-ok); }
-
-.pcard-lbl {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 600;
-}
-.pcard-go {
-  flex: 0 0 auto; color: var(--aw-border-strong); font-size: var(--aw-text-xs);
-  transition: transform .14s ease, color .14s ease;
-}
-a.pcard:hover .pcard-go { color: var(--aw-teal-strong); transform: translateX(2px); }
-a.pcard[data-tone='warn']:hover .pcard-go { color: var(--aw-warn-ink); }
-a.pcard[data-tone='danger']:hover .pcard-go { color: var(--aw-danger-ink); }
-a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
-
-.pcard-val {
-  margin-top: .125rem;
-  color: var(--aw-ink-strong); font-size: var(--aw-text-md); font-weight: 700;
-  font-variant-numeric: tabular-nums; line-height: 1.25;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.pcard[data-tone='warn'] .pcard-val { color: var(--aw-warn-ink); }
-.pcard[data-tone='danger'] .pcard-val { color: var(--aw-danger-ink); }
-.pcard[data-tone='ok'] .pcard-val { color: var(--aw-ok); }
-
-.pcard-sub {
-  color: var(--aw-ink-soft); font-size: var(--aw-text-xs); line-height: 1.35;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* --- the whole plan, as one bar per phase -------------------------------- */
+/* --- unified 4-phase deck ------------------------------------------------ */
 .progress {
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  padding: .625rem .25rem;
+  padding: .5rem .25rem;
   border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
   background: var(--aw-panel);
 }
 .pcol {
-  display: grid; gap: .45rem; min-width: 0; padding: .25rem .875rem;
+  display: grid; gap: .375rem; min-width: 0; padding: .375rem .875rem;
   border-radius: var(--aw-radius-control); cursor: pointer;
   transition: background-color .14s ease;
 }
@@ -1352,12 +1072,26 @@ a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
   color: var(--aw-teal-strong); font-family: var(--aw-font-mono); font-variant-numeric: tabular-nums;
 }
 .pcol[data-state='live'] .pss { color: var(--aw-info); font-weight: 600; }
+
+.pstat { display: flex; align-items: center; justify-content: space-between; gap: .4rem; min-width: 0; }
+.pmetric {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--aw-ink-soft); font-size: var(--aw-text-xs); font-variant-numeric: tabular-nums;
+}
+.pcol[data-state='later'] .pmetric { color: var(--aw-muted); }
+.pgate {
+  flex: 0 0 auto; display: inline-flex; align-items: center;
+  padding: .05rem .45rem; border-radius: var(--aw-radius-pill);
+  background: var(--aw-warn-soft); color: var(--aw-warn-ink);
+  font-size: var(--aw-text-2xs); font-weight: 600; white-space: nowrap;
+}
+
 .ptrack { display: block; height: 5px; border-radius: 3px; background: var(--aw-border); overflow: hidden; }
 .ptrack i { display: block; height: 100%; border-radius: inherit; background: var(--aw-teal); }
 .pcol[data-state='done'] .ptrack i { background: var(--aw-ok); }
 .pcol[data-state='live'] .ptrack i { background: var(--aw-info); }
 
-/* --- the two things that are news ---------------------------------------- */
+/* --- live run band ------------------------------------------------------- */
 .brief {
   display: flex;
   align-items: center;
@@ -1368,23 +1102,10 @@ a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
   background: var(--aw-warn-soft);
 }
 .brief .mark { flex: 0 0 auto; display: grid; place-items: center; color: var(--aw-warn-ink); font-size: var(--aw-text-sm); }
-.brief-pill {
-  flex: 0 0 auto; display: inline-flex; align-items: center; gap: .3rem;
-  padding: .2rem .55rem; border-radius: var(--aw-radius-pill);
-  background: var(--aw-panel); border: 1px solid var(--aw-warn-line);
-  color: var(--aw-warn-ink); font-size: var(--aw-text-xs); font-weight: 700;
-  white-space: nowrap;
-}
-.brief-pill .aw-icon { font-size: var(--aw-text-xs); }
 .brief .txt { flex: 1; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .5rem; }
 .brief.stepped .txt { flex: 0 1 auto; }
 .brief strong { color: var(--aw-warn-ink); font-size: var(--aw-text-sm); font-weight: 600; line-height: 1.4; }
 .brief span { color: var(--aw-ink-soft); font-size: var(--aw-text-sm); }
-.gate-count {
-  padding: .05rem .45rem; border-radius: var(--aw-radius-pill);
-  background: color-mix(in srgb, var(--aw-warn) 14%, transparent);
-  color: var(--aw-warn-ink); font-size: var(--aw-text-xs); font-weight: 600;
-}
 
 /* --- the run history, as a footnote -------------------------------------- */
 /* The strip at the top draws what the engagement holds. What is left down here
@@ -1468,12 +1189,10 @@ a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
   background: var(--aw-panel); overflow: hidden;
 }
 
-/* One line per work product, in five fixed columns so a reader scans down
-   them rather than across each row: its state, what it is, its name, what it
-   amounts to, and the one thing to do about it. */
+/* One line per work product, in four fixed columns: state, name, facts, and action. */
 .row {
   display: grid;
-  grid-template-columns: 1rem 1rem minmax(8rem, 15.5rem) minmax(0, 1fr) auto;
+  grid-template-columns: 1rem minmax(9rem, 16rem) minmax(0, 1fr) auto;
   gap: 0 .75rem;
   align-items: center;
   min-height: 2.75rem;
@@ -1509,13 +1228,6 @@ a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
 }
 
 /* --- what the row is ------------------------------------------------------ */
-/* The artifact's own icon, after the state: the one says what the work
-   product is, the other where it stands. */
-.wpi { justify-self: center; font-size: var(--aw-text-base); color: var(--aw-teal); }
-.row.ghost .wpi { color: var(--aw-muted); }
-.row.ghost.lead .wpi,
-.row[data-live] .wpi { color: var(--aw-teal); }
-
 .name { display: flex; align-items: center; gap: .625rem; min-width: 0; }
 /* The step's place in the plan, in the ledger face so 1.1 to 4.2 line up. */
 .sn {
@@ -1567,43 +1279,7 @@ a.door:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; b
 .door[data-kind='tool'] .aw-icon { margin-right: .25rem; font-size: var(--aw-text-xs); vertical-align: -.1em; }
 a.door[data-kind='tool']:hover { color: var(--aw-teal-strong); }
 
-.end { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; }
 .act { display: flex; align-items: center; justify-content: flex-end; }
-
-/* Execution-mode provenance badge per stage: AI, AI + Local Polars,
-   Deterministic, or Auditor. */
-.mode {
-  display: inline-flex; align-items: center; gap: .25rem;
-  height: 1.35rem; padding: 0 .5rem;
-  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-pill);
-  background: var(--aw-raised); color: var(--aw-muted);
-  font-size: var(--aw-text-2xs); font-weight: 600; white-space: nowrap;
-}
-.mode .aw-icon { font-size: var(--aw-text-2xs); }
-.mode[data-kind='ai'] {
-  border-color: var(--aw-accent-line); background: var(--aw-accent-soft); color: var(--aw-accent);
-}
-.mode[data-kind='hybrid'] {
-  border-color: var(--aw-teal-line); background: var(--aw-teal-soft); color: var(--aw-teal-strong);
-}
-.mode[data-kind='deterministic'] {
-  border-color: var(--aw-border); background: var(--aw-raised); color: var(--aw-ink-soft);
-}
-.mode[data-kind='human'] {
-  border-color: var(--aw-border-strong); background: var(--aw-panel); color: var(--aw-ink);
-}
-.row.ghost .mode { opacity: .65; }
-
-.row-open {
-  display: grid; place-items: center;
-  width: 1.6rem; height: 1.6rem; border-radius: var(--aw-radius-control);
-  color: var(--aw-muted); text-decoration: none;
-  transition: background-color .12s ease, color .12s ease, transform .12s ease;
-}
-.row-open .aw-icon { font-size: var(--aw-text-xs); }
-.row:hover .row-open { color: var(--aw-teal-strong); }
-.row-open:hover { background: var(--aw-teal-soft); color: var(--aw-teal-strong); transform: translateX(1px); }
-.row-open:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; }
 
 /* Importing more is always possible and never the next step, so it is a
    link-weight control rather than a second button on the screen. */
@@ -1616,7 +1292,7 @@ a.door[data-kind='tool']:hover { color: var(--aw-teal-strong); }
 .rowlink:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; border-radius: 2px; }
 
 /* Live run progress and open review points hanging under a row. */
-.body { grid-column: 3 / -1; display: grid; gap: .25rem; min-width: 0; justify-items: start; padding: .125rem 0 .375rem; }
+.body { grid-column: 2 / -1; display: grid; gap: .25rem; min-width: 0; justify-items: start; padding: .125rem 0 .375rem; }
 
 /* A distribution said on the row's own line. A severe tier that holds
    something keeps its colour, so the matrix still reads amber where it should. */
@@ -1681,18 +1357,15 @@ a.door[data-kind='tool']:hover { color: var(--aw-teal-strong); }
    thing to do about it: an action that scrolls away from the row it belongs
    to is one nobody takes. */
 @container (max-width: 44rem) {
-  .posture { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .progress { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: .625rem; }
   .pcol:nth-child(odd) { border-left: 0; }
-  .mode { display: none; }
 
-  .row { grid-template-columns: 1rem 1rem minmax(0, 1fr) auto; }
+  .row { grid-template-columns: 1rem minmax(0, 1fr) auto; }
   .row .dot, .row .state { grid-column: 1; grid-row: 1; }
-  .row .wpi { grid-column: 2; grid-row: 1; }
-  .row .name { grid-column: 3; grid-row: 1; }
-  .row .end { grid-column: 4; grid-row: 1; }
-  .row .meta { grid-column: 3 / -1; grid-row: 2; margin-top: .125rem; }
-  .row .body { grid-column: 3 / -1; grid-row: 3; }
+  .row .name { grid-column: 2; grid-row: 1; }
+  .row .act { grid-column: 3; grid-row: 1; }
+  .row .meta { grid-column: 2 / -1; grid-row: 2; margin-top: .125rem; }
+  .row .body { grid-column: 2 / -1; grid-row: 3; }
   .pnames { display: none; }
   .phase { column-gap: .75rem; grid-template-columns: 1.75rem minmax(0, 1fr); }
   .disc { width: 1.75rem; height: 1.75rem; font-size: var(--aw-text-sm); }

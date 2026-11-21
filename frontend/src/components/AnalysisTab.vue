@@ -73,6 +73,15 @@ const selected = computed(() => analyses.value.find(item => item.id === selected
 const outstanding = computed(() => analyses.value.filter(isOutstanding))
 const assistantUnavailable = computed(() => agent.isActive.value || assistantChat.state.busy)
 
+const aiAnalysisSummary = computed(() => {
+  const total = analyses.value.length
+  if (!total) return null
+  const aiCount = analyses.value.filter(item => item.source === 'ai').length
+  const runCount = analyses.value.filter(item => Boolean(item.last_result && !item.last_result.error)).length
+  const withExceptions = analyses.value.filter(item => (item.last_result?.exception_count ?? 0) > 0).length
+  return { total, aiCount, runCount, withExceptions }
+})
+
 /** The lanes, the chips and the whole filter vocabulary, from one tally. */
 const status = computed(() => analysisStatus(analyses.value))
 
@@ -349,7 +358,13 @@ function fail(summaryText: string, error: unknown) {
          every count this page has, so a sentence beside the title would
          restate numbers the reader is about to be shown. -->
     <header class="page-head">
-      <h1>Analysis</h1>
+      <div class="head-copy">
+        <h1>Analysis</h1>
+        <span v-if="aiAnalysisSummary && aiAnalysisSummary.aiCount" class="ai-corpus-pill">
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          {{ plural(aiAnalysisSummary.aiCount, 'AI procedure') }} · {{ aiAnalysisSummary.runCount }} run locally<template v-if="aiAnalysisSummary.withExceptions"> · {{ aiAnalysisSummary.withExceptions }} flagged</template>
+        </span>
+      </div>
       <span class="grow" />
       <template v-if="analyses.length">
         <SplitButton
@@ -511,6 +526,16 @@ function fail(summaryText: string, error: unknown) {
 }
 
 .grow { flex: 1; }
+.head-copy { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; min-width: 0; }
+.ai-corpus-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .15rem .6rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-xs); font-weight: 600; white-space: nowrap;
+}
 
 .layout { display: grid; grid-template-columns: 18.75rem minmax(0, 1fr); gap: .875rem; flex: 1; min-height: 12rem; }
 

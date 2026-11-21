@@ -23,6 +23,10 @@ import { classificationTone, foundSummary } from './analysisStatus'
 
 defineProps<{ items: SavedAnalysis[]; selectedId: string | null }>()
 defineEmits<{ select: [analysis: SavedAnalysis] }>()
+
+function displayTable(item: SavedAnalysis): string {
+  return item.alignment?.root || item.table || ''
+}
 </script>
 
 <template>
@@ -41,9 +45,15 @@ defineEmits<{ select: [analysis: SavedAnalysis] }>()
       <span class="copy">
         <span class="title">{{ item.title }}</span>
         <span class="meta aw-figure">
-          {{ foundSummary(item) }}<template v-if="item.table"> · {{ item.table }}</template>
+          {{ foundSummary(item) }}<template v-if="displayTable(item)"> · {{ displayTable(item) }}</template>
         </span>
       </span>
+      <i
+        v-if="item.source === 'ai'"
+        class="ai-mark aw-icon aw-icon-sparkles"
+        aria-hidden="true"
+        v-tooltip.left="'AI authored'"
+      />
       <i
         v-if="freshnessMeta(item.state)"
         class="mark"
@@ -82,6 +92,7 @@ defineEmits<{ select: [analysis: SavedAnalysis] }>()
 .row.active .title { color: var(--aw-ink-strong); font-weight: 600; }
 .meta { overflow: hidden; color: var(--aw-muted); font-size: var(--aw-text-xs); text-overflow: ellipsis; white-space: nowrap; }
 
+.ai-mark { flex: none; color: var(--aw-accent); font-size: var(--aw-text-xs); opacity: .75; }
 .mark { flex: none; color: var(--aw-warn); font-size: var(--aw-text-sm); }
 
 .sr-only {

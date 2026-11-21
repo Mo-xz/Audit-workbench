@@ -59,6 +59,12 @@ function table(test: DataTest) { return test.table_refs[0] || '' }
           <template v-if="hasWarning(test)"> · <span class="warning">warning</span></template>
         </span>
       </span>
+      <i
+        v-if="test.created_by === 'agent'"
+        class="ai-mark aw-icon aw-icon-sparkles"
+        aria-hidden="true"
+        v-tooltip.left="'AI authored'"
+      />
     </button>
     <p v-if="!tests.length" class="empty">No data test matches this filter.</p>
   </div>
@@ -83,12 +89,13 @@ function table(test: DataTest) { return test.table_refs[0] || '' }
 .dot[data-tone='warn'] { background: var(--aw-warn); }
 .dot[data-tone='bad'] { background: var(--aw-danger); }
 
-.copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .title { overflow: hidden; color: var(--aw-ink); font-size: var(--aw-text-base); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .row.active .title { color: var(--aw-ink-strong); font-weight: 600; }
 .meta { overflow: hidden; color: var(--aw-muted); font-size: var(--aw-text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .meta .open { color: var(--aw-danger); }
 .meta .warning { color: var(--aw-warn-ink); }
+.ai-mark { flex: none; color: var(--aw-accent); font-size: var(--aw-text-xs); opacity: .75; }
 
 .empty { padding: 1rem .75rem; color: var(--aw-muted); font-size: var(--aw-text-sm); text-align: center; }
 </style>

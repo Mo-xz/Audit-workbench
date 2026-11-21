@@ -5,6 +5,7 @@ import type { DataTest, DataTestDispositionState, DataTestResult } from '../../t
 import ExceptionExplorer from './ExceptionExplorer.vue'
 import FrameTable from '../FrameTable.vue'
 import ProvenanceRail from '../agent/ProvenanceRail.vue'
+import UiExecutionStory from '../ui/UiExecutionStory.vue'
 import UiTestStatus from '../ui/UiTestStatus.vue'
 import { plural } from '../../format'
 
@@ -100,6 +101,77 @@ function commitReview() {
  * are one row of links rather than three permanent blocks. Open state is local
  * because it is a reading posture, not a property of the test.
  */
+const CONCLUSION_LABELS: Record<string, string> = {
+  effective: 'Effective',
+  partially_effective: 'Partially effective',
+  ineffective: 'Ineffective',
+  not_applicable: 'Not applicable',
+  no_conclusion: 'Not concluded',
+}
+
+const story = computed(() => {
+  const t = props.test
+  const r = props.result
+  const isPolars = t.engine === 'polars'
+  const stepCount = (t.steps?.length ?? 0) || (r?.step_results?.length ?? 0)
+  const rawTestName = String((t.spec as { test?: string } | undefined)?.test ?? '').replace(/_/g, ' ').trim()
+  const ruleTitle = isPolars
+    ? (stepCount > 0 ? `${stepCount} Polars check${stepCount === 1 ? '' : 's'}` : 'Polars control test')
+    : (rawTestName ? rawTestName.charAt(0).toUpperCase() + rawTestName.slice(1) : 'Analytics control test')
+  const tables = t.table_refs ?? []
+  const scopeLabel = tables.length
+    ? tables.join(' → ')
+    : (profile.value?.population_table || r?.exception_profile?.population_table || 'Workspace tables')
+  const ran = Boolean(t.last_run || r)
+  const population = profile.value?.population ?? r?.exception_profile?.population ?? null
+  const exceptions = t.evaluation?.exception_count ?? r?.exception_count ?? 0
+  const open = t.open_exception_count ?? 0
+  const conclusionText = CONCLUSION_LABELS[t.control_conclusion] ?? t.control_conclusion
+
+  let humanTitle = 'Awaiting local execution'
+  let humanDetail = 'Run the test locally to evaluate 100% of records before signing off.'
+  let humanTone: 'ok' | 'warn' | 'bad' | 'neutral' = 'neutral'
+  let humanBadge = 'Human in the loop'
+
+  if (t.control_conclusion_source === 'auditor' && t.control_conclusion !== 'no_conclusion') {
+    humanTitle = `Signed off · ${conclusionText}`
+    humanDetail = open > 0
+      ? `${open.toLocaleString()} open exception${open === 1 ? '' : 's'} still tracked below.`
+      : 'Auditor reviewed the evidence and signed off on the control conclusion.'
+    humanTone = 'ok'
+    humanBadge = 'Auditor signed off'
+  } else if (t.control_conclusion_source === 'agent' && t.control_conclusion !== 'no_conclusion') {
+    humanTitle = `AI suggested ${conclusionText}`
+    humanDetail = 'Awaiting auditor confirmation or exception rulings below.'
+    humanTone = 'warn'
+    humanBadge = 'Sign-off required'
+  } else if (ran) {
+    if (open > 0) {
+      humanTitle = `${open.toLocaleString()} open exception${open === 1 ? '' : 's'} to rule on`
+      humanDetail = 'Rule on exception groups below and accept or override the control conclusion.'
+    } else {
+      humanTitle = 'Ready for auditor sign-off'
+      humanDetail = 'Accept the run reading above or record your own control conclusion.'
+    }
+    humanTone = 'warn'
+  }
+
+  return {
+    aiAuthored: t.created_by === 'agent',
+    engineLabel: isPolars ? 'Polars steps' : 'Analytics test',
+    ruleTitle,
+    scopeLabel,
+    ran,
+    population,
+    exceptions,
+    executionError: r?.error ?? null,
+    humanTitle,
+    humanDetail,
+    humanTone,
+    humanBadge,
+  }
+})
+
 const open = ref<Record<string, boolean>>({})
 function toggle(key: string) { open.value[key] = !open.value[key] }
 const disclosures = computed(() => [
@@ -115,6 +187,22 @@ const disclosures = computed(() => [
 
 <template>
   <section class="result">
+    <UiExecutionStory
+      :ai-authored="story.aiAuthored"
+      :engine-label="story.engineLabel"
+      :rule-title="story.ruleTitle"
+      :scope-label="story.scopeLabel"
+      :ran="story.ran"
+      :population="story.population"
+      :exceptions="story.exceptions"
+      :tracks-exceptions="true"
+      :execution-error="story.executionError"
+      :human-title="story.humanTitle"
+      :human-detail="story.humanDetail"
+      :human-tone="story.humanTone"
+      :human-badge="story.humanBadge"
+    />
+
     <!-- What the runner could not vouch for. It qualifies the result and the
          conclusion drawn from it; it does not withhold either. -->
     <div v-if="issues.length || warnings.length" class="warnings">

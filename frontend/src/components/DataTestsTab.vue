@@ -140,6 +140,14 @@ const coverage = computed(() => findingCoverage(
 const status = computed(() => dataTestStatus(
   tests.value, planning.value?.findings ?? [], planning.value?.observations ?? [],
 ))
+const aiTestsSummary = computed(() => {
+  const total = tests.value.length
+  if (!total) return null
+  const aiCount = tests.value.filter(test => test.created_by === 'agent').length
+  const runCount = tests.value.filter(test => Boolean(test.last_run)).length
+  const auditorConcluded = tests.value.filter(test => test.control_conclusion_source === 'auditor').length
+  return { total, aiCount, runCount, auditorConcluded }
+})
 const statusBusy = computed(() => running.value || runningAll.value || generatingFindings.value)
 const canRunAgent = computed(() => !agent.isActive.value)
 // Folded rather than combined: each narrowing runs the same predicate over
@@ -615,7 +623,14 @@ onUnmounted(unsubscribe)
          outstanding is the primary when anything is; otherwise the page's
          ordinary next act takes the slot. -->
     <header class="page-head">
-      <h1>Data tests</h1>
+      <div class="head-copy">
+        <h1>Data tests</h1>
+        <span v-if="aiTestsSummary && aiTestsSummary.aiCount > 0" class="ai-corpus-pill">
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          {{ aiTestsSummary.aiCount }} AI tests · {{ aiTestsSummary.runCount }} run locally
+          <template v-if="aiTestsSummary.auditorConcluded"> · {{ aiTestsSummary.auditorConcluded }} auditor signed-off</template>
+        </span>
+      </div>
       <span class="grow" />
       <!-- With no tests the empty state offers the first one, and there is
            nothing to run; the header holds back both. -->
@@ -688,7 +703,12 @@ onUnmounted(unsubscribe)
       <section v-if="selected" class="detail">
         <header class="detail-head">
           <div class="detail-copy">
-            <p class="detail-id">{{ selected.id }}</p>
+            <div class="detail-id-row">
+              <span v-if="selected.created_by === 'agent'" class="ai-badge">
+                <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI authored
+              </span>
+              <p class="detail-id">{{ selected.id }}</p>
+            </div>
             <h2>{{ selected.title }}</h2>
             <p class="objective">{{ selected.objective }}</p>
           </div>
@@ -890,6 +910,16 @@ onUnmounted(unsubscribe)
 .data-tests { display: flex; flex-direction: column; gap: .75rem; min-width: 0; max-width: 100%; min-height: 0; height: 100%; }
 
 .grow { flex: 1; }
+.head-copy { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; min-width: 0; }
+.ai-corpus-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .15rem .6rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-xs); font-weight: 600; white-space: nowrap;
+}
 
 .layout { display: grid; grid-template-columns: 18.75rem minmax(0, 1fr); gap: .875rem; flex: 1; min-height: 12rem; }
 
@@ -912,7 +942,18 @@ onUnmounted(unsubscribe)
 }
 .detail-head { display: flex; align-items: flex-start; gap: 1rem; min-width: 0; }
 .detail-copy { display: flex; flex-direction: column; gap: .25rem; flex: 1; min-width: 0; }
+.detail-id-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .detail-id { margin: 0; color: var(--aw-muted); font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 600; }
+.ai-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .05rem .45rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
 .detail-head h2 { margin: 0; color: var(--aw-ink-strong); font-size: var(--aw-text-lg); font-weight: 600; letter-spacing: -0.01em; }
 .objective { margin: 0; color: var(--aw-ink-soft); font-size: var(--aw-text-base); line-height: 1.45; }
 .rcm-chip :deep(.p-button-label), .detail-head :deep(.p-button) { white-space: nowrap; }

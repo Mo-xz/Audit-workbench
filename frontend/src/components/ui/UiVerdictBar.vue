@@ -54,7 +54,7 @@ defineProps<{
 /* Raised rather than white-on-white: the detail panel is already a card, and
    this has to read as a band inside it rather than as another panel. */
 .verdict-bar {
-  display: flex; flex-direction: column; min-width: 0;
+  display: flex; flex-direction: column; flex: none; min-width: 0;
   overflow: hidden;
   border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
   background: var(--aw-raised);

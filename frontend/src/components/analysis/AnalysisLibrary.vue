@@ -13,6 +13,7 @@ import { api, ApiError } from '../../api'
 import { useAgentRun } from '../../composables/useAgentRun'
 import type {
   AnalysisDetail,
+  AnalysisExceptions,
   AnalyticsParamMeta,
   AnalyticsResult,
   AnalyticsTest,
@@ -25,6 +26,7 @@ import FrameTable from '../FrameTable.vue'
 import AnalysisFooter from './AnalysisFooter.vue'
 import AnalysisHead from './AnalysisHead.vue'
 import AnalysisVerdict from './AnalysisVerdict.vue'
+import UiExecutionStory from '../ui/UiExecutionStory.vue'
 import UiOverflowMenu from '../ui/UiOverflowMenu.vue'
 
 // A library analysis: pick a predefined audit test, configure it, and save it as
@@ -50,6 +52,9 @@ const selected = ref<AnalyticsTest | null>(null)
 const params = ref<Record<string, unknown>>({})
 const result = ref<AnalyticsResult | null>(null)
 const detail = ref<AnalysisDetail | null>(null)
+const exceptions = ref<AnalysisExceptions | null>(null)
+const resultView = ref<'exceptions' | 'chart'>('exceptions')
+const baselineParams = ref<string | null>(null)
 const title = ref('')
 const previewing = ref(false)
 const loadingCurrent = ref(false)
@@ -58,6 +63,85 @@ const exporting = ref(false)
 const saving = ref(false)
 const pickerOpen = ref(!props.analysis)
 const paramsOpen = ref(true)
+/** Saved procedures lead with verdict + results; definition/params stay one click away. */
+const definitionOpen = ref(!props.analysis)
+
+const effectiveResult = computed(() => detail.value?.last_result ?? props.analysis?.last_result ?? null)
+const effectiveClassification = computed(() => detail.value?.classification ?? props.analysis?.classification)
+const scopeLabel = computed(() => {
+  if (props.analysis?.alignment?.root) {
+    const hops = props.analysis.alignment.joins.map(hop => hop.right).filter(Boolean)
+    return hops.length ? `${props.analysis.alignment.root} → ${hops.join(' → ')}` : props.analysis.alignment.root
+  }
+  return props.analysis?.table || table.value || 'Workspace table'
+})
+const tracksExceptions = computed(() => {
+  const res = effectiveResult.value
+  if (effectiveClassification.value === 'exception') return true
+  if ((res?.exception_count ?? 0) > 0) return true
+  return res?.verdict !== 'info'
+})
+const humanStory = computed(() => {
+  const a = props.analysis
+  const res = effectiveResult.value
+  if (a?.promotion?.state === 'promoted') {
+    return {
+      title: `Promoted to ${a.promotion.test_id || 'Data Test'}`,
+      detail: a.promotion.rcm_id
+        ? `Carried forward into formal testing for ${a.promotion.rcm_id}.`
+        : 'Carried forward into formal RCM Data Tests.',
+      tone: 'ok' as const,
+      badge: 'Auditor decided',
+    }
+  }
+  if (a?.promotion?.state === 'declined') {
+    return {
+      title: 'Reviewed — not promoted',
+      detail: a.promotion.reason || 'Auditor recorded why no formal control test is needed.',
+      tone: 'neutral' as const,
+      badge: 'Auditor decided',
+    }
+  }
+  if (!res) {
+    return {
+      title: 'Awaiting local run',
+      detail: 'Click Run above to execute this test over the full local table.',
+      tone: 'neutral' as const,
+      badge: 'Human review',
+    }
+  }
+  if (res.error) {
+    return {
+      title: 'Needs auditor review',
+      detail: 'Check the test parameters below or rerun after fixing the input table.',
+      tone: 'bad' as const,
+      badge: 'Action needed',
+    }
+  }
+  if (tracksExceptions.value) {
+    const exc = res.exception_count ?? 0
+    if (exc > 0) {
+      return {
+        title: `${exc.toLocaleString()} exception${exc === 1 ? '' : 's'} to assess`,
+        detail: 'Review the flagged rows below and decide whether to promote into an RCM Data Test.',
+        tone: 'warn' as const,
+        badge: 'Human review',
+      }
+    }
+    return {
+      title: 'Verified — 0 exceptions',
+      detail: 'Deterministic local check found no breaches across the evaluated population.',
+      tone: 'ok' as const,
+      badge: 'Clean result',
+    }
+  }
+  return {
+    title: 'Informational context',
+    detail: 'Statistical profile used to guide audit planning and risk assessment.',
+    tone: 'neutral' as const,
+    badge: 'Planning context',
+  }
+})
 
 const tableOptions = computed(() => [...new Set([
   ...props.workspace.tables.map((t) => t.name),
@@ -143,13 +227,18 @@ const ready = computed(() => {
 
 // The definition on screen differs from the one that produced the recorded
 // result, so running it now would conclude something else. Saying so is more
-// useful than silently letting the two drift.
+// useful than silently letting the two drift. Compare against the hydrated
+// parameter baseline so key order or default-filled optional fields never
+// falsely mark a freshly opened procedure as edited.
 const dirty = computed(() => {
   if (!props.analysis || !selected.value) return false
   const saved = (props.analysis.spec ?? {}) as { test?: string; params?: Record<string, unknown> }
+  const paramsChanged = baselineParams.value !== null
+    ? JSON.stringify(params.value) !== baselineParams.value
+    : false
   return (
     saved.test !== selected.value.id
-    || JSON.stringify(saved.params ?? {}) !== JSON.stringify(params.value)
+    || paramsChanged
     || title.value.trim() !== props.analysis.title
   )
 })
@@ -181,6 +270,7 @@ async function run() {
       `/api/workspaces/${props.workspace.id}/analyses/${props.analysis.id}/execute`, {},
     )
     result.value = null
+    await loadExceptions(props.analysis.id)
     emit('changed')
     const recorded = detail.value.last_result
     toast.add({
@@ -217,6 +307,7 @@ async function save() {
         `/api/workspaces/${props.workspace.id}/analyses/${props.analysis.id}`,
         { title: name, spec: spec() },
       )
+      baselineParams.value = JSON.stringify(params.value)
       emit('changed')
       toast.add({ severity: 'success', summary: 'Saved', detail: name, life: 2500 })
     } else {
@@ -315,11 +406,26 @@ async function preloadFromAnalysis() {
   const test = tests.value.find((t) => t.id === saved.test)
   if (test) {
     pick(test, saved.params ?? {})
+    baselineParams.value = JSON.stringify(params.value)
     // The recorded outcome is stated at the top of the pane; the parameters
     // that produced it stay one click away rather than filling the screen.
     paramsOpen.value = false
   }
   await loadCurrent(a.id)
+}
+
+/** Read back the retained exception rows for the recorded result (no recompute). */
+async function loadExceptions(analysisId: string) {
+  try {
+    const payload = await api.get<AnalysisExceptions>(
+      `/api/workspaces/${props.workspace.id}/analyses/${analysisId}/exceptions`,
+    )
+    exceptions.value = payload
+    resultView.value = payload.frame?.rows.length ? 'exceptions' : 'chart'
+  } catch {
+    exceptions.value = null
+    resultView.value = 'chart'
+  }
 }
 
 /**
@@ -331,9 +437,13 @@ async function preloadFromAnalysis() {
 async function loadCurrent(analysisId: string) {
   loadingCurrent.value = true
   try {
-    detail.value = await api.get<AnalysisDetail>(
-      `/api/workspaces/${props.workspace.id}/analyses/${analysisId}`,
-    )
+    const [loadedDetail] = await Promise.all([
+      api.get<AnalysisDetail>(
+        `/api/workspaces/${props.workspace.id}/analyses/${analysisId}`,
+      ),
+      loadExceptions(analysisId),
+    ])
+    detail.value = loadedDetail
   } catch {
     // The recorded outcome banner above still stands; a failed recompute here
     // is not fatal, and Run surfaces the same error explicitly if retried.
@@ -347,6 +457,9 @@ watch(
   () => props.analysis?.id,
   () => {
     detail.value = null
+    exceptions.value = null
+    baselineParams.value = null
+    definitionOpen.value = !props.analysis
     if (props.analysis) {
       preloadFromAnalysis()
     } else {
@@ -391,109 +504,208 @@ watch(table, () => {
     v-if="analysis"
     :classification="detail?.classification ?? analysis.classification"
     :state="detail?.state ?? analysis.state"
-    :result="detail?.last_result ?? analysis.last_result"
+    :result="effectiveResult"
     :busy="running"
     @openRun="openRun"
     @run="run"
   />
 
-  <p v-if="props.analysis?.alignment" class="muted population">
-    Population: {{ props.analysis.alignment.root }}.
-    <span v-for="hop in props.analysis.alignment.joins" :key="hop.name">
-      {{ hop.left_on.join(', ') }} → {{ hop.right }}.{{ hop.right_on.join(', ') }}.
-    </span>
-  </p>
+  <UiExecutionStory
+    v-if="analysis"
+    :ai-authored="analysis.source === 'ai'"
+    engine-label="Library test"
+    :rule-title="selected?.label || 'Predefined audit test'"
+    :scope-label="scopeLabel"
+    :ran="Boolean(effectiveResult)"
+    :population="effectiveResult?.population ?? null"
+    :tested="effectiveResult?.tested ?? null"
+    :exceptions="effectiveResult?.exception_count ?? 0"
+    :tracks-exceptions="tracksExceptions"
+    :verdict-text="effectiveResult?.verdict_text ?? null"
+    :execution-error="effectiveResult?.error ?? detail?.error ?? null"
+    :human-title="humanStory.title"
+    :human-detail="humanStory.detail"
+    :human-tone="humanStory.tone"
+    :human-badge="humanStory.badge"
+  />
+
   <p v-if="analysis && dirty" class="dirty-note">
     <i class="aw-icon aw-icon-pencil" /> Unsaved changes. Running saves them first, so the
     recorded result always matches the definition that produced it.
   </p>
 
-  <!-- The definition: what it tests, over which frame, called what. Compact
-       once a test is chosen; the full catalog only while picking. -->
-  <div class="definition-head">
-    <label class="title-field">
-      <span>Title</span>
-      <InputText v-model="title" placeholder="What this procedure tests" size="small" />
-    </label>
-    <span class="grow" />
-    <Select v-model="table" :disabled="!!props.analysis?.alignment" :options="tableOptions" placeholder="Table" size="small" style="min-width: 12rem" />
-  </div>
-  <div v-if="selected && !pickerOpen" class="test-strip">
-    <i :class="selected.icon" />
-    <div class="test-strip-text">
-      <strong>{{ selected.label }}</strong>
-      <span>{{ selected.description }}</span>
-    </div>
-    <Button label="Change test" icon="aw-icon aw-icon-layout-grid" severity="secondary" size="small" outlined @click="pickerOpen = true" />
-  </div>
-
-  <div v-if="pickerOpen" class="picker">
-    <div v-if="selected" class="picker-head">
-      <Button label="Keep current" icon="aw-icon aw-icon-x" text size="small" @click="pickerOpen = false" />
-    </div>
-    <template v-for="group in testGroups" :key="group.name">
-      <p class="group-title">{{ group.name }}</p>
-      <div class="test-grid">
+  <!-- What this saved procedure found — leads above the folded definition so
+       executives and auditors see the flagged rows (and chart) immediately. -->
+  <div v-if="analysis && !result && (exceptions?.frame?.rows.length || detail?.frame)" class="result">
+    <div class="result-bar">
+      <div v-if="exceptions?.frame?.rows.length && detail?.frame" class="result-tabs" role="tablist" aria-label="Result view">
         <button
-          v-for="test in group.tests"
-          :key="test.id"
-          class="test-card"
-          :class="{ active: selected?.id === test.id }"
-          @click="pick(test)"
+          type="button"
+          role="tab"
+          :aria-selected="resultView === 'exceptions'"
+          class="result-tab"
+          :class="{ active: resultView === 'exceptions' }"
+          @click="resultView = 'exceptions'"
         >
-          <i :class="test.icon" />
-          <strong>{{ test.label }}</strong>
-          <span>{{ test.description }}</span>
+          <i class="aw-icon aw-icon-triangle-alert" aria-hidden="true" />
+          Flagged rows ({{ (exceptions.exception_count || exceptions.frame.rows.length).toLocaleString() }})
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="resultView === 'chart'"
+          class="result-tab"
+          :class="{ active: resultView === 'chart' }"
+          @click="resultView = 'chart'"
+        >
+          <i class="aw-icon aw-icon-chart-column" aria-hidden="true" />
+          Chart
         </button>
       </div>
-    </template>
+      <h4 v-else-if="exceptions?.frame?.rows.length" class="result-title">
+        Flagged rows <span class="muted">({{ (exceptions.exception_count || exceptions.frame.rows.length).toLocaleString() }})</span>
+      </h4>
+      <h4 v-else class="result-title">
+        Current result <span class="muted">({{ (detail?.total_rows ?? 0).toLocaleString() }} row{{ (detail?.total_rows ?? 0) === 1 ? '' : 's' }})</span>
+      </h4>
+      <span
+        v-if="resultView === 'exceptions' && exceptions && exceptions.exception_count > exceptions.retained"
+        class="muted retention-note"
+      >
+        Showing {{ exceptions.retained.toLocaleString() }} of {{ exceptions.exception_count.toLocaleString() }} — Export for all
+      </span>
+    </div>
+
+    <FrameTable
+      v-if="resultView === 'exceptions' && exceptions?.frame?.rows.length"
+      :frame="exceptions.frame"
+      scrollHeight="38vh"
+    />
+    <ChartView
+      v-else-if="detail?.frame"
+      :frame="detail.frame"
+      :viz="detail.viz"
+      height="280px"
+    />
+  </div>
+  <p v-else-if="analysis && !result && detail?.error" class="analysis-error">
+    <i class="aw-icon aw-icon-triangle-alert" /> {{ detail.error }}
+  </p>
+  <div v-else-if="analysis && !result && loadingCurrent" class="loading-current">
+    <i class="aw-icon aw-icon-spin aw-icon-loader-circle" /> Loading current result…
   </div>
 
-  <div v-if="selected && !pickerOpen" class="run-panel">
-    <button class="section-toggle" @click="paramsOpen = !paramsOpen">
-      <i :class="paramsOpen ? 'aw-icon aw-icon-chevron-down' : 'aw-icon aw-icon-chevron-right'" />
-      Parameters
-    </button>
-    <div v-show="paramsOpen" class="param-form">
-      <div v-for="param in selected.params" :key="param.name" class="field">
-        <label>{{ param.label }}</label>
-        <Select
-          v-if="param.kind === 'column'"
-          v-model="params[param.name] as string | null"
-          :options="columnOptions(param)"
-          :showClear="!!param.optional"
-          placeholder="Pick a column"
-          filter
-          style="min-width: 14rem"
-        />
-        <MultiSelect
-          v-else-if="param.kind === 'columns'"
-          v-model="params[param.name] as string[]"
-          :options="columnOptions(param)"
-          display="chip"
-          filter
-          placeholder="Pick columns"
-          style="min-width: 16rem"
-        />
-        <Select
-          v-else-if="param.kind === 'select'"
-          v-model="params[param.name] as string | number | null"
-          :options="param.options"
-          optionLabel="label"
-          optionValue="value"
-          style="min-width: 12rem"
-        />
-        <InputNumber
-          v-else-if="param.kind === 'number'"
-          v-model="params[param.name] as number"
-          :useGrouping="false"
-          style="width: 8rem"
-        />
+  <!-- The definition: folded behind a single toggle on saved procedures so the
+       verdict, execution story, and chart lead; always open while creating. -->
+  <div :class="analysis ? 'definition-disclosure' : 'definition-create'">
+    <div v-if="analysis" class="definition-disclosure-head">
+      <button
+        type="button"
+        class="section-toggle"
+        :aria-expanded="definitionOpen || pickerOpen || dirty"
+        @click="definitionOpen = !definitionOpen"
+      >
+        <i :class="(definitionOpen || pickerOpen || dirty) ? 'aw-icon aw-icon-chevron-down' : 'aw-icon aw-icon-chevron-right'" />
+        <i class="aw-icon aw-icon-sliders-horizontal" aria-hidden="true" />
+        <span>Test definition &amp; parameters</span>
+        <span v-if="selected" class="hint">· {{ selected.label }}</span>
+      </button>
+    </div>
+
+    <div v-if="!analysis || definitionOpen || pickerOpen || dirty" class="definition-body">
+      <p v-if="props.analysis?.alignment" class="muted population">
+        Population: {{ props.analysis.alignment.root }}.
+        <span v-for="hop in props.analysis.alignment.joins" :key="hop.name">
+          {{ hop.left_on.join(', ') }} → {{ hop.right }}.{{ hop.right_on.join(', ') }}.
+        </span>
+      </p>
+
+      <div class="definition-head">
+        <label class="title-field">
+          <span>Title</span>
+          <InputText v-model="title" placeholder="What this procedure tests" size="small" />
+        </label>
+        <span class="grow" />
+        <Select v-model="table" :disabled="!!props.analysis?.alignment" :options="tableOptions" placeholder="Table" size="small" style="min-width: 12rem" />
       </div>
-      <Button label="Preview" icon="aw-icon aw-icon-eye" severity="secondary" outlined :disabled="!ready" :loading="previewing" @click="preview" />
-      <span class="muted run-hint">
-        A preview shows what these parameters return now; it records nothing.
-      </span>
+      <div v-if="selected && !pickerOpen" class="test-strip">
+        <i :class="selected.icon" />
+        <div class="test-strip-text">
+          <strong>{{ selected.label }}</strong>
+          <span>{{ selected.description }}</span>
+        </div>
+        <Button label="Change test" icon="aw-icon aw-icon-layout-grid" severity="secondary" size="small" outlined @click="pickerOpen = true" />
+      </div>
+
+      <div v-if="pickerOpen" class="picker">
+        <div v-if="selected" class="picker-head">
+          <Button label="Keep current" icon="aw-icon aw-icon-x" text size="small" @click="pickerOpen = false" />
+        </div>
+        <template v-for="group in testGroups" :key="group.name">
+          <p class="group-title">{{ group.name }}</p>
+          <div class="test-grid">
+            <button
+              v-for="test in group.tests"
+              :key="test.id"
+              class="test-card"
+              :class="{ active: selected?.id === test.id }"
+              @click="pick(test)"
+            >
+              <i :class="test.icon" />
+              <strong>{{ test.label }}</strong>
+              <span>{{ test.description }}</span>
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <div v-if="selected && !pickerOpen" class="run-panel">
+        <button class="section-toggle" @click="paramsOpen = !paramsOpen">
+          <i :class="paramsOpen ? 'aw-icon aw-icon-chevron-down' : 'aw-icon aw-icon-chevron-right'" />
+          Parameters
+        </button>
+        <div v-show="paramsOpen" class="param-form">
+          <div v-for="param in selected.params" :key="param.name" class="field">
+            <label>{{ param.label }}</label>
+            <Select
+              v-if="param.kind === 'column'"
+              v-model="params[param.name] as string | null"
+              :options="columnOptions(param)"
+              :showClear="!!param.optional"
+              placeholder="Pick a column"
+              filter
+              style="min-width: 14rem"
+            />
+            <MultiSelect
+              v-else-if="param.kind === 'columns'"
+              v-model="params[param.name] as string[]"
+              :options="columnOptions(param)"
+              display="chip"
+              filter
+              placeholder="Pick columns"
+              style="min-width: 16rem"
+            />
+            <Select
+              v-else-if="param.kind === 'select'"
+              v-model="params[param.name] as string | number | null"
+              :options="param.options"
+              optionLabel="label"
+              optionValue="value"
+              style="min-width: 12rem"
+            />
+            <InputNumber
+              v-else-if="param.kind === 'number'"
+              v-model="params[param.name] as number"
+              :useGrouping="false"
+              style="width: 8rem"
+            />
+          </div>
+          <Button label="Preview" icon="aw-icon aw-icon-eye" severity="secondary" outlined :disabled="!ready" :loading="previewing" @click="preview" />
+          <span class="muted run-hint">
+            A preview shows what these parameters return now; it records nothing.
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -530,29 +742,60 @@ watch(table, () => {
     </template>
   </div>
 
-  <!-- What this procedure currently returns — loaded the moment it's opened,
-       not only after Run. Nothing here is recorded; the outcome banner above
-       is the durable conclusion. The test's own suggested chart (bar, line,
-       ...) travels on `detail.viz`, computed fresh each time — never the
-       static "table" default a saved definition is created with — so
-       ChartView renders it directly and only falls back to a plain table
-       when the chart doesn't apply. -->
-  <div v-else-if="detail?.frame" class="result">
-    <h4>Current result <span class="muted">({{ (detail.total_rows ?? 0).toLocaleString() }} row{{ (detail.total_rows ?? 0) === 1 ? '' : 's' }})</span></h4>
-    <ChartView :frame="detail.frame" :viz="detail.viz" height="280px" />
-  </div>
-  <p v-else-if="detail?.error" class="analysis-error">
-    <i class="aw-icon aw-icon-triangle-alert" /> {{ detail.error }}
-  </p>
-  <div v-else-if="loadingCurrent" class="loading-current">
-    <i class="aw-icon aw-icon-spin aw-icon-loader-circle" /> Loading current result…
-  </div>
-
-
   <AnalysisFooter v-if="analysis" :analysis="analysis" />
 </template>
 
 <style scoped>
+.result { display: flex; flex-direction: column; gap: .6rem; flex: none; min-width: 0; }
+.result-bar { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.result-title { margin: 0; }
+.retention-note { font-size: var(--aw-text-xs); }
+.result-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .2rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-raised);
+}
+.result-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .28rem .65rem;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-ink-soft);
+  font: inherit;
+  font-size: var(--aw-text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.result-tab:hover:not(.active) { color: var(--aw-ink-strong); }
+.result-tab.active {
+  background: var(--aw-panel);
+  color: var(--aw-ink-strong);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--aw-ink-strong) 8%, transparent);
+}
+.result-tab .aw-icon-triangle-alert { color: var(--aw-danger); }
+
+.definition-disclosure {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: .75rem;
+  padding: .65rem .85rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-canvas);
+}
+.definition-disclosure-head { display: flex; align-items: center; gap: .5rem; }
+.definition-body { display: flex; flex-direction: column; }
+.section-toggle .hint { color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 500; }
+.section-toggle:hover { color: var(--aw-teal); }
+
 .definition-head {
   display: flex; align-items: center; gap: var(--aw-space-2); flex-wrap: wrap;
   margin-bottom: var(--aw-space-3);

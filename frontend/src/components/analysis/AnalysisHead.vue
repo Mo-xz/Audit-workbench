@@ -22,18 +22,29 @@ const props = defineProps<{
 }>()
 
 const origin = computed(() => (props.analysis ? provenance(props.analysis) : null))
+const isAi = computed(() => props.analysis?.source === 'ai')
+const displayTable = computed(() => {
+  const a = props.analysis
+  if (!a) return ''
+  if (a.alignment?.root) {
+    const joined = a.alignment.joins.map(j => j.right).filter(Boolean)
+    return joined.length ? `${a.alignment.root} + ${joined.join(', ')}` : a.alignment.root
+  }
+  return a.table ?? ''
+})
 </script>
 
 <template>
   <header class="detail-head">
     <div class="detail-copy">
       <p v-if="analysis" class="detail-id">
+        <span v-if="isAi" class="ai-badge"><i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI authored</span>
         <span class="id">{{ analysis.id }}</span>
-        <span v-if="origin" class="sep" aria-hidden="true">·</span>
-        <span v-if="origin">{{ origin.label }}</span>
-        <template v-if="analysis.table">
+        <span v-if="origin && !isAi" class="sep" aria-hidden="true">·</span>
+        <span v-if="origin && !isAi">{{ origin.label }}</span>
+        <template v-if="displayTable">
           <span class="sep" aria-hidden="true">·</span>
-          <span class="table">{{ analysis.table }}</span>
+          <span class="table">{{ displayTable }}</span>
         </template>
       </p>
       <h2>{{ analysis?.title || placeholder || 'New procedure' }}</h2>
@@ -50,6 +61,16 @@ const origin = computed(() => (props.analysis ? provenance(props.analysis) : nul
   display: flex; align-items: center; gap: .35rem; flex-wrap: wrap;
   margin: 0; color: var(--aw-muted);
   font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 600;
+}
+.ai-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .05rem .45rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-text-2xs); font-weight: 700;
 }
 .detail-id .id { color: var(--aw-ink-soft); }
 .detail-id .sep { color: var(--aw-border-strong); }

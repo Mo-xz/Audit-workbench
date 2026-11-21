@@ -16,13 +16,15 @@ import { TERMINAL_STATUSES, useAgentRun } from '../composables/useAgentRun'
 import { useAssistantChat } from '../composables/useAssistantChat'
 import { useSession } from '../composables/useSession'
 import { useWorkspaceNav } from '../composables/useWorkspaceNavigation'
-import type { AIActivityEvent, AgentRun, AssistantProvider, AssistantStatus, AuditDocument, DocumentAnalysisCitation, DocumentAnalysisDetail, DocumentCategory, DocumentIndexingStatus, DocumentPage, DocumentSearchResult, DocumentVocabulary, KnowledgePack, WorkspaceSummary } from '../types'
+import type { AIActivityEvent, AgentRun, AssistantProvider, AssistantStatus, AuditDocument, DocumentAnalysisCitation, DocumentAnalysisDetail, DocumentCategory, DocumentHighlightItem, DocumentHighlightsPayload, DocumentIndexingStatus, DocumentNoteMarker, DocumentPage, DocumentSearchResult, DocumentVocabulary, KnowledgePack, WorkspaceSummary } from '../types'
 import MarkdownEditor from './MarkdownEditor.vue'
 import MarkdownView from './MarkdownView.vue'
 import UiEmptyState from './ui/UiEmptyState.vue'
 import UiOverflowMenu from './ui/UiOverflowMenu.vue'
 import DocumentTypeReview from './documents/DocumentTypeReview.vue'
+import PdfHighlightViewer from './documents/PdfHighlightViewer.vue'
 import StructuredEvidenceSheet from './documents/StructuredEvidenceSheet.vue'
+import { annotateDocxContainer, type DocxAnnotationResult, type DocxNoteInput } from './documents/docxAnnotations'
 import {
   DOCUMENT_QUEUES, documentLabel, documentMeta, documentTone, documentsStatus, filterDocuments, isReviewed, needsReview,
 } from './documents/documentsStatus'
@@ -60,7 +62,17 @@ const search = ref('')
 const statusFilter = ref<DocumentsFilter[]>([])
 const groupBy = ref<'type' | 'folder' | 'status'>('type')
 const collapsedGroups = ref<Set<string>>(new Set())
-const sourceView = ref<'original' | 'text' | 'fields'>('original')
+const sourceView = ref<'annotated' | 'original' | 'text' | 'fields'>('original')
+const highlights = ref<DocumentHighlightsPayload | null>(null)
+const hoveredHighlightKey = ref<string | null>(null)
+const selectedHighlightKey = ref<string | null>(null)
+const activeHighlightKey = computed(() => hoveredHighlightKey.value || selectedHighlightKey.value)
+const activeNoteKey = ref<string | null>(null)
+const activeDocxCitationId = ref<string | null>(null)
+const docxShowCitations = ref(true)
+const docxShowNotes = ref(true)
+const docxAnnotations = ref<DocxAnnotationResult | null>(null)
+const readingBodyRef = ref<HTMLElement | null>(null)
 const docxContainer = ref<HTMLElement | null>(null)
 const docxLoading = ref(false)
 const busy = ref(false)
@@ -174,13 +186,172 @@ const documentFacts = computed(() => ({
   visionAvailable: visionAvailable.value,
 }))
 const status = computed(() => documentsStatus(documents.value, documentFacts.value))
+const typeFilter = ref<string>('')
 const scoped = computed(() => statusFilter.value.reduce<AuditDocument[]>(
   (rows, key) => filterDocuments(rows, key, documentFacts.value), documents.value,
 ))
+function matchesTypeFilter(doc: AuditDocument, filter: string): boolean {
+  if (!filter) return true
+  if (filter === 'unidentified') {
+    return doc.category === 'evidence' && (!doc.classification?.document_type || doc.classification.document_type === 'other')
+  }
+  if (filter.startsWith('category:')) {
+    return doc.category === filter.slice('category:'.length)
+  }
+  if (filter.startsWith('type:')) {
+    return doc.classification?.document_type === filter.slice('type:'.length)
+  }
+  return true
+}
 const filtered = computed(() => scoped.value.filter(doc => {
+  if (!matchesTypeFilter(doc, typeFilter.value)) return false
   const term = search.value.toLowerCase()
   return !term || `${doc.title} ${doc.source}`.toLowerCase().includes(term)
 }))
+
+interface TypeBucket {
+  key: string
+  label: string
+  count: number
+  tone: 'ai' | 'neutral' | 'warn'
+}
+
+/** What the AI sorted this folder into: clickable type & category pills. */
+const typeBuckets = computed<TypeBucket[]>(() => {
+  const evidenceTypes = new Map<string, number>()
+  const nonEvidence = new Map<string, number>()
+  let needsType = 0
+  for (const doc of documents.value) {
+    if (doc.category === 'evidence') {
+      const t = doc.classification?.document_type
+      if (!t || t === 'other') needsType += 1
+      else evidenceTypes.set(t, (evidenceTypes.get(t) ?? 0) + 1)
+    } else if (doc.category) {
+      nonEvidence.set(doc.category, (nonEvidence.get(doc.category) ?? 0) + 1)
+    }
+  }
+  const out: TypeBucket[] = [...evidenceTypes.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([type, count]) => ({
+      key: `type:${type}`,
+      label: sentenceCase(documentTypeLabel(type)),
+      count,
+      tone: 'ai' as const,
+    }))
+  for (const cat of categories) {
+    if (cat === 'evidence') continue
+    const count = nonEvidence.get(cat) ?? 0
+    if (count > 0) {
+      out.push({ key: `category:${cat}`, label: sentenceCase(cat), count, tone: 'neutral' })
+    }
+  }
+  if (needsType > 0) {
+    out.push({ key: 'unidentified', label: 'Needs type', count: needsType, tone: 'warn' })
+  }
+  return out
+})
+
+function toggleTypeFilter(key: string) {
+  typeFilter.value = typeFilter.value === key ? '' : key
+}
+
+const aiCorpusSummary = computed(() => {
+  const total = documents.value.length
+  if (!total) return null
+  const classified = documents.value.filter(doc =>
+    doc.classification?.assigned_by === 'model'
+    || doc.classification?.category_assigned_by === 'model',
+  ).length
+  const reviewed = documents.value.filter(isReviewed).length
+  return {
+    total,
+    classified,
+    schemas: vocabulary.value.length,
+    reviewed,
+  }
+})
+
+/** Unified classification, confidence and AI rationale for the open document. */
+const selectedClassification = computed(() => {
+  const doc = selected.value
+  if (!doc) return null
+  const cls = doc.classification
+  const docType = cls?.document_type
+  const isOther = docType === 'other'
+  const assigner = cls?.assigned_by || cls?.category_assigned_by || null
+  const confidence = cls?.confidence || cls?.category_confidence || null
+  const rationale = (cls?.rationale || cls?.category_rationale || '').trim()
+  const parts: string[] = []
+  if (doc.category) parts.push(sentenceCase(doc.category))
+  if (docType) parts.push(isOther && cls?.document_type_other ? cls.document_type_other : sentenceCase(documentTypeLabel(docType)))
+  return {
+    assigner,
+    isModel: assigner === 'model',
+    label: parts.join(' · ') || 'Unclassified',
+    confidence,
+    rationale,
+    isOther,
+  }
+})
+
+/** Parse the AI's audit notes into individual scannable observations for the Reading pane. */
+const showAllObservations = ref(false)
+const auditObservations = computed<string[]>(() => {
+  const raw = (notesDraft.value || '').trim()
+  if (!raw) return []
+  const lines = raw.split(/\r?\n/)
+  const items: string[] = []
+  let current = ''
+  const flush = () => {
+    const cleaned = current.trim().replace(/\*\*/g, '').replace(/\s+/g, ' ')
+    if (cleaned) items.push(cleaned)
+    current = ''
+  }
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) { flush(); continue }
+    if (/^#{1,6}\s+/.test(line)) { flush(); continue }
+    if (/^[-*•]\s+/.test(line) || /^\d+\.\s+/.test(line)) {
+      flush()
+      current = line.replace(/^([-*•]|\d+\.)\s+/, '')
+    } else if (current) {
+      current += ` ${line}`
+    } else {
+      current = line
+    }
+  }
+  flush()
+  return items
+})
+
+const visibleObservations = computed(() => (
+  showAllObservations.value ? auditObservations.value : auditObservations.value.slice(0, 3)
+))
+
+const docxNotes = computed<DocxNoteInput[]>(() =>
+  auditObservations.value.map((text, index) => ({
+    key: `note:${index + 1}`,
+    number: index + 1,
+    text,
+  })),
+)
+
+const openDocxNote = computed(() =>
+  docxNotes.value.find(note => note.key === activeNoteKey.value) ?? null,
+)
+const openDocxNoteIndex = computed(() =>
+  openDocxNote.value ? docxNotes.value.findIndex(note => note.key === openDocxNote.value!.key) : -1,
+)
+
+const structuredFieldCount = computed(() => {
+  const records = analysis.value?.effective?.records ?? []
+  let total = 0
+  for (const record of records) {
+    if (Array.isArray(record.fields)) total += record.fields.length
+    else total += Object.keys(record).length
+  }
+  return total
+})
 /**
  * The filters, as one choice. The page drew two rows of count chips and three
  * progress lanes under them, which said each number twice (`83 Analysis to
@@ -374,8 +545,12 @@ const hasOriginalView = computed(() => isPdf.value || isDocx.value)
  * the 24rem pane its values wrapped a character at a time.
  */
 const hasRecords = computed(() => Boolean(analysis.value?.effective?.records?.length))
+const hasHighlights = computed(() => Boolean(
+  isPdf.value && ((highlights.value?.items.length ?? 0) > 0 || (highlights.value?.notes?.length ?? 0) > 0),
+))
+const showAnnotated = computed(() => sourceView.value === 'annotated' && hasHighlights.value)
 const showFields = computed(() => sourceView.value === 'fields' && hasRecords.value)
-const showTextView = computed(() => !isImage.value && !showFields.value
+const showTextView = computed(() => !isImage.value && !showFields.value && !showAnnotated.value
   && (!hasOriginalView.value || sourceView.value === 'text'))
 const fileUrl = computed(() => selected.value ? `/api/workspaces/${props.workspace.id}/documents/${selected.value.id}/file` : '')
 const indexingActive = computed(() =>
@@ -551,6 +726,13 @@ async function selectDocument(id: string, page?: number) {
     fullVisualCoverage.value = false
     editingReading.value = false
     compareCandidate.value = false
+    showAllObservations.value = false
+    hoveredHighlightKey.value = null
+    selectedHighlightKey.value = null
+    activeNoteKey.value = null
+    activeDocxCitationId.value = null
+    highlights.value = null
+    docxAnnotations.value = null
   }
   selectedId.value = id
   currentPage.value = page || Number(route.query.page || 1)
@@ -573,9 +755,36 @@ async function loadDetail() {
 
 async function loadAnalysis() {
   if (!selectedId.value) return
-  analysis.value = await api.get<DocumentAnalysisDetail>(`/api/workspaces/${props.workspace.id}/documents/${selectedId.value}/analysis`)
+  const docId = selectedId.value
+  analysis.value = await api.get<DocumentAnalysisDetail>(`/api/workspaces/${props.workspace.id}/documents/${docId}/analysis`)
   summaryDraft.value = analysis.value.effective?.summary_markdown || ''
   notesDraft.value = analysis.value.effective?.audit_notes_markdown || ''
+  await loadHighlights(docId)
+}
+
+async function loadHighlights(docId: string) {
+  if (!isPdf.value || !analysis.value?.effective) {
+    highlights.value = null
+    if (sourceView.value === 'annotated') sourceView.value = 'original'
+    return
+  }
+  try {
+    const payload = await api.get<DocumentHighlightsPayload>(
+      `/api/workspaces/${props.workspace.id}/documents/${docId}/analysis/highlights`,
+    )
+    if (selectedId.value !== docId) return
+    highlights.value = payload
+    const hasAny = payload.items.length > 0 || (payload.notes?.length ?? 0) > 0
+    if (hasAny && (sourceView.value === 'original' || sourceView.value === 'annotated')) {
+      sourceView.value = 'annotated'
+    } else if (!hasAny && sourceView.value === 'annotated') {
+      sourceView.value = 'original'
+    }
+  } catch {
+    if (selectedId.value !== docId) return
+    highlights.value = null
+    if (sourceView.value === 'annotated') sourceView.value = 'original'
+  }
 }
 
 async function waitForAnalysis(runId: string) {
@@ -701,8 +910,79 @@ async function openCitation(citation: DocumentAnalysisCitation) {
   if (!selected.value) return
   currentPage.value = citation.page
   pane.value = 'original'
-  sourceView.value = citation.evidence_kind === 'visual' ? 'original' : 'text'
+  if (hasHighlights.value) {
+    const match = highlights.value?.items.find(item => item.citation_id === citation.id)
+    if (match) selectedHighlightKey.value = match.key
+    sourceView.value = 'annotated'
+  } else if (isDocx.value) {
+    activeDocxCitationId.value = citation.id
+    sourceView.value = 'original'
+    await nextTick()
+    applyDocxAnnotations()
+    const target = docxAnnotations.value?.elementByCitationId.get(citation.id)
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } else {
+    sourceView.value = citation.evidence_kind === 'visual' ? 'original' : 'text'
+  }
   await nav.replace('documents', { doc: selected.value.id, page: citation.page })
+}
+
+async function focusField(payload: { key: string; citation: DocumentAnalysisCitation | null }) {
+  selectedHighlightKey.value = payload.key
+  if (hasHighlights.value) {
+    const match = highlights.value?.items.find(item => item.key === payload.key)
+    if (match) currentPage.value = match.page
+    else if (payload.citation) currentPage.value = payload.citation.page
+    sourceView.value = 'annotated'
+    pane.value = 'original'
+  } else if (payload.citation) {
+    await openCitation(payload.citation)
+  }
+}
+
+async function onHighlightSelect(item: DocumentHighlightItem) {
+  selectedHighlightKey.value = item.key
+  readingTab.value = 'reading'
+  await nextTick()
+  const card = readingBodyRef.value?.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(item.key)}"]`)
+  card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
+function onPdfNoteSelect(note: DocumentNoteMarker | null) {
+  activeNoteKey.value = note ? note.key : null
+  if (note && note.number > 3) showAllObservations.value = true
+}
+
+async function focusObservation(index: number) {
+  const key = `note:${index + 1}`
+  const next = activeNoteKey.value === key ? null : key
+  activeNoteKey.value = next
+  if (!next) return
+  if (isPdf.value && hasHighlights.value) {
+    const match = highlights.value?.notes?.find(note => note.key === key)
+    if (match) currentPage.value = match.page
+    sourceView.value = 'annotated'
+    pane.value = 'original'
+  } else if (isDocx.value) {
+    sourceView.value = 'original'
+    pane.value = 'original'
+    await nextTick()
+    applyDocxAnnotations()
+    const target = docxAnnotations.value?.elementByNoteKey.get(key)
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+async function stepDocxNote(delta: number) {
+  if (!docxNotes.value.length || openDocxNoteIndex.value < 0) return
+  const nextIdx = (openDocxNoteIndex.value + delta + docxNotes.value.length) % docxNotes.value.length
+  const targetNote = docxNotes.value[nextIdx]
+  activeNoteKey.value = targetNote.key
+  if (targetNote.number > 3) showAllObservations.value = true
+  await nextTick()
+  applyDocxAnnotations()
+  const el = docxAnnotations.value?.elementByNoteKey.get(targetNote.key)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 async function reindexAll() {
@@ -798,6 +1078,23 @@ async function attachToAssistant() {
   toast.add({ severity: 'success', summary: 'Added to assistant', detail: selected.value.title, life: 2500 })
 }
 
+function applyDocxAnnotations() {
+  if (!isDocx.value || sourceView.value !== 'original' || !docxContainer.value || docxLoading.value) return
+  const citations = analysis.value?.effective?.citations ?? []
+  docxAnnotations.value = annotateDocxContainer(docxContainer.value, {
+    citations,
+    notes: docxNotes.value,
+    showCitations: docxShowCitations.value,
+    showNotes: docxShowNotes.value,
+    activeNoteKey: activeNoteKey.value,
+    activeCitationId: activeDocxCitationId.value,
+    onSelectNote: note => {
+      activeNoteKey.value = activeNoteKey.value === note.key ? null : note.key
+      if (activeNoteKey.value && note.number > 3) showAllObservations.value = true
+    },
+  })
+}
+
 let docxToken = 0
 async function renderDocx() {
   if (!selected.value || !isDocx.value || sourceView.value !== 'original') return
@@ -815,11 +1112,20 @@ async function renderDocx() {
       toast.add({ severity: 'warn', summary: 'Original view unavailable', detail: `Showing extracted text instead. ${error}`, life: 4000 })
     }
   } finally {
-    if (token === docxToken) docxLoading.value = false
+    if (token === docxToken) {
+      docxLoading.value = false
+      await nextTick()
+      applyDocxAnnotations()
+    }
   }
 }
 
 watch([() => selected.value?.id, sourceView], () => { void renderDocx() }, { flush: 'post' })
+watch(
+  [() => analysis.value?.effective?.id, notesDraft, docxShowCitations, docxShowNotes, activeNoteKey, activeDocxCitationId],
+  () => { applyDocxAnnotations() },
+  { flush: 'post' },
+)
 // A document with nothing structured to show falls back to its original
 // rather than to a blank Fields view the toggle no longer offers.
 watch(hasRecords, has => { if (!has && sourceView.value === 'fields') sourceView.value = 'original' })
@@ -887,6 +1193,10 @@ onUnmounted(() => {
       <div class="head-copy">
         <h1>Documents</h1>
         <p v-if="documents.length" class="aw-type-meta head-count">{{ countSentence }}</p>
+        <span v-if="aiCorpusSummary && aiCorpusSummary.classified" class="ai-corpus-pill">
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          {{ plural(aiCorpusSummary.classified, 'file') }} AI-classified<template v-if="aiCorpusSummary.schemas"> · {{ plural(aiCorpusSummary.schemas, 'schema') }} induced</template>
+        </span>
       </div>
       <span class="grow" />
       <!-- A background job, reported at the size of a background job. -->
@@ -925,7 +1235,7 @@ onUnmounted(() => {
       <UiOverflowMenu :items="secondaryActions" tooltip="More document actions" />
     </header>
 
-    <div v-if="documents.length" class="aw-filter-row">
+    <div v-if="documents.length" class="aw-filter-row doc-filter-bar">
       <div class="aw-segmented" role="group" aria-label="Show">
         <button
           v-for="option in queues"
@@ -936,9 +1246,24 @@ onUnmounted(() => {
           @click="setQueue(option.key)"
         >{{ option.label }} <span class="aw-figure">{{ option.count }}</span></button>
       </div>
+      <div v-if="typeBuckets.length > 1" class="type-buckets" role="group" aria-label="Filter by classified type">
+        <button
+          v-for="bucket in typeBuckets"
+          :key="bucket.key"
+          type="button"
+          class="type-bucket"
+          :data-tone="bucket.tone"
+          :class="{ on: typeFilter === bucket.key }"
+          :aria-pressed="typeFilter === bucket.key"
+          @click="toggleTypeFilter(bucket.key)"
+        >
+          <span>{{ bucket.label }}</span>
+          <b class="aw-figure">{{ bucket.count }}</b>
+        </button>
+      </div>
       <label v-if="filterCounts.get('model_typed')" class="aw-filter-check">
         <input v-model="modelTypedOnly" type="checkbox">
-        Only types the assistant assigned <span class="aw-figure">{{ filterCounts.get('model_typed') }}</span>
+        AI-assigned only <span class="aw-figure">{{ filterCounts.get('model_typed') }}</span>
       </label>
     </div>
 
@@ -1035,8 +1360,9 @@ onUnmounted(() => {
             <span v-if="showPageNav" class="page-nav">
               <Button icon="aw-icon aw-icon-chevron-left" text size="small" :disabled="currentPage <= 1" aria-label="Previous page" @click="currentPage--" /><span class="aw-figure">{{ currentPage }} / {{ selected.pages || previewPages.length || 1 }}</span><Button icon="aw-icon aw-icon-chevron-right" text size="small" :disabled="currentPage >= (selected.pages || previewPages.length || 1)" aria-label="Next page" @click="currentPage++" />
             </span>
-            <div v-if="hasOriginalView || hasRecords" class="source-toggle" role="group" aria-label="Preview mode">
-              <button v-if="hasOriginalView || isImage" :class="{ active: !showFields && sourceView === 'original' }" @click="sourceView = 'original'">Original</button>
+            <div v-if="hasOriginalView || hasRecords || hasHighlights" class="source-toggle" role="group" aria-label="Preview mode">
+              <button v-if="hasHighlights" :class="{ active: showAnnotated }" @click="sourceView = 'annotated'">Annotated</button>
+              <button v-if="hasOriginalView || isImage" :class="{ active: !showFields && !showAnnotated && sourceView === 'original' }" @click="sourceView = 'original'">Original</button>
               <button v-if="!isImage" :class="{ active: showTextView }" @click="sourceView = 'text'">Extracted text</button>
               <button v-if="hasRecords" :class="{ active: showFields }" @click="sourceView = 'fields'">Fields</button>
             </div>
@@ -1093,11 +1419,77 @@ onUnmounted(() => {
                 :schema="analysis.effective.schema_ref"
                 :citations="analysis.effective.citations"
                 :validated="analysis.status.analysis_coverage_state === 'complete'"
+                :documents="documents"
+                :current-document-id="selected.id"
+                :active-key="activeHighlightKey"
+                @cite="openCitation"
+                @open-document="selectDocument($event, 1)"
+                @hover="hoveredHighlightKey = $event"
+                @focus-field="focusField"
               />
             </section>
+            <PdfHighlightViewer
+              v-else-if="showAnnotated && highlights"
+              :workspace-id="props.workspace.id"
+              :document-id="selected.id"
+              :page="currentPage"
+              :page-count="highlights.page_count || selected.pages || 1"
+              :items="highlights.items"
+              :notes="highlights.notes ?? []"
+              :active-key="activeHighlightKey"
+              :active-note-key="activeNoteKey"
+              :cache-bust="selected.sha1"
+              @update:page="currentPage = $event"
+              @hover="hoveredHighlightKey = $event"
+              @select="onHighlightSelect"
+              @select-note="onPdfNoteSelect"
+              @edit-notes="readingTab = 'notes'"
+            />
             <img v-else-if="isImage" class="document-image" :src="fileUrl" :alt="selected.title" />
             <iframe v-else-if="isPdf && sourceView === 'original'" :key="`${selected.id}:${currentPage}`" class="document-frame" :src="`${fileUrl}#page=${currentPage}`" :title="selected.title" />
-            <div v-else-if="isDocx && sourceView === 'original'" :key="selected.id" ref="docxContainer" class="docx-frame" :class="{ loading: docxLoading }" :aria-busy="docxLoading" />
+            <div v-else-if="isDocx && sourceView === 'original'" :key="selected.id" class="docx-stage" @click="activeNoteKey && (activeNoteKey = null)">
+              <div v-if="(docxAnnotations?.citedCount || docxNotes.length)" class="docx-hl-bar" @click.stop>
+                <span class="docx-hl-stat">
+                  <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+                  <strong v-if="docxAnnotations?.citedCount">{{ plural(docxAnnotations.citedCount, 'cited passage') }}</strong>
+                  <template v-if="docxAnnotations?.citedCount && docxNotes.length"><span aria-hidden="true">·</span></template>
+                  <strong v-if="docxNotes.length" class="stat-notes">{{ plural(docxNotes.length, 'audit note') }}</strong>
+                </span>
+                <span class="grow" />
+                <label v-if="docxAnnotations?.citedCount" class="docx-layer-toggle">
+                  <input v-model="docxShowCitations" type="checkbox" />
+                  <span>Citations</span>
+                </label>
+                <label v-if="docxNotes.length" class="docx-layer-toggle warn">
+                  <input v-model="docxShowNotes" type="checkbox" />
+                  <span>Notes</span>
+                </label>
+              </div>
+              <article v-if="openDocxNote" class="docx-callout" role="dialog" :aria-label="`Audit note ${openDocxNote.number}`" @click.stop>
+                <header class="docx-callout-head">
+                  <span class="docx-callout-badge">Audit note #{{ openDocxNote.number }}</span>
+                  <span class="docx-callout-scope">Highlighted in document</span>
+                  <button type="button" class="docx-callout-close" aria-label="Close callout" @click="activeNoteKey = null">
+                    <i class="aw-icon aw-icon-x" aria-hidden="true" />
+                  </button>
+                </header>
+                <p class="docx-callout-body">{{ openDocxNote.text }}</p>
+                <footer class="docx-callout-foot">
+                  <div v-if="docxNotes.length > 1" class="docx-callout-nav">
+                    <button type="button" class="docx-callout-step" @click="stepDocxNote(-1)">
+                      <i class="aw-icon aw-icon-chevron-left" aria-hidden="true" /> Prev
+                    </button>
+                    <span class="aw-figure">{{ openDocxNoteIndex + 1 }} / {{ docxNotes.length }}</span>
+                    <button type="button" class="docx-callout-step" @click="stepDocxNote(1)">
+                      Next <i class="aw-icon aw-icon-chevron-right" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <span class="grow" />
+                  <button type="button" class="docx-callout-edit" @click="readingTab = 'notes'">Edit in notes</button>
+                </footer>
+              </article>
+              <div ref="docxContainer" class="docx-frame" :class="{ loading: docxLoading }" :aria-busy="docxLoading" />
+            </div>
             <pre v-else class="page-text">{{ current?.text || 'No extractable text on this page.' }}</pre>
           </div>
         </main>
@@ -1106,7 +1498,9 @@ onUnmounted(() => {
         <aside v-if="selected" class="reading-pane" aria-label="Reading">
           <nav class="reading-tabs">
             <button type="button" :class="{ on: readingTab === 'reading' }" @click="readingTab = 'reading'">Reading</button>
-            <button type="button" :class="{ on: readingTab === 'notes' }" @click="readingTab = 'notes'">Audit notes</button>
+            <button type="button" :class="{ on: readingTab === 'notes' }" @click="readingTab = 'notes'">
+              Audit notes<span v-if="auditObservations.length" class="tab-badge warn aw-figure">{{ auditObservations.length }}</span>
+            </button>
             <button type="button" :class="{ on: readingTab === 'activity' }" @click="readingTab = 'activity'">
               Activity<span v-if="activity.length" class="tab-badge aw-figure">{{ activity.length }}</span>
             </button>
@@ -1126,8 +1520,55 @@ onUnmounted(() => {
             <button type="button" @click="readingTab = 'reading'; compareCandidate = true">Compare</button>
           </p>
 
-          <div class="reading-body">
+          <div ref="readingBodyRef" class="reading-body">
             <template v-if="readingTab === 'reading'">
+              <!-- AI Classification & Rationale: visible whether or not full analysis has finished. -->
+              <section v-if="selectedClassification" class="ai-class-card" :class="{ thin: selectedVocabulary?.thin, other: selectedClassification.isOther }">
+                <div class="ai-class-head">
+                  <span class="by" :data-edited="(!selectedClassification.isModel && !readingSource) || readingSource?.edited || null">
+                    <i class="aw-icon" :class="readingSource?.edited ? 'aw-icon-user-pen' : selectedClassification.isModel ? 'aw-icon-sparkles' : 'aw-icon-user-pen'" aria-hidden="true" />
+                    {{ readingSource?.edited ? 'Edited by auditor' : selectedClassification.isModel ? 'AI classified' : 'Classified' }}
+                  </span>
+                  <strong class="ai-class-type">{{ selectedClassification.label }}</strong>
+                  <span v-if="selectedClassification.confidence" class="conf-pill" :data-level="selectedClassification.confidence">
+                    {{ sentenceCase(selectedClassification.confidence) }} confidence
+                  </span>
+                </div>
+                <p v-if="selectedClassification.rationale" class="ai-class-rationale">{{ selectedClassification.rationale }}</p>
+                <div class="ai-class-meta">
+                  <span v-if="readingSource?.meta" class="aw-type-meta">{{ readingSource.meta }}</span>
+                  <template v-if="selectedVocabulary">
+                    <span v-if="readingSource?.meta" aria-hidden="true">·</span>
+                    <button type="button" class="fields-link" @click="fieldsOpen = !fieldsOpen">
+                      {{ plural(selectedVocabulary.fields.length, 'schema field') }}
+                      <i class="aw-icon" :class="fieldsOpen ? 'aw-icon-chevron-down' : 'aw-icon-chevron-right'" />
+                    </button>
+                    <span class="aw-type-meta">from {{ plural(selectedVocabulary.documents_read.length, 'document') }}</span>
+                  </template>
+                </div>
+                <p v-if="selectedVocabulary?.thin" class="strip warn inline">
+                  <i class="aw-icon aw-icon-triangle-alert" aria-hidden="true" />
+                  <span>{{ thinReason(selectedVocabulary) }}</span>
+                </p>
+                <table v-if="selectedVocabulary && fieldsOpen" class="vocabulary-fields">
+                  <tbody>
+                    <tr v-for="field in selectedVocabulary.fields" :key="field.name">
+                      <td class="vf-name">{{ field.name }}</td>
+                      <td class="vf-role">{{ field.role }}</td>
+                      <td class="vf-fill aw-figure" :class="{ partial: field.fill_count < selectedVocabulary.documents_read.length }">
+                        {{ field.fill_count }} / {{ selectedVocabulary.documents_read.length }}
+                      </td>
+                      <td class="vf-unread">
+                        <span
+                          v-if="field.unread.length"
+                          v-tooltip.left="`${field.unread.length} document(s) were read before this field existed, so their silence about it means nobody asked — not that they do not state it.`"
+                        >{{ field.unread.length }} never asked</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+
               <UiEmptyState
                 v-if="!analysis?.effective"
                 icon="aw-icon aw-icon-sparkles"
@@ -1138,47 +1579,36 @@ onUnmounted(() => {
                 <Button label="Analyse this document" icon="aw-icon aw-icon-sparkles" :loading="analysisBusy" @click="startAnalysis('analyze')" />
               </UiEmptyState>
               <template v-else>
-                <p v-if="readingSource" class="reading-source">
-                  <span class="by" :data-edited="readingSource.edited || null">
-                    <i class="aw-icon" :class="readingSource.edited ? 'aw-icon-user-pen' : 'aw-icon-sparkles'" aria-hidden="true" />
-                    {{ readingSource.edited ? 'Edited by an auditor' : 'Written by the assistant' }}
-                  </span>
-                  <span v-if="readingSource.meta" class="aw-type-meta">{{ readingSource.meta }}</span>
-                </p>
-
-                <section v-if="selectedVocabulary" class="vocabulary-card" :class="{ thin: selectedVocabulary.thin }">
-                  <p class="vocabulary-line">
-                    <b>Read as {{ sentenceCase(selectedVocabulary.document_type) }}</b>
-                    <span>
-                      ·
-                      <button type="button" class="fields-link" @click="fieldsOpen = !fieldsOpen">
-                        {{ plural(selectedVocabulary.fields.length, 'field') }}
-                        <i class="aw-icon" :class="fieldsOpen ? 'aw-icon-chevron-down' : 'aw-icon-chevron-right'" />
-                      </button>
-                      from {{ plural(selectedVocabulary.documents_read.length, 'document') }}
+                <!-- AI Audit Observations surfaced right on the Reading view -->
+                <section v-if="auditObservations.length" class="observations-card">
+                  <header class="observations-head">
+                    <span class="observations-title">
+                      <i class="aw-icon aw-icon-triangle-alert" aria-hidden="true" />
+                      <strong>AI spotted {{ plural(auditObservations.length, 'audit observation') }}</strong>
                     </span>
-                  </p>
-                  <p v-if="selectedVocabulary.thin" class="strip warn inline">
-                    <i class="aw-icon aw-icon-triangle-alert" aria-hidden="true" />
-                    <span>{{ thinReason(selectedVocabulary) }}</span>
-                  </p>
-                  <table v-if="fieldsOpen" class="vocabulary-fields">
-                    <tbody>
-                      <tr v-for="field in selectedVocabulary.fields" :key="field.name">
-                        <td class="vf-name">{{ field.name }}</td>
-                        <td class="vf-role">{{ field.role }}</td>
-                        <td class="vf-fill aw-figure" :class="{ partial: field.fill_count < selectedVocabulary.documents_read.length }">
-                          {{ field.fill_count }} / {{ selectedVocabulary.documents_read.length }}
-                        </td>
-                        <td class="vf-unread">
-                          <span
-                            v-if="field.unread.length"
-                            v-tooltip.left="`${field.unread.length} document(s) were read before this field existed, so their silence about it means nobody asked — not that they do not state it.`"
-                          >{{ field.unread.length }} never asked</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                    <button type="button" class="obs-link" @click="readingTab = 'notes'">Edit</button>
+                  </header>
+                  <ol class="observations-list">
+                    <li v-for="(obs, index) in visibleObservations" :key="index">
+                      <button
+                        type="button"
+                        class="obs-item"
+                        :class="{ active: activeNoteKey === `note:${index + 1}` }"
+                        @click="focusObservation(index)"
+                      >
+                        <span class="obs-num aw-figure">{{ index + 1 }}</span>
+                        <span class="obs-text">{{ obs }}</span>
+                      </button>
+                    </li>
+                  </ol>
+                  <button
+                    v-if="auditObservations.length > 3"
+                    type="button"
+                    class="obs-more"
+                    @click="showAllObservations = !showAllObservations"
+                  >
+                    {{ showAllObservations ? 'Show fewer' : `Show all ${auditObservations.length} observations` }}
+                  </button>
                 </section>
 
                 <div v-if="analysis.status.analysis_coverage_state === 'partial'" class="coverage-warning">
@@ -1193,23 +1623,43 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <!-- A summary whose origin is the structured evidence is that
-                     evidence written out as bullets; the sheet is the better
-                     rendering of it, so only a model-written summary is drawn. -->
+                <!-- Prose summary for planning/policy/minutes documents -->
                 <template v-if="!hasStructuredSummary">
                   <MarkdownEditor v-if="editingReading" v-model="summaryDraft" class="reading-editor" />
                   <MarkdownView v-else :markdown="summaryDraft || '_No summary was written._'" class="reading-text" />
                 </template>
-                <button
-                  v-if="analysis.effective.records?.length"
-                  type="button"
-                  class="fields-door"
-                  @click="sourceView = 'fields'; pane = 'original'"
-                >
-                  <i class="aw-icon aw-icon-table" aria-hidden="true" />
-                  <span><b>Structured evidence</b> · {{ plural(analysis.effective.records.length, 'record') }} read against the {{ sentenceCase(analysis.effective.schema_ref?.document_type || 'document') }} schema</span>
-                  <i class="aw-icon aw-icon-arrow-right" aria-hidden="true" />
-                </button>
+
+                <!-- Structured extracted fields right beside the PDF -->
+                <section v-if="analysis.effective.records?.length" class="inline-fields-section">
+                  <header class="inline-fields-head">
+                    <h4 class="aw-label">
+                      Extracted fields <span v-if="structuredFieldCount" class="aw-figure">({{ structuredFieldCount }})</span>
+                    </h4>
+                    <span v-if="analysis.status.analysis_coverage_state === 'complete'" class="validated-pill">Validated</span>
+                    <span class="grow" />
+                    <button
+                      type="button"
+                      class="expand-fields-link"
+                      @click="sourceView = 'fields'; pane = 'original'"
+                    >
+                      Expand <i class="aw-icon aw-icon-arrow-right" aria-hidden="true" />
+                    </button>
+                  </header>
+                  <StructuredEvidenceSheet
+                    compact
+                    :records="analysis.effective.records ?? []"
+                    :schema="analysis.effective.schema_ref"
+                    :citations="analysis.effective.citations"
+                    :validated="analysis.status.analysis_coverage_state === 'complete'"
+                    :documents="documents"
+                    :current-document-id="selected.id"
+                    :active-key="activeHighlightKey"
+                    @cite="openCitation"
+                    @open-document="selectDocument($event, 1)"
+                    @hover="hoveredHighlightKey = $event"
+                    @focus-field="focusField"
+                  />
+                </section>
 
                 <section v-if="compareCandidate && analysis.candidate" class="candidate-compare">
                   <h4>The refreshed reading</h4>
@@ -1221,7 +1671,23 @@ onUnmounted(() => {
                   </div>
                 </section>
 
-                <section v-if="analysis.effective.citations.length" class="analysis-sources">
+                <!-- When structured fields already carry inline p.N badges, tuck raw source fragments behind a disclosure so they don't dominate the pane. -->
+                <details v-if="analysis.effective.citations.length && hasRecords" class="source-excerpts">
+                  <summary>
+                    Source excerpts · <span class="aw-figure">{{ plural(analysis.effective.citations.length, 'citation') }}</span>
+                  </summary>
+                  <div class="analysis-sources">
+                    <button v-for="citation in analysis.effective.citations" :key="`${citation.id}:${citation.page}`" type="button" @click="openCitation(citation)">
+                      <strong>
+                        <span class="aw-figure">{{ citation.id }}</span> · Page {{ citation.page }}
+                        <span v-if="citation.evidence_kind === 'visual'" class="visual-tag">AI visual description</span>
+                      </strong>
+                      <span v-if="citation.evidence_kind === 'visual'">{{ citation.description || 'Visual region' }}</span>
+                      <span v-else>{{ citation.excerpt }}</span>
+                    </button>
+                  </div>
+                </details>
+                <section v-else-if="analysis.effective.citations.length" class="analysis-sources">
                   <h4 class="aw-label">Where it says so</h4>
                   <button v-for="citation in analysis.effective.citations" :key="`${citation.id}:${citation.page}`" type="button" @click="openCitation(citation)">
                     <strong>
@@ -1274,25 +1740,38 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- The review, where the reading ends: the eye reaches it having
-               read the thing it vouches for. The page's one filled button. -->
+          <!-- Human-in-the-loop review bar where the reading ends. -->
           <footer v-if="analysis?.effective" class="reading-foot">
-            <!-- Its own line: beside the two buttons it was what the pane's
-                 width could not fit, and both buttons clipped to make room. -->
-            <span class="queue-position aw-type-meta">{{ queuePosition }}</span>
+            <span class="queue-position">
+              <strong v-if="isReviewed(selected)" class="hitl-done">
+                <i class="aw-icon aw-icon-check" aria-hidden="true" /> Reviewed by auditor
+              </strong>
+              <strong v-else class="hitl-pending">Human review required</strong>
+              <span class="aw-type-meta">· {{ queuePosition }}</span>
+            </span>
             <template v-if="editingReading">
               <Button label="Cancel" size="small" text severity="secondary" @click="cancelReadingEdit" />
               <Button label="Save edits" icon="aw-icon aw-icon-save" size="small" severity="secondary" outlined :loading="analysisBusy" @click="saveReadingEdit" />
             </template>
-            <Button
-              v-else-if="readingTab === 'reading' && !hasStructuredSummary"
-              label="Edit reading"
-              icon="aw-icon aw-icon-pencil"
-              size="small"
-              severity="secondary"
-              outlined
-              @click="editingReading = true"
-            />
+            <template v-else>
+              <Button
+                v-if="isEvidence"
+                label="Reclassify"
+                size="small"
+                severity="secondary"
+                outlined
+                @click="typeReviewOpen = true"
+              />
+              <Button
+                v-if="readingTab === 'reading' && !hasStructuredSummary"
+                label="Edit reading"
+                icon="aw-icon aw-icon-pencil"
+                size="small"
+                severity="secondary"
+                outlined
+                @click="editingReading = true"
+              />
+            </template>
             <span class="grow" />
             <Button
               v-if="!isReviewed(selected)"
@@ -1369,8 +1848,45 @@ onUnmounted(() => {
 .documents-tab { display: flex; flex-direction: column; gap: .75rem; height: 100%; min-height: 36rem; min-width: 0; }
 .grow { flex: 1; }
 
-.head-copy { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; min-width: 0; }
+.head-copy { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; min-width: 0; }
 .head-count { margin: 0; }
+.ai-corpus-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .15rem .6rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-accent-soft);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.doc-filter-bar { flex-wrap: wrap; gap: .5rem .75rem; }
+.type-buckets { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; }
+.type-bucket {
+  display: inline-flex; align-items: center; gap: .35rem;
+  height: var(--aw-control-height-sm);
+  padding: 0 .6rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel);
+  color: var(--aw-ink-soft);
+  font: inherit; font-size: var(--aw-text-xs); font-weight: 500;
+  cursor: pointer;
+}
+.type-bucket:hover { border-color: var(--aw-teal-line); color: var(--aw-ink-strong); }
+.type-bucket b { font-weight: 700; color: var(--aw-ink-strong); }
+.type-bucket[data-tone='ai'] b { color: var(--aw-accent); }
+.type-bucket[data-tone='warn'] { border-color: var(--aw-warn-line); background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
+.type-bucket[data-tone='warn'] b { color: var(--aw-warn); }
+.type-bucket.on {
+  border-color: var(--aw-teal);
+  background: var(--aw-teal-soft);
+  color: var(--aw-teal-strong);
+  font-weight: 600;
+}
+.type-bucket.on b { color: var(--aw-teal-strong); }
 
 /* A running background job, not a problem to be solved. */
 .indexing-chip { display: inline-flex; align-items: center; gap: .4rem; min-height: var(--aw-control-height-sm); padding: .2rem .6rem; border: 1px solid var(--aw-info-line); border-radius: var(--aw-radius-pill); background: var(--aw-info-soft); color: var(--aw-info); font-size: var(--aw-text-xs); font-weight: 600; white-space: nowrap; }
@@ -1381,7 +1897,7 @@ onUnmounted(() => {
 .document-layout { container: documents / inline-size; flex: 1 1 auto; min-height: 0; display: flex; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface); background: var(--aw-panel); overflow: hidden; }
 .document-grid {
   flex: 1; min-width: 0; min-height: 0; display: grid;
-  grid-template-columns: minmax(15rem, 18.5rem) minmax(0, 1fr) minmax(19rem, 23.75rem);
+  grid-template-columns: minmax(14.5rem, 17.5rem) minmax(0, 1fr) minmax(21rem, 27rem);
   grid-template-rows: minmax(0, 1fr);
   grid-template-areas: "list viewer reading";
 }
@@ -1483,10 +1999,85 @@ onUnmounted(() => {
 .document-image { display: block; max-width: 100%; max-height: 34rem; margin: auto; }
 /* `flex: 1`, not a height guessed from the chrome above it. */
 .document-frame { width: 100%; flex: 1 1 auto; min-height: 24rem; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface); background: var(--aw-panel); }
+.docx-stage { display: flex; flex-direction: column; gap: .625rem; flex: 1 1 auto; min-height: 0; position: relative; }
+.docx-hl-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem;
+  padding: .4rem .65rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-accent-soft);
+  font-size: var(--aw-text-xs);
+}
+.docx-hl-stat { display: inline-flex; align-items: center; gap: .35rem; color: var(--aw-ink-strong); }
+.docx-hl-stat .aw-icon { color: var(--aw-accent); }
+.docx-hl-stat .stat-notes { color: var(--aw-warn-ink); }
+.docx-layer-toggle { display: inline-flex; align-items: center; gap: .3rem; color: var(--aw-ink-soft); font-weight: 600; cursor: pointer; user-select: none; }
+.docx-layer-toggle input { accent-color: var(--aw-accent); cursor: pointer; }
+.docx-layer-toggle.warn input { accent-color: var(--aw-warn); }
+
+.docx-callout {
+  position: sticky; top: 0; z-index: 6;
+  display: flex; flex-direction: column; gap: .45rem;
+  padding: .7rem .85rem;
+  border: 1px solid var(--aw-warn-line);
+  border-radius: var(--aw-radius-surface);
+  background: var(--aw-panel);
+  box-shadow: var(--aw-shadow-lg);
+}
+.docx-callout-head { display: flex; align-items: center; gap: .45rem; }
+.docx-callout-badge { padding: .08rem .45rem; border-radius: var(--aw-radius-pill); background: var(--aw-warn-soft); color: var(--aw-warn-ink); font-size: var(--aw-text-2xs); font-weight: 700; }
+.docx-callout-scope { flex: 1; min-width: 0; color: var(--aw-muted); font-size: var(--aw-text-2xs); }
+.docx-callout-close { display: grid; place-items: center; width: 1.4rem; height: 1.4rem; padding: 0; border: 0; border-radius: var(--aw-radius-control); background: transparent; color: var(--aw-muted); cursor: pointer; }
+.docx-callout-close:hover { background: var(--aw-raised); color: var(--aw-ink-strong); }
+.docx-callout-body { margin: 0; color: var(--aw-ink); font-size: var(--aw-text-xs); line-height: 1.5; }
+.docx-callout-foot { display: flex; align-items: center; gap: .5rem; padding-top: .45rem; border-top: 1px solid var(--aw-border); font-size: var(--aw-text-2xs); }
+.docx-callout-nav { display: inline-flex; align-items: center; gap: .35rem; color: var(--aw-muted); }
+.docx-callout-step { display: inline-flex; align-items: center; gap: .15rem; padding: .15rem .4rem; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control); background: var(--aw-canvas); color: var(--aw-ink-soft); font: inherit; font-weight: 600; cursor: pointer; }
+.docx-callout-step:hover { border-color: var(--aw-teal); color: var(--aw-teal); }
+.docx-callout-edit { padding: 0; border: 0; background: none; color: var(--aw-teal); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
 .docx-frame { flex: 1 1 auto; min-height: 24rem; overflow: auto; border-radius: var(--aw-radius-surface); }
 .docx-frame.loading { opacity: .5; }
 .docx-frame :deep(.docx-wrapper) { background: transparent; padding: 0; }
 .docx-frame :deep(.docx-wrapper > section.docx) { margin: 0 auto 1rem; box-shadow: var(--aw-shadow-md); }
+.docx-frame :deep(.aw-docx-cited) {
+  background: color-mix(in srgb, var(--aw-accent) 10%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--aw-accent);
+  border-radius: 3px;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.docx-frame :deep(.aw-docx-cited-active) {
+  background: color-mix(in srgb, var(--aw-accent) 22%, transparent) !important;
+  box-shadow: inset 4px 0 0 var(--aw-accent), 0 0 0 2px color-mix(in srgb, var(--aw-accent) 30%, transparent);
+}
+.docx-frame :deep(.aw-docx-note-active) {
+  background: color-mix(in srgb, var(--aw-warn) 16%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--aw-warn);
+  border-radius: 3px;
+}
+.docx-frame :deep(.aw-docx-pin) {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.3rem; height: 1.3rem;
+  margin-left: .4rem;
+  padding: 0;
+  border: 2px solid var(--aw-panel);
+  border-radius: 50%;
+  background: var(--aw-warn);
+  color: var(--aw-on-dark);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-text-2xs);
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  box-shadow: var(--aw-shadow-sm);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.docx-frame :deep(.aw-docx-pin:hover),
+.docx-frame :deep(.aw-docx-pin.active) {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-warn) 32%, transparent), var(--aw-shadow-md);
+}
 .fields-view { max-width: 56rem; width: 100%; margin: 0 auto; padding: 1rem 1.25rem; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface); background: var(--aw-panel); box-shadow: var(--aw-shadow-sm); }
 .fields-door { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .625rem .75rem; border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control); background: var(--aw-canvas); color: var(--aw-ink-soft); font: inherit; font-size: var(--aw-text-sm); text-align: left; cursor: pointer; }
 .fields-door:hover { border-color: var(--aw-teal-line); background: var(--aw-teal-soft); }
@@ -1502,18 +2093,141 @@ onUnmounted(() => {
 .reading-tabs > button:hover { color: var(--aw-ink-strong); }
 .reading-tabs > button.on { border-bottom-color: var(--aw-teal); color: var(--aw-teal-strong); font-weight: 600; }
 .reading-tabs > :deep(*:last-child) { align-self: center; }
-.tab-badge { padding: 0 .3rem; border-radius: var(--aw-radius-pill); background: var(--aw-raised); color: var(--aw-muted); font-size: var(--aw-text-2xs); }
-.reading-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: .875rem; padding: 1rem; overflow-y: auto; overscroll-behavior: contain; font-size: var(--aw-text-sm); line-height: 1.55; }
-.reading-source { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: 0; }
-.reading-source .by { display: inline-flex; align-items: center; gap: .3rem; padding: .125rem .5rem; border-radius: var(--aw-radius-pill); background: var(--aw-accent-soft); color: var(--aw-accent); font-size: var(--aw-text-xs); font-weight: 600; }
-.reading-source .by[data-edited] { background: var(--aw-raised); color: var(--aw-ink-soft); }
+.tab-badge { padding: 0 .35rem; border-radius: var(--aw-radius-pill); background: var(--aw-raised); color: var(--aw-muted); font-size: var(--aw-text-2xs); font-weight: 600; }
+.tab-badge.warn { background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
+.reading-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: .75rem; padding: .875rem; overflow-y: auto; overscroll-behavior: contain; font-size: var(--aw-text-sm); line-height: 1.5; }
+
+/* AI classification & rationale card */
+.ai-class-card {
+  display: flex; flex-direction: column; gap: .45rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--aw-accent-line);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-accent-soft);
+}
+.ai-class-card.thin, .ai-class-card.other {
+  border-color: var(--aw-warn-line);
+  background: var(--aw-warn-soft);
+}
+.ai-class-head { display: flex; align-items: center; flex-wrap: wrap; gap: .375rem .5rem; }
+.ai-class-head .by {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .08rem .45rem;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel);
+  color: var(--aw-accent);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.ai-class-head .by[data-edited] { color: var(--aw-ink-soft); }
+.ai-class-type { color: var(--aw-ink-strong); font-size: var(--aw-text-sm); font-weight: 700; }
+.conf-pill {
+  margin-left: auto;
+  padding: .06rem .45rem;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel);
+  color: var(--aw-muted);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.conf-pill[data-level='high'] { background: var(--aw-ok-soft); color: var(--aw-ok); }
+.conf-pill[data-level='medium'] { background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
+.conf-pill[data-level='low'] { background: var(--aw-danger-soft); color: var(--aw-danger); }
+.ai-class-rationale {
+  margin: 0;
+  color: var(--aw-ink-soft);
+  font-size: var(--aw-text-xs);
+  line-height: 1.45;
+}
+.ai-class-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .35rem;
+  color: var(--aw-muted); font-size: var(--aw-text-xs);
+}
+
+/* AI audit observations card */
+.observations-card {
+  display: flex; flex-direction: column; gap: .45rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--aw-warn-line);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-warn-soft);
+}
+.observations-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.observations-title {
+  display: inline-flex; align-items: center; gap: .375rem;
+  color: var(--aw-warn-ink); font-size: var(--aw-text-xs);
+}
+.observations-title .aw-icon { color: var(--aw-warn); font-size: var(--aw-text-sm); }
+.obs-link, .obs-more {
+  padding: 0; border: 0; background: none;
+  color: var(--aw-warn-ink); font: inherit; font-size: var(--aw-text-xs); font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.obs-more { align-self: flex-start; }
+.observations-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.obs-item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .45rem;
+  width: 100%; padding: .35rem .45rem;
+  border: 1px solid transparent; border-radius: var(--aw-radius-control);
+  background: transparent; color: var(--aw-ink); font: inherit; font-size: var(--aw-text-xs); line-height: 1.45;
+  text-align: left; cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.obs-item:hover { background: var(--aw-panel); border-color: var(--aw-warn-line); }
+.obs-item.active { background: var(--aw-panel); border-color: var(--aw-warn); box-shadow: var(--aw-shadow-sm); }
+.obs-num {
+  display: grid; place-items: center;
+  width: 1.25rem; height: 1.25rem;
+  margin-top: .05rem;
+  border-radius: 50%;
+  background: var(--aw-warn); color: var(--aw-on-dark);
+  font-size: var(--aw-text-2xs); font-weight: 800; line-height: 1;
+}
+.obs-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* Inline structured fields inside the Reading pane */
+.inline-fields-section { display: flex; flex-direction: column; gap: .5rem; }
+.inline-fields-head { display: flex; align-items: center; gap: .45rem; }
+.inline-fields-head h4 { margin: 0; }
+.validated-pill {
+  padding: .05rem .42rem;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-ok-soft); color: var(--aw-ok);
+  font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.expand-fields-link {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: 0; border: 0; background: none;
+  color: var(--aw-teal); font: inherit; font-size: var(--aw-text-xs); font-weight: 600;
+  cursor: pointer;
+}
+.expand-fields-link:hover { color: var(--aw-teal-strong); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Collapsible raw source citations when structured fields already carry inline p.N chips */
+.source-excerpts {
+  padding: .55rem .7rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-canvas);
+}
+.source-excerpts summary {
+  cursor: pointer;
+  color: var(--aw-ink-soft);
+  font-size: var(--aw-text-xs);
+  font-weight: 600;
+}
+.source-excerpts .analysis-sources { margin-top: .55rem; }
+
 .reading-text { color: var(--aw-ink); }
 .reading-editor { min-height: 14rem; }
 .notes-hint { margin: 0; }
 .notes-actions { display: flex; align-items: center; gap: .5rem; }
 .reading-foot { display: flex; align-items: center; flex-wrap: wrap; gap: .375rem .5rem; padding: .5rem .75rem .625rem; border-top: 1px solid var(--aw-border); background: var(--aw-panel); }
 .reading-foot > :deep(.p-button) { flex: none; }
-.queue-position { flex-basis: 100%; white-space: nowrap; }
+.queue-position { flex-basis: 100%; display: flex; align-items: center; gap: .35rem; font-size: var(--aw-text-xs); white-space: nowrap; }
+.hitl-pending { color: var(--aw-warn-ink); font-weight: 700; }
+.hitl-done { display: inline-flex; align-items: center; gap: .25rem; color: var(--aw-ok); font-weight: 700; }
 
 /* The two states that need a sentence, in the fieldwork strip form. */
 .strip { display: flex; align-items: center; gap: .5rem; margin: 0; padding: .5rem 1rem; border-bottom: 1px solid var(--aw-border); font-size: var(--aw-text-sm); line-height: 1.4; }

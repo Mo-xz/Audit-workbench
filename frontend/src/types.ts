@@ -63,6 +63,11 @@ export type DocumentTextState = 'pending' | 'extracted' | 'image_only' | 'partia
 export type DocumentTypeAssigner = 'model' | 'auditor'
 
 export interface DocumentClassification {
+  category?: DocumentCategory | null
+  category_assigned_by?: DocumentTypeAssigner | null
+  category_assigned_at?: string | null
+  category_confidence?: 'high' | 'medium' | 'low' | null
+  category_rationale?: string
   document_type: string | null
   /** Set only when the type is `other`: what the auditor or model called it. */
   document_type_other: string | null
@@ -389,6 +394,40 @@ export interface DocumentAnalysisCitation {
   variant?: string
   prepared_sha256?: string
   generated_description?: boolean
+}
+
+export interface DocumentHighlightBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface DocumentHighlightItem {
+  key: string
+  field_name: string
+  value: string
+  citation_id: string | null
+  page: number
+  boxes: DocumentHighlightBox[]
+}
+
+export interface DocumentNoteMarker {
+  key: string
+  number: number
+  text: string
+  page: number
+  x: number
+  y: number
+  anchored: boolean
+  box: DocumentHighlightBox | null
+}
+
+export interface DocumentHighlightsPayload {
+  document_id: string
+  page_count: number
+  items: DocumentHighlightItem[]
+  notes?: DocumentNoteMarker[]
 }
 
 export interface GeneratedDocumentAnalysis {

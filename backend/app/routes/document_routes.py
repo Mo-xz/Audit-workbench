@@ -6,13 +6,14 @@ import asyncio
 import hashlib
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from .. import (
     cycle_linking,
     document_analysis,
     document_classification,
     document_masters,
+    document_media,
     document_schemas,
     document_search,
     document_types,
@@ -416,6 +417,29 @@ def get_document(workspace_id: str, doc_id: str):
 @router.get("/documents/{doc_id}/analysis")
 def get_document_analysis(workspace_id: str, doc_id: str):
     return document_analysis.load_analysis(_ws(workspace_id), doc_id)
+
+
+@router.get("/documents/{doc_id}/analysis/highlights")
+def get_document_analysis_highlights(workspace_id: str, doc_id: str):
+    return document_media.locate_analysis_highlights(_ws(workspace_id), doc_id)
+
+
+@router.get("/documents/{doc_id}/pages/{page}/image")
+def get_document_page_image(
+    workspace_id: str,
+    doc_id: str,
+    page: int,
+    dpi: int = Query(default=180, ge=72, le=260),
+):
+    try:
+        content = document_media.render_page_png(_ws(workspace_id), doc_id, page, dpi=dpi)
+    except document_media.MediaPreparationError as error:
+        raise HTTPException(400, detail=str(error)) from error
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.post("/documents/{doc_id}/analysis-runs")

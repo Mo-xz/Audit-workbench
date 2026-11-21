@@ -15,6 +15,7 @@ import type { CycleVouchMetadata, DocumentSchemaCatalogEntry, PlanningPayload, R
 import UiReviewBar from './ui/UiReviewBar.vue'
 import { RCM_CHIPS, filterRows, rcmStatus } from './planning/rcmStatus'
 import type { RcmFilter } from './planning/rcmStatus'
+import RcmCycleMap from './planning/RcmCycleMap.vue'
 import RcmGrid from './planning/RcmGrid.vue'
 import LinkTestDialog from './planning/LinkTestDialog.vue'
 import RcmRowDrawer from './planning/RcmRowDrawer.vue'
@@ -59,15 +60,50 @@ const completion = ref<RcmCompletion | null>(null)
 // per axis. A view over one array, so the counts above and the rows below can
 // never disagree.
 const rcmFilter = ref<RcmFilter[]>([])
+const selectedProcess = ref<string | null>(null)
 // Open by default. What the memorandum was drafted from is the first thing a
 // reviewer asks about it, and a panel behind a button is a panel nobody opens.
 const selectedRcm = computed(() => data.value?.rcm.find(item => item.id === selectedRcmId.value) ?? null)
 // Folded rather than combined: each narrowing runs the same predicate over
 // what the last one left, so the filters compose without a second code path.
-const visibleRcm = computed(() => rcmFilter.value.reduce(
+const filteredByChips = computed(() => rcmFilter.value.reduce(
   (rows, key) => filterRows(rows, key, data.value?.finding_rollups, completion.value),
   data.value?.rcm ?? [],
 ))
+const visibleRcm = computed(() => {
+  if (!selectedProcess.value) return filteredByChips.value
+  return filteredByChips.value.filter(
+    row => (String(row.process ?? '').trim() || 'Unassigned') === selectedProcess.value,
+  )
+})
+const cycleOrder = computed(() => {
+  const cycle = data.value?.planning?.cycle
+  if (!cycle?.steps?.length) return []
+  const names = cycle.steps.map(step => String(step.name ?? '').trim()).filter(Boolean)
+  const cross = String(cycle.cross_cutting?.name ?? '').trim()
+  if (cross && !names.includes(cross)) names.push(cross)
+  return names
+})
+const aiRcmSummary = computed(() => {
+  const rows = data.value?.rcm ?? []
+  if (!rows.length) return null
+  const aiCount = rows.filter(row => row.created_by === 'agent').length
+  const policyCited = rows.filter(row => (row.criteria_refs?.length ?? 0) > 0).length
+  const reviewed = rows.filter(row => row.review_status === 'reviewed').length
+  let dataTests = 0
+  let docTests = 0
+  for (const row of rows) {
+    const rollups = row.execution_rollup?.test_rollups ?? []
+    if (rollups.length) {
+      dataTests += rollups.filter(r => r.kind === 'datatest').length
+      docTests += rollups.filter(r => r.kind === 'doctest').length
+    } else {
+      dataTests += (row.test_refs ?? []).filter(r => r.startsWith('datatest:')).length
+      docTests += (row.test_refs ?? []).filter(r => r.startsWith('doctest:')).length
+    }
+  }
+  return { total: rows.length, aiCount, policyCited, dataTests, docTests, reviewed }
+})
 const rcmStatusModel = computed(() => rcmStatus(
   data.value?.rcm ?? [], data.value?.finding_rollups, completion.value,
 ))
@@ -161,6 +197,7 @@ async function addRcm() {
     // A new row rarely matches the filter that was on, and a risk that is added
     // and immediately invisible reads as a failure to add it.
     rcmFilter.value = []
+    selectedProcess.value = null
     await reload(); openRcm(row); emit('changed')
   } catch (error) { fail('Could not add the risk', error) }
 }
@@ -244,6 +281,17 @@ async function saveRcmRow(changes: Partial<RcmRow>) {
     await reload()
     detailOpen.value = false
     toast.add({ severity: 'success', summary: 'RCM row saved', life: 1800 })
+  } finally { saving.value = false }
+}
+/** One-click auditor sign-off from the read-first row drawer. */
+async function approveRcmRow() {
+  const id = selectedRcmId.value
+  if (!id) return
+  saving.value = true
+  try {
+    await updateRcm(id, { review_status: 'reviewed' })
+    await reload()
+    toast.add({ severity: 'success', summary: 'Row signed off by auditor', life: 2200 })
   } finally { saving.value = false }
 }
 /** The drawer asks for removal; the prompt is the one the row's own page asks. */
@@ -527,7 +575,18 @@ const rcmActions = computed(() => [
          control matrix` again over the grid. One count sentence, and at most
          one primary — the write-up the file owes, or adding a risk. -->
     <header class="page-head">
-      <h1>Risk and control matrix</h1>
+      <div class="head-copy">
+        <h1>Risk and control matrix</h1>
+        <span v-if="aiRcmSummary && aiRcmSummary.aiCount > 0" class="ai-corpus-pill">
+          <i class="aw-icon aw-icon-sparkles" aria-hidden="true" />
+          {{ aiRcmSummary.aiCount }} AI risks
+          <template v-if="aiRcmSummary.policyCited"> · {{ aiRcmSummary.policyCited }} policy-cited</template>
+          <template v-if="aiRcmSummary.dataTests || aiRcmSummary.docTests">
+            · {{ aiRcmSummary.dataTests }} Data + {{ aiRcmSummary.docTests }} Doc tests
+          </template>
+          · {{ aiRcmSummary.reviewed }}/{{ aiRcmSummary.total }} signed off
+        </span>
+      </div>
       <span class="grow" />
       <Button label="Add risk" icon="aw-icon aw-icon-plus" size="small" outlined severity="secondary" @click="addRcm" />
       <SplitButton
@@ -586,11 +645,20 @@ const rcmActions = computed(() => [
         </template>
       </UiReviewBar>
 
+      <RcmCycleMap
+        v-if="data.rcm.length"
+        :cycle="data.planning.cycle ?? null"
+        :rows="filteredByChips"
+        :selectedProcess="selectedProcess"
+        @select="selectedProcess = $event"
+      />
+
       <RcmGrid
         :rows="visibleRcm"
         :findingRollups="data.finding_rollups"
         :selectedId="detailOpen ? selectedRcmId : null"
         :papers="data.working_papers"
+        :cycleOrder="cycleOrder"
         @open="openRcm"
         @paper="openPaper"
       />
@@ -618,6 +686,7 @@ const rcmActions = computed(() => [
         :findings="selectedFindings"
         :saving="saving"
         @save="saveRcmRow"
+        @approve="approveRcmRow"
         @close="closeRcm"
         @remove="removeRcmRow"
         @paper="openRcmRow('paper')"
@@ -643,6 +712,16 @@ const rcmActions = computed(() => [
 .rcm-view { display:flex; flex-direction:column; gap:.75rem }
 
 .grow { flex:1 }
+.head-copy { display:flex; align-items:center; gap:.625rem; flex-wrap:wrap; min-width:0 }
+.ai-corpus-pill {
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.15rem .6rem;
+  border:1px solid var(--aw-accent-line);
+  border-radius:var(--aw-radius-pill);
+  background:var(--aw-accent-soft);
+  color:var(--aw-accent);
+  font-size:var(--aw-text-xs); font-weight:600; white-space:nowrap;
+}
 .settle {
   padding:.25rem .625rem; border:1px solid var(--aw-border-strong); border-radius:var(--aw-radius-control);
   background:var(--aw-panel); color:var(--aw-ink-soft);

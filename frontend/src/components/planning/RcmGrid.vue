@@ -27,6 +27,8 @@ const props = defineProps<{
   selectedId?: string | null
   /** RCM row id → when its working paper was generated; absent rows have none. */
   papers?: Record<string, string>
+  /** Optional business-cycle step sequence; when given, groups follow cycle order. */
+  cycleOrder?: string[]
 }>()
 const emit = defineEmits<{ open: [RcmRow]; paper: [RcmRow] }>()
 
@@ -57,7 +59,16 @@ const groups = computed(() => {
     if (bucket) bucket.push(row)
     else byProcess.set(key, [row])
   }
-  return [...byProcess].map(([process, rows]) => ({
+  const entries = [...byProcess]
+  if (props.cycleOrder?.length) {
+    const order = new Map(props.cycleOrder.map((name, idx) => [name, idx]))
+    entries.sort((a, b) => {
+      const ia = order.has(a[0]) ? order.get(a[0])! : Number.MAX_SAFE_INTEGER
+      const ib = order.has(b[0]) ? order.get(b[0])! : Number.MAX_SAFE_INTEGER
+      return ia - ib
+    })
+  }
+  return entries.map(([process, rows]) => ({
     process,
     rows,
     // The sentence the group header carries: how much, and what is wrong with
@@ -97,6 +108,24 @@ function paperTitle(row: RcmRow) {
 }
 /** The `RCM-` prefix is on every row, so it identifies nothing. */
 function shortId(row: RcmRow) { return row.id.replace(/^RCM-/, '') }
+function firstPolicyPage(row: RcmRow): number | null {
+  const hit = (row.criteria_refs ?? []).find(ref => typeof ref.page === 'number' && ref.page > 0)
+  return hit?.page ?? null
+}
+function testKinds(row: RcmRow): { data: number; doc: number } {
+  const rollups = row.execution_rollup?.test_rollups ?? []
+  if (rollups.length) {
+    return {
+      data: rollups.filter(r => r.kind === 'datatest').length,
+      doc: rollups.filter(r => r.kind === 'doctest').length,
+    }
+  }
+  const refs = row.test_refs ?? []
+  return {
+    data: refs.filter(r => r.startsWith('datatest:')).length,
+    doc: refs.filter(r => r.startsWith('doctest:')).length,
+  }
+}
 </script>
 
 <template>
@@ -134,13 +163,27 @@ function shortId(row: RcmRow) { return row.id.replace(/^RCM-/, '') }
           @keydown.space.self.prevent="emit('open', row)"
         >
           <span class="identity">
-            <span class="row-id">{{ shortId(row) }}</span>
+            <span class="id-line">
+              <span class="row-id">{{ shortId(row) }}</span>
+              <i
+                v-if="row.created_by === 'agent' && row.review_status !== 'reviewed'"
+                class="ai-spark aw-icon aw-icon-sparkles"
+                aria-hidden="true"
+                title="AI drafted · awaiting sign-off"
+              />
+            </span>
             <span class="rating" :data-rating="row.risk_rating">
               <span class="rating-dot" />{{ row.risk_rating }}
             </span>
           </span>
 
-          <span class="statement">{{ row.risk }}</span>
+          <span class="statement-cell">
+            <span class="statement">{{ row.risk }}</span>
+            <span v-if="row.criteria_refs?.length" class="policy-ref">
+              <i class="aw-icon aw-icon-book-open" aria-hidden="true" />
+              Policy cited<template v-if="firstPolicyPage(row)"> · p.{{ firstPolicyPage(row) }}</template>
+            </span>
+          </span>
 
           <span v-if="controlOf(row)" class="control">{{ controlOf(row) }}</span>
           <span v-else class="no-control">
@@ -148,9 +191,15 @@ function shortId(row: RcmRow) { return row.id.replace(/^RCM-/, '') }
           </span>
 
           <span class="tests aw-figure">
-            {{ plural(testCount(row), 'test') }} ·
-            <b v-if="exceptions(row)" class="exceptions">{{ exceptions(row) }} exc</b>
-            <template v-else>0 exc</template>
+            <span class="tests-line">
+              {{ plural(testCount(row), 'test') }} ·
+              <b v-if="exceptions(row)" class="exceptions">{{ exceptions(row) }} exc</b>
+              <template v-else>0 exc</template>
+            </span>
+            <span v-if="testKinds(row).data || testKinds(row).doc" class="test-kinds">
+              <span v-if="testKinds(row).data" class="kind-badge data">Data {{ testKinds(row).data }}</span>
+              <span v-if="testKinds(row).doc" class="kind-badge doc">Doc {{ testKinds(row).doc }}</span>
+            </span>
           </span>
 
           <span>
@@ -244,7 +293,9 @@ function shortId(row: RcmRow) { return row.id.replace(/^RCM-/, '') }
 .row.selected { background: var(--aw-teal-soft); }
 
 .identity { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.id-line { display: inline-flex; align-items: center; gap: .3rem; }
 .row-id { color: var(--aw-ink-strong); font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 600; }
+.ai-spark { color: var(--aw-accent); font-size: var(--aw-text-2xs); flex: none; }
 .rating { display: inline-flex; align-items: center; gap: .3125rem; font-size: var(--aw-text-xs); font-weight: 600; text-transform: capitalize; }
 .rating-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--aw-muted); }
 .rating[data-rating='critical'] { color: var(--aw-danger-ink); }
@@ -258,20 +309,38 @@ function shortId(row: RcmRow) { return row.id.replace(/^RCM-/, '') }
 
 /* Two lines, clamped: one row with a six-line risk statement must not set the
    height of every row in the matrix. The whole text is in the drawer. */
+.statement-cell { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
 .statement, .control {
   display: -webkit-box; overflow: hidden;
   font-size: var(--aw-text-base); line-height: 1.4;
   -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .statement { color: var(--aw-ink); }
+.policy-ref {
+  display: inline-flex; align-items: center; gap: .25rem; align-self: flex-start;
+  padding: .03rem .4rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-canvas);
+  color: var(--aw-muted);
+  font-size: var(--aw-text-2xs); font-weight: 600;
+}
+.policy-ref .aw-icon { font-size: var(--aw-text-2xs); color: var(--aw-teal); }
 .control { color: var(--aw-ink-soft); }
 .no-control { display: inline-flex; align-items: center; gap: .375rem; color: var(--aw-warn-ink); font-size: var(--aw-text-base); font-style: italic; }
 .no-control .aw-icon { font-size: var(--aw-text-xs); }
 
-/* One line: "2 tests · 0 exc" wrapping made a row half a line taller than the
-   ones around it, which is the raggedness the fixed clamps above exist to
-   prevent. */
-.tests { color: var(--aw-ink-soft); font-size: var(--aw-text-sm); white-space: nowrap; }
+.tests { display: flex; flex-direction: column; gap: .2rem; color: var(--aw-ink-soft); font-size: var(--aw-text-sm); white-space: nowrap; }
+.tests-line { white-space: nowrap; }
+.test-kinds { display: inline-flex; align-items: center; gap: .25rem; flex-wrap: wrap; }
+.kind-badge {
+  display: inline-flex; align-items: center;
+  padding: .02rem .35rem;
+  border-radius: var(--aw-radius-pill);
+  font-size: var(--aw-text-2xs); font-weight: 600;
+}
+.kind-badge.data { background: var(--aw-teal-soft); color: var(--aw-teal-strong); border: 1px solid var(--aw-teal-line); }
+.kind-badge.doc { background: var(--aw-accent-soft); color: var(--aw-accent); border: 1px solid var(--aw-accent-line); }
 .exceptions { color: var(--aw-danger); font-weight: 600; }
 
 .pill {

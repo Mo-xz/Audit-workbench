@@ -79,7 +79,7 @@ from .workspaces import Workspace
 # run reads "0 scheduled tests" and "no new drafts", where a figure read from
 # the workspace stays 22 rows, 54 tests, 30 findings.
 #
-# `live_headline` takes the projection's status and headline as well, for a
+# `live_status` takes the projection's status as well, for a
 # stage whose status is decided by the artifact alone — an incomplete matrix, a
 # row no test covers — rather than by how one run's units settled. Read from the
 # milestone instead, the status is a photograph: the row stayed amber after the
@@ -159,7 +159,7 @@ _SPINE: dict[str, dict[str, Any]] = {
         "label": "Audit planning memorandum", "destination": "apm",
         "unit": "", "count": None,
         "headline": "Draft the audit planning memorandum",
-        "prompt": "Draft the APM.", "live_body": True, "live_headline": True,
+        "prompt": "Draft the APM.", "live_body": True, "live_status": True,
     },
     "planning.cycle_ready": {
         "label": "Cycle design", "destination": "cycle",
@@ -171,7 +171,7 @@ _SPINE: dict[str, dict[str, Any]] = {
         "label": "Risk and control matrix", "destination": "rcm",
         "unit": "row", "count": "rcm",
         "headline": "Build the risk and control matrix",
-        "prompt": "Generate the RCM.", "live_body": True, "live_headline": True,
+        "prompt": "Generate the RCM.", "live_body": True, "live_status": True,
     },
     # Two registers, one programme. The row is sized by both — `tests` is the
     # data and document registers added together — so a single door to one of
@@ -183,7 +183,7 @@ _SPINE: dict[str, dict[str, Any]] = {
         "unit": "test", "count": "tests",
         "headline": "Specify the tests each control needs",
         "prompt": "Draft the tests the RCM rows still need.",
-        "live_body": True, "live_headline": True,
+        "live_body": True, "live_status": True,
         "links": (
             {"label": "Data tests", "destination": "data-tests", "count": "data_tests"},
             {"label": "Document tests", "destination": "doc-tests", "count": "document_tests"},
@@ -209,18 +209,12 @@ _SPINE: dict[str, dict[str, Any]] = {
     # kept for is on this row now: "Document tests 5/8" says the same thing
     # about the same register, in the place the button that runs them lives.
     # Its runs are read onto this row, not lost — see `_FILED_UNDER`.
-    # Live, headline included, and not from its projection. The milestone counts
-    # the units one run scheduled, so it was left a photograph — and the
-    # photograph kept saying "2 tests need you", with both tests named and an
-    # attention mark, after one had been replaced and the other answered. The
-    # body is read from the test register instead (`_fieldwork_body`), and with
-    # it the headline and status, since those are the part that went stale.
     "fieldwork.executed": {
         "label": "Fieldwork results", "destination": "",
         "unit": "", "count": None,
         "headline": "Run the tests against the data and documents",
         "prompt": "Run the tests.",
-        "live_body": True, "live_headline": True,
+        "live_body": True, "live_status": True,
         "links": (
             {
                 "label": "Data tests", "destination": "data-tests",
@@ -240,7 +234,7 @@ _SPINE: dict[str, dict[str, Any]] = {
         # Live status too: milestones filed before the projection stopped
         # calling exceptions an issue still say `completed_with_issues`, and
         # that photograph kept the row amber over a satisfied roll-up.
-        "live_body": True, "live_headline": True,
+        "live_body": True, "live_status": True,
     },
     # The last of fieldwork: a paper documents what a row's tests found and
     # what was concluded, so the fieldwork is not closed until each row has
@@ -388,9 +382,6 @@ def _milestone_rows(run: dict) -> list[dict]:
         rows.append({
             "milestone": milestone,
             "run_id": str(run.get("id") or ""),
-            "run_status": str(run.get("status") or ""),
-            "chat_id": str(run.get("chat_id") or "") or None,
-            "objective": str((run.get("route") or {}).get("objective") or "").strip(),
             "at": settled_at,
             "elapsed_ms": elapsed,
         })
@@ -398,56 +389,14 @@ def _milestone_rows(run: dict) -> list[dict]:
     return rows
 
 
-def _history(capability: str, rows: list[dict]) -> dict:
-    """What the runs behind one stage recorded, collapsed into one block.
-
-    Layered onto a row that already stands without it. Cost, attempts, the
-    milestone's own narrative and provenance are the things a run uniquely
-    owns — none of them is derivable from the workspace — so they are carried
-    here and are simply absent on a stage no run ever filed.
-
-    The narrative comes from the latest attempt because that is the state the
-    engagement is actually in. The cost is the sum of every attempt, because
-    three tries at the RCM cost what three tries cost.
-    """
-    rows = sorted(rows, key=lambda row: str(row["at"] or ""))
-    latest = rows[-1]
-    milestone = latest["milestone"]
-
-    measured = [row["elapsed_ms"] for row in rows if row["elapsed_ms"] is not None]
+def _latest_milestone(rows: list[dict]) -> dict:
+    """The minimal state a concise ledger row reads from a stage's latest run."""
+    ordered = sorted(rows, key=lambda row: str(row["at"] or ""))
+    milestone = ordered[-1]["milestone"]
     return {
-        "id": f"{capability}:{milestone.get('id') or latest['run_id']}",
-        "capability": capability,
-        "at": latest["at"],
-        "first_at": rows[0]["at"],
         "status": str(milestone.get("status") or ""),
-        "headline": str(milestone.get("headline") or ""),
         "summary": str(milestone.get("summary") or ""),
-        "metrics": list(milestone.get("metrics") or []),
-        "highlights": list(milestone.get("highlights") or []),
-        # Absent on every stage whose result is not a distribution, and on
-        # milestones filed before the channel existed.
         "stats": list(milestone.get("stats") or []),
-        "objective": latest["objective"],
-        "run_id": latest["run_id"],
-        "chat_id": latest["chat_id"],
-        # Every run that contributed, newest last, so a reader can open the
-        # attempts a collapsed row is standing in for.
-        "attempts": [
-            {
-                "run_id": row["run_id"],
-                "run_status": row["run_status"],
-                "at": row["at"],
-                "elapsed_ms": row["elapsed_ms"],
-            }
-            for row in rows
-        ],
-        "elapsed_ms": sum(measured) if measured else None,
-        # A cancelled or failed run's wall clock counts however long it sat
-        # waiting for a person, so those attempts are not timed. When this is
-        # short of `attempts`, the elapsed figure covers only part of the work
-        # and a reader who is being sold time saved needs to know which part.
-        "measured_attempts": len(measured),
     }
 
 
@@ -839,31 +788,14 @@ def _live_bodies(workspace: Workspace) -> dict[str, dict]:
     return _once("live_bodies", read)
 
 
-_FIELDWORK_OWED = (
-    ("blocked", "Blocked on evidence."),
-    ("review", "Needs auditor review before it can run."),
-    ("pending", "Has not run yet."),
-)
-
-
 def _fieldwork_body(workspace: Workspace) -> dict:
-    """Fieldwork as the test register stands, not as the last run left it.
+    """Fieldwork status and summary as the test register stands."""
 
-    The milestone projection cannot be re-run for this: it counts the units a
-    run scheduled, and with no run it reports "0 scheduled tests". The register
-    can answer instead, through the same classification readiness uses.
-    """
-
-    from .agent.audit_execution import HIGHLIGHT_LIMIT
     from .agent.capabilities.fieldwork import execution_state
 
     state = execution_state(workspace, {}, _document_test_index(workspace))
     total = sum(len(tests) for tests in state.values())
-    owed = [
-        (test, default)
-        for key, default in _FIELDWORK_OWED
-        for test in state[key]
-    ]
+    owed = any(state[key] for key in ("blocked", "review", "pending"))
     done = len(state["done"])
     summary = f"{done} of {counted(total, 'test')} {verb(total, 'has', 'have')} a result."
     if owed:
@@ -878,31 +810,12 @@ def _fieldwork_body(workspace: Workspace) -> dict:
         ) + "."
     return {
         "status": "completed_with_issues" if owed else "completed",
-        "headline": (
-            f"Fieldwork — {counted(len(owed), 'test')} {verb(len(owed))} you"
-            if owed else "Fieldwork complete"
-        ),
         "summary": summary,
-        "highlights": [
-            {
-                "severity": "warning",
-                "label": str(test.get("title") or test["test_id"]),
-                "detail": str(
-                    next(iter(test.get("execution_issues") or []), "") or default
-                ),
-                "artifact_ref": f"{test['kind']}:{test['test_id']}",
-            }
-            for test, default in owed
-        ][:HIGHLIGHT_LIMIT],
     }
 
 
 def _findings_body(workspace: Workspace) -> dict:
-    """The findings register as it stands, sized the way `_counts` sizes it.
-
-    A sentence and nothing to read out: the register is one click away, and
-    naming its most severe findings here drew them as flags on the row.
-    """
+    """The findings register as it stands, sized the way `_counts` sizes it."""
     reportable = [
         item for item in workspace.findings
         if not finding_consolidation.is_absorbed(item)
@@ -923,7 +836,6 @@ def _findings_body(workspace: Workspace) -> dict:
             f"{counted(len(reportable), 'finding')} in the register"
             + (f": {distribution}." if distribution else ".")
         ),
-        "highlights": [],
     }
 
 
@@ -1284,28 +1196,14 @@ def _stages(
                     if key not in ("state", "reasons", "blocking_on")
                 },
             },
-            # What this stage amounts to now. The severity tally in particular
-            # is read at a glance and was the most misleading thing on the row:
-            # a matrix rated "22 high" when it holds five.
-            # A live empty list is an answer — nothing to read out now — and
-            # must not fall through to the photograph's rows, which is how two
-            # settled tests kept being named under a complete stage.
+            "status": str(
+                (body.get("status") if body and spec.get("live_status") else "")
+                or past.get("status")
+                or ""
+            ),
             "summary": str(body.get("summary") or past.get("summary") or ""),
             "stats": list(body["stats"] if "stats" in body else past.get("stats") or []),
-            "highlights": list(
-                body["highlights"] if "highlights" in body else past.get("highlights") or []
-            ),
-            "live_body": bool(body),
-            # The headline and status as the workspace stands, where the spine
-            # says the milestone's own are a photograph that goes stale. Null
-            # everywhere else: the run's headline is still its own account.
-            "current": (
-                {"status": str(body.get("status") or ""),
-                 "headline": str(body.get("headline") or "")}
-                if body and spec.get("live_headline") else None
-            ),
             "open_points": points.get(capability, []),
-            "history": history.get(capability),
         })
     rows.sort(key=lambda row: row["order"])
 
@@ -1343,13 +1241,10 @@ def _stages(
             "links": [],
             "filed": None,
             "readiness": {"state": "", "reasons": [], "details": {}},
+            "status": str(filed.get("status") or ""),
             "summary": str(filed.get("summary") or ""),
             "stats": list(filed.get("stats") or []),
-            "highlights": list(filed.get("highlights") or []),
-            "live_body": False,
-            "current": None,
             "open_points": points.get(capability, []),
-            "history": filed,
         })
     return rows
 
@@ -1552,8 +1447,8 @@ def record(workspace: Workspace) -> dict:
                 by_capability.setdefault(capability, []).append(row)
                 contributing.add(row["run_id"])
 
-        history = {
-            capability: _history(capability, rows)
+        latest_by_capability = {
+            capability: _latest_milestone(rows)
             for capability, rows in by_capability.items()
         }
         points = _open_points(workspace)
@@ -1561,7 +1456,7 @@ def record(workspace: Workspace) -> dict:
         for point in points:
             by_capability_point.setdefault(point["capability"], []).append(point)
 
-        stages = _stages(workspace, counts, history, by_capability_point)
+        stages = _stages(workspace, counts, latest_by_capability, by_capability_point)
         # Every debt now has a row to sit on: the stage that owes it is drawn
         # whether or not it ever filed. `orphaned_points` existed because a debt
         # could outlive the only row that would have carried it.
@@ -1576,9 +1471,17 @@ def record(workspace: Workspace) -> dict:
             else None
         )
 
-        settled = [stage["history"] for stage in stages if stage["history"]]
-        measured = [item["elapsed_ms"] for item in settled if item["elapsed_ms"] is not None]
-        timeline = sorted(str(item["at"] or "") for item in settled)
+        drawn_capabilities = {stage["capability"] for stage in stages}
+        settled_rows = [
+            row
+            for capability, rows in by_capability.items()
+            if capability in drawn_capabilities
+            for row in rows
+        ]
+        measured = [
+            row["elapsed_ms"] for row in settled_rows if row["elapsed_ms"] is not None
+        ]
+        timeline = sorted(str(row["at"] or "") for row in settled_rows if row.get("at"))
         # The sections the view draws, in plan order, and only the ones this
         # engagement actually has stages for. The frontend groups by this list
         # rather than by a copy of the titles, so a phase renamed or reordered
@@ -1604,9 +1507,9 @@ def record(workspace: Workspace) -> dict:
                 # A run that committed nothing filed nothing; saying so is more
                 # honest than a record that silently drops a third of the history.
                 "runs_that_filed": len(contributing),
-                "attempts": sum(len(item["attempts"]) for item in settled),
+                "attempts": len(settled_rows),
                 "elapsed_ms": sum(measured) if measured else None,
-                "first_at": min((str(item["first_at"] or "") for item in settled), default=None) or None,
+                "first_at": timeline[0] if timeline else None,
                 "last_at": timeline[-1] if timeline else None,
             },
             # The stage states above are the last stored answer and a newer

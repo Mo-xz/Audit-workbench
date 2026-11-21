@@ -181,7 +181,8 @@ def test_a_work_product_survives_the_loss_of_the_run_that_filed_it(stub_store):
 
     assert rows["planning.rcm_ready"]["held"] is True
     assert rows["planning.rcm_ready"]["filed"]["count"] == 22
-    assert rows["planning.rcm_ready"]["history"] is None
+    assert rows["planning.rcm_ready"]["status"] == ""
+    assert "history" not in rows["planning.rcm_ready"]
     assert rows["findings.drafted"]["held"] is True
     assert result["totals"]["runs"] == 0
     # What the engagement holds, which is no longer what a run was seen to file.
@@ -398,14 +399,13 @@ def test_repeated_attempts_at_one_capability_collapse_to_one_row(stub_store):
                          headline="Finding drafts prepared")]),
     ])
     result = engagement_record.record(_Workspace(findings=[{}] * 35))
-    history = _rows(result)["findings.drafted"]["history"]
+    row = _rows(result)["findings.drafted"]
 
-    assert len(history["attempts"]) == 3
-    # The latest attempt is the state the engagement is in.
-    assert history["headline"] == "Finding drafts prepared"
-    assert history["at"] == "2026-08-15T12:10:00+00:00"
-    assert history["first_at"] == "2026-08-14T11:05:00+00:00"
+    assert row["status"] == "completed"
+    assert "history" not in row
     assert result["totals"]["attempts"] == 3
+    assert result["totals"]["first_at"] == "2026-08-14T11:05:00+00:00"
+    assert result["totals"]["last_at"] == "2026-08-15T12:10:00+00:00"
 
 
 def test_cost_is_every_attempt_summed_not_only_the_one_that_stuck(stub_store):
@@ -416,11 +416,10 @@ def test_cost_is_every_attempt_summed_not_only_the_one_that_stuck(stub_store):
         _run("r2", "2026-08-14T08:00:00+00:00",
              [_milestone("planning.rcm_ready", "2026-08-14T08:03:00+00:00")]),
     ])
-    history = _rows(engagement_record.record(_Workspace(rcm=[{}] * 27)))[
-        "planning.rcm_ready"]["history"]
+    result = engagement_record.record(_Workspace(rcm=[{}] * 27))
 
-    assert history["elapsed_ms"] == (2 + 3) * 60_000
-    assert history["measured_attempts"] == 2
+    assert result["totals"]["elapsed_ms"] == (2 + 3) * 60_000
+    assert result["totals"]["attempts"] == 2
 
 
 def test_a_stage_is_timed_from_the_previous_stage_in_its_own_run(stub_store):
@@ -431,10 +430,10 @@ def test_a_stage_is_timed_from_the_previous_stage_in_its_own_run(stub_store):
             _milestone("results.rolled_up", "2026-08-14T20:05:00+00:00"),
         ]),
     ])
-    rows = _rows(engagement_record.record(_Workspace()))
+    result = engagement_record.record(_Workspace())
 
-    assert rows["fieldwork.executed"]["history"]["elapsed_ms"] == 5 * 60_000
-    assert rows["results.rolled_up"]["history"]["elapsed_ms"] == 0
+    assert result["totals"]["elapsed_ms"] == 5 * 60_000
+    assert result["totals"]["attempts"] == 2
 
 
 def test_a_cancelled_run_is_counted_as_an_attempt_but_never_timed(stub_store):
@@ -446,12 +445,10 @@ def test_a_cancelled_run_is_counted_as_an_attempt_but_never_timed(stub_store):
         _run("r2", "2026-08-14T20:00:00+00:00",
              [_milestone("fieldwork.executed", "2026-08-14T20:01:00+00:00")]),
     ])
-    history = _rows(engagement_record.record(_Workspace()))["fieldwork.executed"]["history"]
+    result = engagement_record.record(_Workspace())
 
-    assert len(history["attempts"]) == 2
-    assert history["measured_attempts"] == 1
-    assert history["elapsed_ms"] == 60_000
-    assert [a["run_status"] for a in history["attempts"]] == ["cancelled", "completed"]
+    assert result["totals"]["attempts"] == 2
+    assert result["totals"]["elapsed_ms"] == 60_000
 
 
 def test_history_with_no_timed_attempt_states_no_duration_rather_than_zero(stub_store):
@@ -460,10 +457,10 @@ def test_history_with_no_timed_attempt_states_no_duration_rather_than_zero(stub_
              [_milestone("fieldwork.executed", "2026-08-14T19:36:20+00:00")],
              status="failed"),
     ])
-    history = _rows(engagement_record.record(_Workspace()))["fieldwork.executed"]["history"]
+    result = engagement_record.record(_Workspace())
 
-    assert history["elapsed_ms"] is None
-    assert history["measured_attempts"] == 0
+    assert result["totals"]["elapsed_ms"] is None
+    assert result["totals"]["attempts"] == 1
 
 
 def test_an_unparseable_timestamp_leaves_the_duration_unstated(stub_store):
@@ -471,9 +468,9 @@ def test_an_unparseable_timestamp_leaves_the_duration_unstated(stub_store):
         _run("r1", "not a date",
              [_milestone("planning.apm_ready", "2026-08-14T06:01:00+00:00")]),
     ])
-    history = _rows(engagement_record.record(_Workspace()))["planning.apm_ready"]["history"]
+    result = engagement_record.record(_Workspace())
 
-    assert history["elapsed_ms"] is None
+    assert result["totals"]["elapsed_ms"] is None
 
 
 def test_runs_that_filed_nothing_are_counted_but_leave_no_history(stub_store):
@@ -488,7 +485,7 @@ def test_runs_that_filed_nothing_are_counted_but_leave_no_history(stub_store):
 
     assert result["totals"]["runs"] == 3
     assert result["totals"]["runs_that_filed"] == 1
-    assert sum(1 for stage in result["stages"] if stage["history"]) == 1
+    assert result["totals"]["attempts"] == 1
 
 
 def test_a_run_that_cannot_be_loaded_is_skipped_rather_than_failing_the_record(
@@ -504,7 +501,8 @@ def test_a_run_that_cannot_be_loaded_is_skipped_rather_than_failing_the_record(
     )
     result = engagement_record.record(_Workspace(apm="# APM"))
 
-    assert _rows(result)["planning.apm_ready"]["history"] is not None
+    assert result["totals"]["runs_that_filed"] == 1
+    assert _rows(result)["planning.apm_ready"]["status"] == "completed"
 
 
 def test_a_stage_the_record_has_not_learned_yet_shows_its_own_briefing(stub_store):
@@ -516,14 +514,15 @@ def test_a_stage_the_record_has_not_learned_yet_shows_its_own_briefing(stub_stor
     """
     stub_store([
         _run("r1", "2026-08-14T06:00:00+00:00",
-             [_milestone("tests.cycle_ruleset_proposed", "2026-08-14T06:01:00+00:00",
-                         headline="A stage the record has never seen")]),
+             [dict(_milestone("tests.cycle_ruleset_proposed", "2026-08-14T06:01:00+00:00"),
+                   summary="A stage the record has never seen")]),
     ])
     row = _rows(engagement_record.record(_Workspace()))["tests.cycle_ruleset_proposed"]
 
     assert "tests.cycle_ruleset_proposed" not in engagement_record._SPINE
     assert row["filed"] is None
-    assert row["history"]["headline"] == "A stage the record has never seen"
+    assert row["status"] == "completed"
+    assert row["summary"] == "A stage the record has never seen"
     # Present and empty, not absent. A reader of one row is entitled to the
     # shape of every other: the record view reads `stage.links.length` and
     # `stage.action` unguarded because the contract says they are always there.
@@ -561,9 +560,11 @@ def test_every_stage_row_carries_the_same_keys(stub_store):
     rows = _rows(engagement_record.record(_Workspace()))
     spine = set(rows["sources.imported"])
     assert set(rows["tests.cycle_ruleset_proposed"]) == spine
+    for removed in ("history", "highlights", "current", "live_body"):
+        assert removed not in spine
 
     for capability, row in rows.items():
-        for key in ("stats", "highlights", "links", "open_points"):
+        for key in ("stats", "links", "open_points"):
             assert isinstance(row[key], list), f"{capability}.{key}"
         assert isinstance(row["action"], str), f"{capability}.action"
 
@@ -586,17 +587,16 @@ def test_a_document_test_run_is_read_onto_the_row_that_carries_the_register(
              [_milestone("doc_tests.executed", "2026-08-15T06:01:00+00:00",
                          headline="Document testing complete")]),
     ])
-    rows = _rows(engagement_record.record(_Workspace(
+    result = engagement_record.record(_Workspace(
         apm="# APM", rcm=[{"id": "R1"}],
         doc_tests=[{"id": "D1", "status": "completed"}],
-    )))
+    ))
+    rows = _rows(result)
 
     assert "doc_tests.executed" not in rows
     assert all(not row.startswith("doc_tests.") for row in rows)
-    history = rows["fieldwork.executed"]["history"]
-    # Both attempts, and the account of whichever settled last.
-    assert [attempt["run_id"] for attempt in history["attempts"]] == ["r1", "r2"]
-    assert history["headline"] == "Document testing complete"
+    assert result["totals"]["attempts"] == 2
+    assert result["totals"]["runs_that_filed"] == 2
 
 
 def test_preparing_document_tests_is_read_onto_the_test_programme(stub_store):
@@ -608,12 +608,14 @@ def test_preparing_document_tests_is_read_onto_the_test_programme(stub_store):
              [_milestone("doc_tests.definitions_ready", "2026-08-14T06:01:00+00:00",
                          headline="Document tests prepared")]),
     ])
-    rows = _rows(engagement_record.record(_Workspace(
+    result = engagement_record.record(_Workspace(
         apm="# APM", rcm=[{"id": "R1"}], doc_tests=[{"id": "D1", "status": "ready"}],
-    )))
+    ))
+    rows = _rows(result)
 
     assert "doc_tests.definitions_ready" not in rows
-    assert rows["tests.specified"]["history"]["headline"] == "Document tests prepared"
+    assert rows["tests.specified"]["status"] == "completed"
+    assert result["totals"]["runs_that_filed"] == 1
 
 
 def test_a_stage_the_workflows_no_longer_declare_is_not_drawn(stub_store):
@@ -652,8 +654,6 @@ def test_counts_come_from_the_workspace_not_the_last_milestones_delta(stub_store
     assert row["filed"]["count"] == 35
     assert row["filed"]["unit"] == "finding"
     assert row["filed"]["destination"] == "findings"
-    # The milestone's own delta is still carried, just not used as the size.
-    assert row["history"]["metrics"] == [{"label": "Drafts prepared", "value": 1}]
 
 
 def test_a_work_product_with_no_meaningful_size_states_none(stub_store):
@@ -938,9 +938,6 @@ def test_a_rows_body_describes_the_workspace_not_the_run_that_wrote_it(
     assert row["filed"]["count"] == 22
     assert row["summary"] == "22 rows covering 4 processes."
     assert row["stats"] == [{"label": "high", "value": 5, "severity": "warning"}]
-    assert row["live_body"] is True
-    # What the run said it did is not lost, it is just not the row's claim.
-    assert row["history"]["summary"] == "25 rows covering 4 processes."
 
 
 def test_a_status_decided_by_the_artifact_is_read_live(stub_store, monkeypatch):
@@ -955,20 +952,19 @@ def test_a_status_decided_by_the_artifact_is_read_live(stub_store, monkeypatch):
     monkeypatch.setattr(
         engagement_record, "_live_bodies",
         lambda workspace: {"planning.rcm_ready": {
-            "status": "completed", "headline": "Risk and control matrix ready",
-            "summary": "2 rows covering 1 process.", "highlights": [],
+            "status": "completed",
+            "summary": "2 rows covering 1 process.",
         }},
     )
     row = _rows(engagement_record.record(_Workspace(rcm=[{}] * 2)))["planning.rcm_ready"]
 
-    assert row["current"] == {"status": "completed", "headline": "Risk and control matrix ready"}
-    assert row["history"]["status"] == "completed_with_issues"
+    assert row["status"] == "completed"
 
 
 def test_fieldwork_is_described_from_the_register_not_from_its_projection(stub_store):
     """Fieldwork's projection counts the units a run scheduled, so re-running it
     with no run to describe reports "0 scheduled tests". The register answers
-    instead, and what the run said is kept as its own account."""
+    instead."""
     stub_store([
         _run("r1", "2026-08-14T20:00:00+00:00",
              [dict(_milestone("fieldwork.executed", "2026-08-14T20:05:00+00:00"),
@@ -980,26 +976,17 @@ def test_fieldwork_is_described_from_the_register_not_from_its_projection(stub_s
     )
     row = _rows(engagement_record.record(workspace))["fieldwork.executed"]
 
-    assert row["live_body"] is True
     assert row["summary"] == "1 of 1 test has a result."
-    assert row["current"] == {"status": "completed", "headline": "Fieldwork complete"}
-    assert row["history"]["summary"] == "Completed 77 of 81 scheduled tests."
+    assert row["status"] == "completed"
 
 
-def test_tests_settled_since_the_run_are_no_longer_named_as_needing_you(stub_store):
+def test_tests_settled_since_the_run_are_no_longer_marked_with_issues(stub_store):
     """The run blocked on two tests; one was replaced and the other answered.
-    Its milestone kept saying "2 tests need you" and naming both, under an
-    attention mark, while readiness said fieldwork was settled."""
-    stale = dict(
-        _milestone(
-            "fieldwork.executed", "2026-08-14T20:05:00+00:00",
-            status="completed_with_issues",
-            headline="Fieldwork ran — 2 tests need you",
-        ),
-        highlights=[
-            {"severity": "warning", "label": "Vendor master status",
-             "detail": "{'document_type': 'purchase_order'}", "artifact_ref": "doctest:D1"},
-        ],
+    Its milestone kept carrying completed_with_issues while the register is settled."""
+    stale = _milestone(
+        "fieldwork.executed", "2026-08-14T20:05:00+00:00",
+        status="completed_with_issues",
+        headline="Fieldwork ran — 2 tests need you",
     )
     stub_store([_run("r1", "2026-08-14T20:00:00+00:00", [stale])])
     workspace = _Workspace(
@@ -1008,23 +995,15 @@ def test_tests_settled_since_the_run_are_no_longer_named_as_needing_you(stub_sto
     )
     row = _rows(engagement_record.record(workspace))["fieldwork.executed"]
 
-    assert row["highlights"] == []
-    assert row["current"]["status"] == "completed"
-    assert row["history"]["headline"] == "Fieldwork ran — 2 tests need you"
+    assert row["status"] == "completed"
+    assert "highlights" not in row
 
 
 def test_the_findings_register_is_described_from_the_register(stub_store):
-    """The projection reads only the findings one run drafted, and names the
-    most severe of them as highlights graded `error` — which the row chipped as
-    flags. Procurement drew "Prepared 4 drafts" and "3 flags" over a register
-    of ten with nothing wrong in it."""
-    stale = dict(
-        _milestone("findings.drafted", "2026-08-14T21:05:00+00:00",
-                   summary="Prepared 4 evidence-linked finding drafts (3 critical, 1 high)."),
-        highlights=[
-            {"severity": "error", "label": "Payments to inactive vendors",
-             "detail": "", "artifact_ref": "finding:F-1"},
-        ],
+    """The summary reads directly from the reportable findings register."""
+    stale = _milestone(
+        "findings.drafted", "2026-08-14T21:05:00+00:00",
+        summary="Prepared 4 evidence-linked finding drafts (3 critical, 1 high).",
     )
     stub_store([_run("r1", "2026-08-14T21:00:00+00:00", [stale])])
     workspace = _Workspace(findings=[
@@ -1036,14 +1015,12 @@ def test_the_findings_register_is_described_from_the_register(stub_store):
     ])
     row = _rows(engagement_record.record(workspace))["findings.drafted"]
 
-    assert row["live_body"] is True
     assert row["summary"] == "3 findings in the register: 2 critical, 1 medium."
-    assert row["highlights"] == []
     assert row["open_points"] == []
-    assert row["history"]["summary"].startswith("Prepared 4")
+    assert "highlights" not in row
 
 
-def test_a_test_still_owed_is_named_with_why(stub_store):
+def test_a_test_still_owed_marks_fieldwork_with_issues(stub_store):
     stub_store([])
     workspace = _Workspace(
         apm="# APM",
@@ -1055,15 +1032,8 @@ def test_a_test_still_owed_is_named_with_why(stub_store):
     )
     row = _rows(engagement_record.record(workspace))["fieldwork.executed"]
 
-    assert row["current"] == {
-        "status": "completed_with_issues",
-        "headline": "Fieldwork — 1 test needs you",
-    }
+    assert row["status"] == "completed_with_issues"
     assert row["summary"] == "1 of 2 tests have a result. 1 test not run yet."
-    assert [(item["label"], item["detail"], item["artifact_ref"])
-            for item in row["highlights"]] == [
-        ("Vendor status", "Has not run yet.", "datatest:T2"),
-    ]
 
 
 def test_an_owed_stage_describes_nothing_rather_than_describing_zero(stub_store):
@@ -1719,7 +1689,7 @@ def test_a_debt_always_has_a_row_to_sit_on(stub_store):
     result = engagement_record.record(_Workspace(rcm=[{"id": "R1", "review_status": "draft"}]))
     row = _rows(result)["planning.rcm_ready"]
 
-    assert row["history"] is None
+    assert row["status"] == ""
     assert [point["key"] for point in row["open_points"]] == ["draft_rcm"]
     # The absolute claim is only made where it holds.
     assert row["open_points"][0]["message"] == (

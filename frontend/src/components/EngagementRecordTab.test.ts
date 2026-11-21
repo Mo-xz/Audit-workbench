@@ -4,7 +4,7 @@ import { reactive, ref } from 'vue'
 
 import EngagementRecordTab from './EngagementRecordTab.vue'
 import type {
-  EngagementOpenPoint, EngagementRecordPayload, EngagementStage, EngagementStageHistory,
+  EngagementOpenPoint, EngagementRecordPayload, EngagementStage,
 } from '../types'
 
 /**
@@ -71,34 +71,7 @@ vi.mock('../composables/useAssistantChat', () => ({
   useAssistantChat: () => ({ send: (...args: unknown[]) => send(...args) }),
 }))
 
-function history(
-  overrides: Partial<EngagementStageHistory> = {},
-): EngagementStageHistory {
-  return {
-    id: 'findings.drafted:m1',
-    capability: 'findings.drafted',
-    at: '2026-08-15T12:10:00+00:00',
-    first_at: '2026-08-14T11:05:00+00:00',
-    status: 'completed',
-    headline: 'Finding drafts prepared',
-    summary: 'Prepared 1 evidence-linked finding draft (1 critical).',
-    metrics: [],
-    highlights: [],
-    objective: 'Draft findings.',
-    run_id: 'r3',
-    chat_id: 'chat_r3',
-    attempts: [
-      { run_id: 'r1', run_status: 'completed', at: '2026-08-14T11:05:00+00:00', elapsed_ms: 60_000 },
-      { run_id: 'r3', run_status: 'completed', at: '2026-08-15T12:10:00+00:00', elapsed_ms: 60_000 },
-    ],
-    elapsed_ms: 120_000,
-    measured_attempts: 2,
-    stats: [],
-    ...overrides,
-  }
-}
-
-/** A stage the engagement holds, with the runs that filed it behind it. */
+/** A stage the engagement holds. */
 function filed(overrides: Partial<EngagementStage> = {}): EngagementStage {
   return {
     id: 'stage:findings.drafted',
@@ -120,13 +93,10 @@ function filed(overrides: Partial<EngagementStage> = {}): EngagementStage {
       count: 35,
     },
     readiness: { state: 'satisfied', reasons: [], details: {} },
+    status: 'completed',
     summary: 'Prepared 1 evidence-linked finding draft (1 critical).',
     stats: [],
-    highlights: [],
-    live_body: true,
-    current: null,
     open_points: [],
-    history: history(),
     ...overrides,
   }
 }
@@ -151,13 +121,10 @@ function owed(overrides: Partial<EngagementStage> = {}): EngagementStage {
     links: [],
     filed: { label: 'Report', destination: 'report', unit: '', unit_plural: '', count: null },
     readiness: { state: 'missing', reasons: [], details: {} },
+    status: '',
     summary: '',
     stats: [],
-    highlights: [],
-    live_body: false,
-    current: null,
     open_points: [],
-    history: null,
     ...overrides,
   }
 }
@@ -233,25 +200,8 @@ function spine(held: string[]): EngagementStage[] {
         ? { prompt: `Run ${capability}.`, outcomes: [capability], alternates: [] }
         : null,
       filed: { label, destination: '', unit: '', unit_plural: '', count: null },
-      history: isHeld ? history({ elapsed_ms: 60_000 }) : null,
+      status: isHeld ? 'completed' : '',
     })
-  })
-}
-
-/** A `Storage` for an environment whose window does not provide one. */
-function installLocalStorage() {
-  if (window.localStorage) return
-  const store = new Map<string, string>()
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => void store.set(key, String(value)),
-      removeItem: (key: string) => void store.delete(key),
-      clear: () => store.clear(),
-      key: (index: number) => [...store.keys()][index] ?? null,
-      get length() { return store.size },
-    },
   })
 }
 
@@ -280,7 +230,6 @@ function payload(
   stages: EngagementStage[],
   extra: Partial<EngagementRecordPayload> = {},
 ): EngagementRecordPayload {
-  const settled = stages.filter(item => item.history)
   const present = new Set(stages.map(item => item.phase))
   return {
     stages,
@@ -296,7 +245,7 @@ function payload(
       work_products: stages.filter(item => item.held).length,
       runs: 32,
       runs_that_filed: 19,
-      attempts: settled.reduce((sum, item) => sum + (item.history?.attempts.length ?? 0), 0),
+      attempts: stages.filter(item => item.held).length * 2,
       elapsed_ms: 3_345_210,
       first_at: '2026-08-13T19:22:24+00:00',
       last_at: '2026-08-15T12:10:00+00:00',
@@ -354,31 +303,12 @@ async function render(
   return wrapper
 }
 
-/**
- * A milestone's body is folded away by default, so anything below the headline
- * has to be asked for. Rows are shut on mount; this is how a test reads one.
- */
-async function openRow(wrapper: Awaited<ReturnType<typeof render>>, index = 0) {
-  await wrapper.findAll('.row .chev')[index].trigger('click')
-  return wrapper
-}
-
 describe('EngagementRecordTab', () => {
   beforeEach(() => {
     get.mockReset(); push.mockReset(); send.mockReset()
     openPanel.mockReset(); agentInit.mockReset()
     agentActive.value = false
     agentState.run = null
-    // Density is a stored preference, so one test choosing Full would otherwise
-    // decide what every test after it renders.
-    //
-    // This environment's jsdom global carries no `localStorage`, so the store
-    // is supplied here. Without it the component still renders — every access
-    // it makes is guarded, because a private-mode browser throws on exactly
-    // this — but the two tests about remembering a density would be asserting
-    // against a preference that was never stored.
-    installLocalStorage()
-    window.localStorage.clear()
   })
 
   it('shows the stored states while a refresh is drawn, then asks again', async () => {
@@ -413,52 +343,21 @@ describe('EngagementRecordTab', () => {
     expect(wrapper.html()).not.toContain('analysiss')
   })
 
-  it('renders sub-minute work in seconds rather than rounding it to 0m', async () => {
-    // Fieldwork and the roll-up settle the instant their run starts, because
-    // the tests they gather already ran. "0m" reads as a broken clock.
-    const wrapper = await render([filed({ history: history({ elapsed_ms: 382, measured_attempts: 1 }) })])
-    await openRow(wrapper)
+  it('renders sub-minute assistant time in seconds rather than rounding it to 0m', async () => {
+    const wrapper = await render([filed()], {
+      totals: {
+        work_products: 1,
+        runs: 1,
+        runs_that_filed: 1,
+        attempts: 1,
+        elapsed_ms: 382,
+        first_at: null,
+        last_at: null,
+      },
+    })
 
-    expect(wrapper.text()).toContain('<1s')
-    expect(wrapper.text()).not.toContain('0m')
-  })
-
-  it('leaves the duration unstated when nothing about the work was timed', async () => {
-    const wrapper = await render([filed({ history: history({ elapsed_ms: null, measured_attempts: 0 }) })])
-    await openRow(wrapper)
-
-    expect(wrapper.find('.stamp').text()).toContain('—')
-  })
-
-  it('says how many attempts an opened row stands for, and how many were timed', async () => {
-    const wrapper = await render([filed({ history: history({ attempts: [
-        { run_id: 'r1', run_status: 'cancelled', at: '2026-08-14T19:36:20+00:00', elapsed_ms: null },
-        { run_id: 'r2', run_status: 'failed', at: '2026-08-14T20:02:09+00:00', elapsed_ms: null },
-        { run_id: 'r3', run_status: 'completed', at: '2026-08-14T20:05:00+00:00', elapsed_ms: 382 },
-      ],
-      measured_attempts: 1 }) })])
-
-    // How the work was produced is not what the row holds, so the shut row
-    // carries no chip for it; opened, it says what the count is made of.
-    expect(wrapper.find('.sig').exists()).toBe(false)
-    await openRow(wrapper)
-    expect(wrapper.text()).toContain('3 attempts · 2 not timed')
-  })
-
-  it('stays silent about attempts when a work product took only one', async () => {
-    const wrapper = await render([filed({ history: history({ attempts: [{ run_id: 'r1', run_status: 'completed', at: '2026-08-14T11:05:00+00:00', elapsed_ms: 60_000 }],
-      measured_attempts: 1 }) })])
-
-    expect(wrapper.text()).not.toContain('attempt')
-  })
-
-  it('reveals the individual runs behind a collapsed row on request', async () => {
-    const wrapper = await render([filed()])
-
-    await openRow(wrapper)
-    expect(wrapper.find('.attempts').exists()).toBe(false)
-    await wrapper.find('.tries').trigger('click')
-    expect(wrapper.findAll('.attempts li')).toHaveLength(2)
+    expect(wrapper.find('.summary').text()).toContain('<1s of assistant time')
+    expect(wrapper.find('.summary').text()).not.toContain('0m')
   })
 
   it('links the filed artifact to the surface that opens it', async () => {
@@ -481,14 +380,11 @@ describe('EngagementRecordTab', () => {
     const wrapper = await render([filed({
       filed: null,
       headline: '',
-      history: history({ headline: 'A stage the record has never seen' }),
     })])
 
     expect(wrapper.find('.none').exists()).toBe(true)
     // With nothing to count, the row's line is the opening of its summary.
     expect(wrapper.find('.meta .text').text()).toBe('Prepared 1 evidence-linked finding draft (1 critical)')
-    await openRow(wrapper)
-    expect(wrapper.find('.sen').text()).toBe('A stage the record has never seen')
   })
 
   it('omits the size of a work product that has no meaningful count', async () => {
@@ -511,12 +407,11 @@ describe('EngagementRecordTab', () => {
     // The run folder is gone, or the stage never narrated. The register is
     // still there, and the row still has to say so. This is the reading that
     // rendered an empty record over eleven real work products.
-    const wrapper = await render([filed({ history: null })])
+    const wrapper = await render([filed({ status: '' })])
 
     expect(wrapper.find('.empty').exists()).toBe(false)
     expect(wrapper.find('.row').text()).toContain('Findings register')
     expect(wrapper.find('.ct').text()).toBe('35')
-    expect(wrapper.find('.stamp').exists()).toBe(false)
   })
 
   it('states what a held stage still owes without contradicting its count', async () => {
@@ -531,10 +426,6 @@ describe('EngagementRecordTab', () => {
     })])
     expect(wrapper.find('.ct').text()).toBe('35')
     expect(wrapper.find('.meta .owed').text()).toBe('2 eligible observations need finding drafts')
-
-    // Said once: opening the row does not repeat the warning on its face.
-    await openRow(wrapper)
-    expect(wrapper.find('.left').exists()).toBe(false)
   })
 
   // ---------------------------------------------------------------- forward
@@ -703,7 +594,7 @@ describe('EngagementRecordTab', () => {
     // it had no row. Every stage is drawn now, so the debt sits where it came
     // from even when nothing filed that stage.
     const wrapper = await render([filed({
-      history: null,
+      status: '',
       open_points: [point({ key: 'draft_rcm', message: '27 of 27 rows are still marked draft.' })],
     })])
 
@@ -717,119 +608,27 @@ describe('EngagementRecordTab', () => {
     expect(wrapper.find('.nowline').exists()).toBe(false)
   })
 
-  /* --- how much of a row is drawn ----------------------------------------- */
+  /* --- concise row layout ------------------------------------------------- */
 
-  it('states the headline of a shut row and folds the rest of it away', async () => {
+  it('renders rows concisely with no density toggle or expandable details', async () => {
     const wrapper = await render([filed({
       summary: 'Prepared 1 evidence-linked finding draft (1 critical).',
-      highlights: [{ severity: 'warning', label: 'Invoices over PO', detail: '3 of 52 rows', artifact_ref: '' }],
+      open_points: [point()],
     })])
 
-    // The shut row states what it holds; what the run said of it is behind
-    // the fold with the rest.
-    expect(wrapper.find('.row').classes()).toContain('shut')
+    expect(wrapper.find('.dens').exists()).toBe(false)
+    expect(wrapper.find('.chev').exists()).toBe(false)
+    expect(wrapper.find('.sig').exists()).toBe(false)
     expect(wrapper.find('.meta').text()).toBe('35 findings')
-    expect(wrapper.find('.sen').exists()).toBe(false)
-    expect(wrapper.find('.dsc').exists()).toBe(false)
-    expect(wrapper.find('.hl').exists()).toBe(false)
-
-    await openRow(wrapper)
-    expect(wrapper.find('.row').classes()).not.toContain('shut')
-    expect(wrapper.find('.sen').text()).toBe('Finding drafts prepared')
-    expect(wrapper.find('.dsc').text()).toContain('evidence-linked finding draft')
-    expect(wrapper.findAll('.hl li')).toHaveLength(1)
-  })
-
-  it('draws what the stage amounts to now over what its last run reported', async () => {
-    // The run blocked on two tests and said so; both were settled afterwards,
-    // and the row kept the run's headline and its attention mark.
-    const wrapper = await render([filed({
-      history: history({ status: 'completed_with_issues', headline: 'Fieldwork ran — 2 tests need you' }),
-      current: { status: 'completed', headline: 'Fieldwork complete' },
-    })])
-
-    expect(wrapper.find('.row .ui-state').attributes('data-state')).toBe('done')
-    await openRow(wrapper)
-    expect(wrapper.find('.sen').text()).toBe('Fieldwork complete')
-  })
-
-  it('counts the flags the fold hides, keeping the colour of the worst', async () => {
-    const wrapper = await render([filed({
-      highlights: [
-        { severity: 'warning', label: 'One', detail: 'a', artifact_ref: '' },
-        { severity: 'error', label: 'Two', detail: 'b', artifact_ref: '' },
-        { severity: 'info', label: 'Context', detail: 'c', artifact_ref: '' },
-      ],
-    })])
-
-    const chips = wrapper.findAll('.sig')
-    // Context is not a flag; of the two that are, the pair reads at its worst.
-    expect(chips).toHaveLength(1)
-    expect(chips[0].text()).toBe('2flags')
-    expect(chips[0].attributes('data-severity')).toBe('error')
-  })
-
-  it('chips nothing on a distribution, whose highlights are its tiers read out', async () => {
-    const wrapper = await render([filed({
-      stats: [
-        { label: 'critical', value: 0, severity: 'error' },
-        { label: 'high', value: 5, severity: 'warning' },
-      ],
-      highlights: [{ severity: 'warning', label: 'A high row', detail: 'a', artifact_ref: '' }],
-    })])
-
-    expect(wrapper.find('.sig').exists()).toBe(false)
-  })
-
-  it('leaves a row with nothing hidden unchipped, so a chip means something', async () => {
-    const wrapper = await render([filed({
-      stats: [],
-      highlights: [],
-      history: history({
-        attempts: [{ run_id: 'r1', run_status: 'completed', at: '2026-08-14T11:05:00+00:00', elapsed_ms: 60_000 }],
-        measured_attempts: 1,
-      }),
-    })])
-
-    expect(wrapper.find('.sig').exists()).toBe(false)
-  })
-
-  it('keeps an open point on the row even while the row is shut', async () => {
-    // The debt is the one thing on a row that asks something of the reader.
-    // Folding it away would be folding away the point of the page.
-    const wrapper = await render([filed({ open_points: [point()] })])
-
-    expect(wrapper.find('.row').classes()).toContain('shut')
     expect(wrapper.find('.open').text()).toContain('41 of 60 conclusions')
   })
 
-  it('opens a row clicked anywhere, and leaves the label to its own link', async () => {
-    const wrapper = await render([filed()])
+  it('marks a held row as attention when its status carries issues, and done when settled', async () => {
+    const settled = await render([filed({ status: 'completed' })])
+    expect(settled.find('.row .ui-state').attributes('data-state')).toBe('done')
 
-    await wrapper.find('.row .name').trigger('click')
-    expect(wrapper.find('.dsc').exists()).toBe(true)
-
-    // The label navigates; it must not also shut the row under the reader. The
-    // stubbed link is a real anchor, so the click is defused before jsdom
-    // tries to follow it — the row handler still sees it bubble.
-    const label = wrapper.find('.row .wp')
-    label.element.addEventListener('click', event => event.preventDefault())
-    await label.trigger('click')
-    expect(wrapper.find('.dsc').exists()).toBe(true)
-  })
-
-  it('opens every row under Full, and remembers that for the next visit', async () => {
-    const wrapper = await render([filed(), filed({ id: 'report:m2', capability: 'report.working_draft' })])
-
-    await wrapper.findAll('.dens button')[1].trigger('click')
-    expect(wrapper.findAll('.row.shut')).toHaveLength(0)
-    expect(wrapper.findAll('.dsc')).toHaveLength(2)
-    // Nothing is shut, so nothing offers to be opened.
-    expect(wrapper.find('.chev').exists()).toBe(false)
-    expect(window.localStorage.getItem('aw.record.density')).toBe('full')
-
-    const second = await render([filed()])
-    expect(second.find('.row.shut').exists()).toBe(false)
+    const withIssues = await render([filed({ status: 'completed_with_issues' })])
+    expect(withIssues.find('.row .ui-state').attributes('data-state')).toBe('attention')
   })
 
   /* --- a stage whose result is a distribution ----------------------------- */
@@ -849,8 +648,6 @@ describe('EngagementRecordTab', () => {
     const figures = wrapper.findAll('.meta .count b.n')
     expect(figures[0].attributes('data-severity')).toBe('error')
     expect(figures[2].attributes('data-severity')).toBeUndefined()
-    await openRow(wrapper)
-    expect(wrapper.find('.tally').exists()).toBe(false)
   })
 
   it('leaves a severe tier at zero uncoloured, since nothing is wrong there', async () => {
@@ -1165,15 +962,6 @@ describe('EngagementRecordTab', () => {
 
   /* --- what one row says --------------------------------------------------- */
 
-  it('states when a stage settled and what it took, in one reading', async () => {
-    // Two columns of the old ledger — a Time that read "—" on nine rows of
-    // twelve, and a Took beside it — are one phrase beside the row instead.
-    const wrapper = await render([filed()])
-    await openRow(wrapper)
-
-    expect(wrapper.find('.stamp').text()).toContain('· 2m')
-  })
-
   it('draws the Run button only on the lead stage, never on the ones behind it', async () => {
     // A tail of buttons is a menu, not a next step. The stage behind the lead
     // is reachable — its phase is open and it is one row down — but it is not
@@ -1184,8 +972,7 @@ describe('EngagementRecordTab', () => {
       owed({ id: 'b', capability: 'planning.rcm_ready' }),
     ])
 
-    const actions = wrapper.findAll('.act button').filter(button => !button.classes('chev'))
-    expect(actions).toHaveLength(1)
+    expect(wrapper.findAll('.act button')).toHaveLength(1)
     expect(wrapper.findAll('.row')[1].find('.act button').exists()).toBe(true)
     expect(wrapper.findAll('.row')[2].find('.act button').exists()).toBe(false)
   })

@@ -2645,37 +2645,6 @@ export interface AgentMilestone {
  * spent waiting for a person, so they are deliberately not timed.
  */
 /**
- * What the runs behind one stage recorded. Absent on a stage no run ever filed,
- * which is a normal state and not an error: cost, attempts and the milestone's
- * own narrative are the things only a run knows, and the row stands without
- * them.
- */
-export interface EngagementStageHistory {
-  id: string
-  capability: string
-  at: string | null
-  first_at: string | null
-  status: string
-  headline: string
-  summary: string
-  metrics: AgentMilestone['metrics']
-  highlights: AgentMilestone['highlights']
-  /** Empty on every stage whose result is not a distribution. */
-  stats: NonNullable<AgentMilestone['stats']>
-  objective: string
-  run_id: string
-  chat_id: string | null
-  attempts: Array<{
-    run_id: string
-    run_status: string
-    at: string | null
-    elapsed_ms: number | null
-  }>
-  elapsed_ms: number | null
-  measured_attempts: number
-}
-
-/**
  * One work product, drawn whether or not a run ever filed it.
  *
  * The row exists because the audit graph says the stage exists, so the ledger
@@ -2764,28 +2733,14 @@ export interface EngagementStage {
     reasons: string[]
     details: Record<string, unknown>
   }
-  /**
-   * What the stage amounts to now: the sentence, the severity distribution,
-   * and the rows worth reading out. Recomputed from the workspace where the
-   * projection describes state rather than a run's delta — a matrix that filed
-   * "22 high" over 25 rows and now holds 22 rows rated 5 high says so — and
-   * falling back to what the run reported otherwise.
-   */
+  /** Live or latest settled status of this stage (e.g. `completed`, `completed_with_issues`). */
+  status: string
+  /** Concise summary sentence, shown on rows with no count to display. */
   summary: string
   /** Empty on every stage whose result is not a distribution. */
   stats: NonNullable<AgentMilestone['stats']>
-  highlights: AgentMilestone['highlights']
-  /** Whether the body above was recomputed, or is the milestone's own. */
-  live_body: boolean
-  /**
-   * The headline and status as the workspace stands, on a stage whose
-   * milestone ones go stale — fieldwork's "2 tests need you" outlived both
-   * tests. Null wherever the run's own headline is still its account.
-   */
-  current: { status: string; headline: string } | null
   /** What this stage left open behind it. */
   open_points: EngagementOpenPoint[]
-  history: EngagementStageHistory | null
 }
 
 /**

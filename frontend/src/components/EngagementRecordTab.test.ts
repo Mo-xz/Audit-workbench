@@ -1193,4 +1193,61 @@ describe('EngagementRecordTab', () => {
       .toEqual(['done', 'later', 'later', 'current'])
     expect(wrapper.findAll('.phase')[3].find('.pnow').text()).toBe('In progress')
   })
+
+  /* --- executive posture, provenance & phase navigation ------------------- */
+
+  it('summarises evidence, controls, findings and human sign-off gates in the posture strip', async () => {
+    const wrapper = await render(
+      [
+        filed({
+          capability: 'findings.drafted',
+          summary: '10 findings in the register: 2 critical, 5 high, 3 medium.',
+        }),
+      ],
+      {
+        counts: {
+          documents: 84,
+          document_analyses: 84,
+          tables: 25,
+          analyses: 24,
+          rcm: 22,
+          tests: 54,
+          data_test_results: 32,
+          document_test_results: 22,
+          findings: 10,
+        },
+        open_points: [point(), point({ key: 'draft_rcm', destination: 'rcm' })],
+      },
+    )
+
+    const cards = wrapper.findAll('.posture .pcard')
+    expect(cards).toHaveLength(4)
+    expect(cards[0].text()).toContain('84 docs · 25 tables')
+    expect(cards[0].text()).toContain('84 analysed · 24 data checks')
+    expect(cards[1].text()).toContain('22 controls')
+    expect(cards[1].text()).toContain('54 of 54 tests executed')
+    expect(cards[2].text()).toContain('10 findings')
+    expect(cards[2].text()).toContain('2 critical, 5 high, 3 medium')
+    expect(cards[3].text()).toContain('2 review gates')
+    expect(cards[3].attributes('data-tone')).toBe('warn')
+  })
+
+  it('labels each stage with its execution provenance (Auditor, AI, AI + Local Polars, Deterministic)', async () => {
+    const wrapper = await render(spine(PLAN.map(([, capability]) => capability)))
+    const modes = wrapper.findAll('.row .mode').map(el => `${el.attributes('data-kind')}:${el.text().trim()}`)
+
+    expect(modes).toContain('human:Auditor')
+    expect(modes).toContain('hybrid:AI + Local Polars')
+    expect(modes).toContain('ai:AI')
+    expect(modes).toContain('deterministic:Deterministic')
+  })
+
+  it('opens a folded phase when its column in the progress bar is clicked', async () => {
+    const wrapper = await render(spine(HELD), {}, { phases: 'as drawn' })
+    expect(wrapper.findAll('.phead')[2].attributes('aria-expanded')).toBe('false')
+
+    await wrapper.findAll('.progress .pcol')[2].trigger('click')
+
+    expect(wrapper.findAll('.phead')[2].attributes('aria-expanded')).toBe('true')
+  })
 })

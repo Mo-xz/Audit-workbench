@@ -717,15 +717,147 @@ function facts(stage: EngagementStage): Fact[] {
 function phaseNames(group: PhaseGroup): string {
   return group.stages.map(stage => stage.filed?.label || stage.capability).join(' · ')
 }
+
+/* --- executive posture & execution provenance ------------------------------ */
+
+type ExecutionKind = 'human' | 'ai' | 'hybrid' | 'deterministic'
+
+interface ExecutionMode {
+  kind: ExecutionKind
+  icon: string
+  label: string
+}
+
+const EXECUTION_MODES: Record<string, ExecutionMode> = {
+  'sources.imported': { kind: 'human', icon: 'aw-icon-user-pen', label: 'Auditor' },
+  'documents.analysis_generated': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'analysis.executed': { kind: 'hybrid', icon: 'aw-icon-shield', label: 'AI + Local Polars' },
+  'planning.apm_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'planning.cycle_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'planning.rcm_ready': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'tests.specified': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'fieldwork.executed': { kind: 'hybrid', icon: 'aw-icon-shield', label: 'AI + Local Polars' },
+  'results.rolled_up': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
+  'working_papers.generated': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
+  'findings.drafted': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'report.working_draft': { kind: 'ai', icon: 'aw-icon-sparkles', label: 'AI' },
+  'audit.verified': { kind: 'deterministic', icon: 'aw-icon-check', label: 'Deterministic' },
+}
+
+function executionMode(capability: string): ExecutionMode | null {
+  return EXECUTION_MODES[capability] ?? null
+}
+
+const openPoints = computed(() => data.value?.open_points ?? [])
+
+interface PostureCard {
+  key: string
+  label: string
+  value: string
+  detail: string
+  icon: string
+  tone: 'neutral' | 'teal' | 'warn' | 'danger' | 'ok'
+  to: WorkspaceDestination | null
+}
+
+const posture = computed<PostureCard[]>(() => {
+  const counts = data.value?.counts ?? {}
+  const docs = counts.documents ?? 0
+  const tables = counts.tables ?? 0
+  const docAnalyses = counts.document_analyses ?? 0
+  const analyses = counts.analyses ?? 0
+  const rcm = counts.rcm ?? 0
+  const tests = counts.tests ?? 0
+  const results = (counts.data_test_results ?? 0) + (counts.document_test_results ?? 0)
+  const findingsCount = counts.findings ?? 0
+  const heldCount = stages.value.filter(stage => stage.held).length
+
+  const evidenceParts: string[] = []
+  if (docs) evidenceParts.push(plural(docs, 'doc'))
+  if (tables) evidenceParts.push(plural(tables, 'table'))
+  const evidenceDetailParts: string[] = []
+  if (docAnalyses) evidenceDetailParts.push(`${docAnalyses} analysed`)
+  if (analyses) evidenceDetailParts.push(plural(analyses, 'data check'))
+
+  const findingsStage = stages.value.find(stage => stage.capability === 'findings.drafted')
+  const findingsDist = findingsStage?.summary.includes(': ')
+    ? findingsStage.summary.split(': ')[1].replace(/\.$/, '')
+    : ''
+  const hasCritical = /\bcritical\b/i.test(findingsDist)
+
+  const gates = openPoints.value.length
+
+  return [
+    {
+      key: 'evidence',
+      label: 'Evidence ingested',
+      value: evidenceParts.length ? evidenceParts.join(' · ') : 'No sources yet',
+      detail: evidenceDetailParts.length ? evidenceDetailParts.join(' · ') : 'Import audit files to start',
+      icon: 'aw-icon-folder-open',
+      tone: evidenceParts.length ? 'teal' : 'neutral',
+      to: 'documents',
+    },
+    {
+      key: 'controls',
+      label: 'Controls & fieldwork',
+      value: rcm ? plural(rcm, 'control') : 'Not planned yet',
+      detail: tests
+        ? `${results} of ${plural(tests, 'test')} executed`
+        : rcm ? 'Test programme pending' : 'Builds after planning',
+      icon: 'aw-icon-shield',
+      tone: rcm ? 'teal' : 'neutral',
+      to: 'rcm',
+    },
+    {
+      key: 'findings',
+      label: 'Findings',
+      value: findingsCount ? plural(findingsCount, 'finding') : 'None raised',
+      detail: findingsDist
+        || (findingsCount ? 'Drafted from fieldwork exceptions' : 'Pending fieldwork review'),
+      icon: 'aw-icon-flag',
+      tone: findingsCount ? (hasCritical ? 'danger' : 'warn') : 'neutral',
+      to: 'findings',
+    },
+    {
+      key: 'signoff',
+      label: 'Human sign-off',
+      value: gates
+        ? plural(gates, 'review gate')
+        : heldCount ? 'All signed off' : 'Awaiting work',
+      detail: gates
+        ? 'Auditor judgment required'
+        : heldCount ? 'Ready for final sign-off' : 'Gates appear as AI drafts',
+      icon: gates ? 'aw-icon-user-pen' : heldCount ? 'aw-icon-circle-check' : 'aw-icon-user-pen',
+      tone: gates ? 'warn' : heldCount ? 'ok' : 'neutral',
+      to: gates ? destinationFor(openPoints.value[0].destination) : 'report',
+    },
+  ]
+})
+
+function jumpToPhase(phaseId: string) {
+  if (!openPhases.value.has(phaseId)) {
+    const next = new Set(openPhases.value)
+    next.add(phaseId)
+    openPhases.value = next
+  }
+  const el = document.querySelector(`[data-phase-section="${phaseId}"]`)
+  el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
 </script>
 
 <template>
   <div class="record">
-    <!-- A page title the size of a headline, above a ledger, competes with the
-         ledger and wins. The tab bar already says which surface this is, so
-         what is left is the controls and a label small enough to be one. -->
     <div class="bar">
-      <h2>Engagement record</h2>
+      <div class="bar-title">
+        <h2>Engagement record</h2>
+        <span class="gov-pill" aria-label="Operating model: AI-assisted, local Polars compute, human sign-off">
+          <span class="gov-seg" data-kind="ai"><i class="aw-icon aw-icon-sparkles" aria-hidden="true" />AI-assisted</span>
+          <span class="gov-dot" aria-hidden="true">·</span>
+          <span class="gov-seg" data-kind="local"><i class="aw-icon aw-icon-lock" aria-hidden="true" />Local Polars</span>
+          <span class="gov-dot" aria-hidden="true">·</span>
+          <span class="gov-seg" data-kind="human"><i class="aw-icon aw-icon-user-pen" aria-hidden="true" />Human sign-off</span>
+        </span>
+      </div>
       <span v-if="data?.refreshing" class="updating" role="status">
         <i class="aw-icon aw-icon-spin aw-icon-loader-circle" aria-hidden="true" />Updating status…
       </span>
@@ -764,11 +896,41 @@ function phaseNames(group: PhaseGroup): string {
     />
 
     <template v-else>
-      <!-- The whole plan at once, which is the one thing the phases cannot
-           show while the later ones are folded. -->
+      <!-- Executive audit posture: evidence ingested, controls tested, findings
+           raised, and remaining human sign-off gates — one click to each surface. -->
+      <section class="posture" aria-label="Engagement posture">
+        <component
+          :is="card.to ? RouterLink : 'div'"
+          v-for="card in posture"
+          :key="card.key"
+          :to="card.to ? nav.to(card.to) : undefined"
+          class="pcard"
+          :data-tone="card.tone"
+        >
+          <div class="pcard-top">
+            <span class="pcard-ico"><i :class="`aw-icon ${card.icon}`" aria-hidden="true" /></span>
+            <span class="pcard-lbl">{{ card.label }}</span>
+            <i v-if="card.to" class="aw-icon aw-icon-arrow-right pcard-go" aria-hidden="true" />
+          </div>
+          <strong class="pcard-val">{{ card.value }}</strong>
+          <span class="pcard-sub">{{ card.detail }}</span>
+        </component>
+      </section>
+
+      <!-- The whole plan at once, clickable to jump to any phase in the spine. -->
       <section class="progress" aria-label="Progress through the engagement">
-        <div v-for="phase in progress" :key="phase.id" class="pcol" :data-state="phase.state">
+        <div
+          v-for="(phase, idx) in progress"
+          :key="phase.id"
+          class="pcol"
+          :data-state="phase.state"
+          role="button"
+          tabindex="0"
+          @click="jumpToPhase(phase.id)"
+          @keydown.enter.space.prevent="jumpToPhase(phase.id)"
+        >
           <div class="phd">
+            <span class="pnum" aria-hidden="true">{{ idx + 1 }}</span>
             <span class="ptl">{{ phase.title }}</span>
             <span class="pss">{{ phase.status }}</span>
           </div>
@@ -817,21 +979,36 @@ function phaseNames(group: PhaseGroup): string {
         />
       </section>
 
-      <!-- One card per phase, in plan order. The three states are the whole
-           point: a phase that is done gets out of the way, the phase being
-           worked is open and says so, and the phases after it are drawn as
-           the plan they are rather than as nine rows of "not yet". -->
-      <!-- The spine: every phase in one card, in plan order. A phase header is
-           a ruled band inside it rather than a card of its own, so the record
-           reads as one file and the rows line up down its whole length. A
-           phase whose turn has not come folds to its header, which names the
-           work products it covers. -->
+      <!-- Human-in-the-loop review gate promoted above the spine so required
+           auditor sign-offs are immediately visible without scrolling. -->
+      <section v-if="next && next.kind === 'open_point'" class="brief" data-kind="open_point">
+        <span class="brief-pill">
+          <i class="aw-icon aw-icon-user-pen" aria-hidden="true" />Human sign-off
+        </span>
+        <div class="txt">
+          <strong>{{ next.message }}</strong>
+          <span v-if="openPoints.length > 1" class="gate-count">
+            +{{ openPoints.length - 1 }} more {{ openPoints.length - 1 === 1 ? 'gate' : 'gates' }}
+          </span>
+        </div>
+        <Button
+          :label="next.action"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="openPoint(next)"
+        />
+      </section>
+
+      <!-- The spine: every phase in plan order. A phase whose turn has not come
+           folds to its header, which names the work products it covers. -->
       <section class="spine" aria-label="The engagement file">
         <section
           v-for="(group, index) in groups"
           :key="group.id"
           class="phase"
           :data-state="group.state"
+          :data-phase-section="group.id"
         >
           <!-- The plan runs one phase after another, so the phases are
                numbered and joined: a rail that is teal through the work behind
@@ -919,6 +1096,15 @@ function phaseNames(group: PhaseGroup): string {
                 </span>
 
                 <span class="end">
+                  <span
+                    v-if="executionMode(stage.capability)"
+                    class="mode"
+                    :data-kind="executionMode(stage.capability)!.kind"
+                  >
+                    <i :class="`aw-icon ${executionMode(stage.capability)!.icon}`" aria-hidden="true" />
+                    {{ executionMode(stage.capability)!.label }}
+                  </span>
+
                   <span class="act">
                     <!-- Sources is the one stage the assistant cannot begin.
                          Bringing in the audit file is the auditor's own act, so
@@ -963,6 +1149,14 @@ function phaseNames(group: PhaseGroup): string {
                       :loading="starting === stage.capability"
                       @click="start(stage)"
                     />
+                    <RouterLink
+                      v-else-if="stage.held && destinationOf(stage)"
+                      :to="nav.to(destinationOf(stage)!)"
+                      class="row-open"
+                      :aria-label="`Open ${stage.filed?.label || stage.capability}`"
+                    >
+                      <i class="aw-icon aw-icon-arrow-right" aria-hidden="true" />
+                    </RouterLink>
                   </span>
                 </span>
 
@@ -1004,27 +1198,6 @@ function phaseNames(group: PhaseGroup): string {
         </section>
       </section>
 
-      <!-- What the whole engagement cost, as a footnote to the ledger it is a
-           footnote to. It answered no question anyone arrives with, and it was
-           the first thing on the page. -->
-      <!-- A review debt sits under the record, because it is a note about what
-           is on the screen and a note above the thing it annotates is a banner.
-           It stands whether or not a run is in flight: only a person can read
-           what the assistant decided, and a run does not do it for them. The
-           `stage` next step has no band any more — the phase being worked says
-           it, on its own header. -->
-      <section v-if="next && next.kind === 'open_point'" class="brief" data-kind="open_point">
-        <span class="mark"><i class="aw-icon aw-icon-circle-alert" /></span>
-        <div class="txt"><strong>{{ next.message }}</strong></div>
-        <Button
-          :label="next.action"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="openPoint(next)"
-        />
-      </section>
-
       <footer class="summary">
         <span>{{ totalLine }}</span>
         <span class="grow"></span>
@@ -1035,22 +1208,36 @@ function phaseNames(group: PhaseGroup): string {
 </template>
 
 <style scoped>
-.record { display: flex; flex-direction: column; gap: .75rem; min-height: 0; }
+.record { display: flex; flex-direction: column; gap: .875rem; min-height: 0; }
 .updating { display: inline-flex; align-items: center; gap: .35rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 .loading { display: grid; place-content: center; gap: .4rem; padding: 3rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 
 /* --- the toolbar --------------------------------------------------------- */
-.bar { display: flex; align-items: center; gap: .875rem; }
+.bar { display: flex; align-items: center; flex-wrap: wrap; gap: .625rem .875rem; }
+.bar-title { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; min-width: 0; }
 .bar h2 {
-  margin: 0; color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 600;
+  margin: 0; color: var(--aw-ink-strong); font-size: var(--aw-text-lg); font-weight: var(--aw-weight-title);
+  letter-spacing: -.01em;
 }
+.gov-pill {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .2rem .6rem;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel);
+  font-size: var(--aw-text-xs); font-weight: 600; color: var(--aw-ink-soft);
+  white-space: nowrap;
+}
+.gov-seg { display: inline-flex; align-items: center; gap: .25rem; }
+.gov-seg .aw-icon { font-size: var(--aw-text-xs); }
+.gov-seg[data-kind='ai'] { color: var(--aw-accent); }
+.gov-seg[data-kind='local'] { color: var(--aw-teal-strong); }
+.gov-seg[data-kind='human'] { color: var(--aw-ink); }
+.gov-dot { color: var(--aw-border-strong); }
 .grow { flex: 1; }
 
 .bar :deep(.refresh) { width: 30px; height: 30px; padding: 0; }
 
 /* --- the chain, which is a lens rather than a work product --------------- */
-/* Sized and weighted like the Refresh button beside it so the bar reads as one
-   row of controls, but drawn as a link because it navigates. */
 .chain {
   display: inline-flex; align-items: center; gap: .4rem;
   padding: .3rem .7rem;
@@ -1063,55 +1250,141 @@ function phaseNames(group: PhaseGroup): string {
 .chain:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 2px; }
 .chain .aw-icon { font-size: var(--aw-text-sm); }
 
+/* --- executive audit posture (4 KPI tiles) ------------------------------- */
+.posture {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .625rem;
+}
+.pcard {
+  display: flex; flex-direction: column; gap: .2rem; min-width: 0;
+  padding: .75rem .875rem;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
+  background: var(--aw-panel);
+  color: inherit; text-decoration: none;
+  transition: border-color .14s ease, background-color .14s ease;
+}
+a.pcard:hover { border-color: var(--aw-teal-line); background: color-mix(in srgb, var(--aw-teal-soft) 30%, var(--aw-panel)); }
+a.pcard:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 2px; }
+
+.pcard[data-tone='warn'] { border-color: var(--aw-warn-line); background: color-mix(in srgb, var(--aw-warn-soft) 65%, var(--aw-panel)); }
+a.pcard[data-tone='warn']:hover { border-color: var(--aw-warn); background: var(--aw-warn-soft); }
+.pcard[data-tone='danger'] { border-color: var(--aw-danger-line); background: color-mix(in srgb, var(--aw-danger-soft) 45%, var(--aw-panel)); }
+a.pcard[data-tone='danger']:hover { border-color: var(--aw-danger); background: var(--aw-danger-soft); }
+.pcard[data-tone='ok'] { border-color: var(--aw-ok-line); background: color-mix(in srgb, var(--aw-ok-soft) 55%, var(--aw-panel)); }
+a.pcard[data-tone='ok']:hover { border-color: var(--aw-ok); background: var(--aw-ok-soft); }
+
+.pcard-top { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.pcard-ico {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 1.375rem; height: 1.375rem; border-radius: 6px;
+  background: var(--aw-raised); color: var(--aw-muted);
+  font-size: var(--aw-text-xs);
+}
+.pcard[data-tone='teal'] .pcard-ico { background: var(--aw-teal-soft); color: var(--aw-teal-strong); }
+.pcard[data-tone='warn'] .pcard-ico { background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
+.pcard[data-tone='danger'] .pcard-ico { background: var(--aw-danger-soft); color: var(--aw-danger-ink); }
+.pcard[data-tone='ok'] .pcard-ico { background: var(--aw-ok-soft); color: var(--aw-ok); }
+
+.pcard-lbl {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--aw-muted); font-size: var(--aw-text-xs); font-weight: 600;
+}
+.pcard-go {
+  flex: 0 0 auto; color: var(--aw-border-strong); font-size: var(--aw-text-xs);
+  transition: transform .14s ease, color .14s ease;
+}
+a.pcard:hover .pcard-go { color: var(--aw-teal-strong); transform: translateX(2px); }
+a.pcard[data-tone='warn']:hover .pcard-go { color: var(--aw-warn-ink); }
+a.pcard[data-tone='danger']:hover .pcard-go { color: var(--aw-danger-ink); }
+a.pcard[data-tone='ok']:hover .pcard-go { color: var(--aw-ok); }
+
+.pcard-val {
+  margin-top: .125rem;
+  color: var(--aw-ink-strong); font-size: var(--aw-text-md); font-weight: 700;
+  font-variant-numeric: tabular-nums; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pcard[data-tone='warn'] .pcard-val { color: var(--aw-warn-ink); }
+.pcard[data-tone='danger'] .pcard-val { color: var(--aw-danger-ink); }
+.pcard[data-tone='ok'] .pcard-val { color: var(--aw-ok); }
+
+.pcard-sub {
+  color: var(--aw-ink-soft); font-size: var(--aw-text-xs); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* --- the whole plan, as one bar per phase -------------------------------- */
-/* One column per phase, ruled off from the next: the phase, how far through it
-   is in the words its header below uses, and the same fraction as a bar. */
 .progress {
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  padding: .875rem .25rem;
+  padding: .625rem .25rem;
   border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
   background: var(--aw-panel);
 }
-.pcol { display: grid; gap: .5rem; min-width: 0; padding: 0 .875rem; }
-.pcol + .pcol { border-left: 1px solid var(--aw-raised); }
-.phd { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; min-width: 0; }
+.pcol {
+  display: grid; gap: .45rem; min-width: 0; padding: .25rem .875rem;
+  border-radius: var(--aw-radius-control); cursor: pointer;
+  transition: background-color .14s ease;
+}
+.pcol:hover { background: color-mix(in srgb, var(--aw-raised) 65%, transparent); }
+.pcol:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: -2px; }
+.pcol + .pcol { border-left: 1px solid var(--aw-raised); border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.phd { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.pnum {
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: 1.15rem; height: 1.15rem; border-radius: 50%;
+  background: var(--aw-raised); color: var(--aw-muted);
+  font-family: var(--aw-font-mono); font-size: var(--aw-text-2xs); font-weight: 700;
+}
+.pcol[data-state='done'] .pnum { background: var(--aw-ok-soft); color: var(--aw-ok); }
+.pcol[data-state='current'] .pnum { background: var(--aw-teal-soft); color: var(--aw-teal-strong); }
+.pcol[data-state='live'] .pnum { background: var(--aw-info-soft); color: var(--aw-info); }
 .ptl {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--aw-ink-strong); font-size: var(--aw-text-sm); font-weight: 600;
 }
 .pcol[data-state='later'] .ptl { color: var(--aw-ink-soft); }
 .pss {
-  flex: 0 0 auto; color: var(--aw-muted); font-size: var(--aw-text-sm); white-space: nowrap;
+  flex: 0 0 auto; color: var(--aw-muted); font-size: var(--aw-text-xs); white-space: nowrap;
 }
 .pcol[data-state='done'] .pss { color: var(--aw-ok); font-weight: 600; }
 .pcol[data-state='current'] .pss {
   color: var(--aw-teal-strong); font-family: var(--aw-font-mono); font-variant-numeric: tabular-nums;
 }
 .pcol[data-state='live'] .pss { color: var(--aw-info); font-weight: 600; }
-.ptrack { display: block; height: 6px; border-radius: 3px; background: var(--aw-border); overflow: hidden; }
+.ptrack { display: block; height: 5px; border-radius: 3px; background: var(--aw-border); overflow: hidden; }
 .ptrack i { display: block; height: 100%; border-radius: inherit; background: var(--aw-teal); }
 .pcol[data-state='done'] .ptrack i { background: var(--aw-ok); }
 .pcol[data-state='live'] .ptrack i { background: var(--aw-info); }
+
 /* --- the two things that are news ---------------------------------------- */
-/* A run under way, and a review debt. Both sit above the phases, both are
-   drawn at the size of the rows they refer to rather than as a banner: what
-   the reader came for is the record, and these are one line each about it. */
 .brief {
   display: flex;
   align-items: center;
   gap: .75rem;
-  padding: .55rem .875rem;
+  padding: .6rem .875rem;
   border: 1px solid var(--aw-warn-line);
-  border-radius: var(--aw-radius-control);
+  border-radius: var(--aw-radius-surface);
   background: var(--aw-warn-soft);
 }
 .brief .mark { flex: 0 0 auto; display: grid; place-items: center; color: var(--aw-warn-ink); font-size: var(--aw-text-sm); }
-.brief .txt { flex: 1; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .4rem; }
-/* The bar takes the width the words do not need, which is what makes it read
-   as the run's own length rather than as another chip on the line. */
+.brief-pill {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: .3rem;
+  padding: .2rem .55rem; border-radius: var(--aw-radius-pill);
+  background: var(--aw-panel); border: 1px solid var(--aw-warn-line);
+  color: var(--aw-warn-ink); font-size: var(--aw-text-xs); font-weight: 700;
+  white-space: nowrap;
+}
+.brief-pill .aw-icon { font-size: var(--aw-text-xs); }
+.brief .txt { flex: 1; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .5rem; }
 .brief.stepped .txt { flex: 0 1 auto; }
 .brief strong { color: var(--aw-warn-ink); font-size: var(--aw-text-sm); font-weight: 600; line-height: 1.4; }
 .brief span { color: var(--aw-ink-soft); font-size: var(--aw-text-sm); }
+.gate-count {
+  padding: .05rem .45rem; border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-warn) 14%, transparent);
+  color: var(--aw-warn-ink); font-size: var(--aw-text-xs); font-weight: 600;
+}
 
 /* --- the run history, as a footnote -------------------------------------- */
 /* The strip at the top draws what the engagement holds. What is left down here
@@ -1206,10 +1479,13 @@ function phaseNames(group: PhaseGroup): string {
   min-height: 2.75rem;
   padding: .375rem 1rem;
   border-top: 1px solid var(--aw-border);
+  transition: background-color .12s ease;
 }
 .row:first-child { border-top: 0; }
+.row:hover { background: color-mix(in srgb, var(--aw-raised) 45%, transparent); }
 /* The lead stage is the one being asked for, so it is the one row tinted. */
 .row.lead { background: color-mix(in srgb, var(--aw-teal-soft) 60%, transparent); }
+.row.lead:hover { background: var(--aw-teal-soft); }
 
 /* The state of the stage, said once. The five settled states are
    `UiStateIcon`; a run in flight keeps a dot, because it is the one state that
@@ -1294,6 +1570,41 @@ a.door[data-kind='tool']:hover { color: var(--aw-teal-strong); }
 .end { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; }
 .act { display: flex; align-items: center; justify-content: flex-end; }
 
+/* Execution-mode provenance badge per stage: AI, AI + Local Polars,
+   Deterministic, or Auditor. */
+.mode {
+  display: inline-flex; align-items: center; gap: .25rem;
+  height: 1.35rem; padding: 0 .5rem;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-pill);
+  background: var(--aw-raised); color: var(--aw-muted);
+  font-size: var(--aw-text-2xs); font-weight: 600; white-space: nowrap;
+}
+.mode .aw-icon { font-size: var(--aw-text-2xs); }
+.mode[data-kind='ai'] {
+  border-color: var(--aw-accent-line); background: var(--aw-accent-soft); color: var(--aw-accent);
+}
+.mode[data-kind='hybrid'] {
+  border-color: var(--aw-teal-line); background: var(--aw-teal-soft); color: var(--aw-teal-strong);
+}
+.mode[data-kind='deterministic'] {
+  border-color: var(--aw-border); background: var(--aw-raised); color: var(--aw-ink-soft);
+}
+.mode[data-kind='human'] {
+  border-color: var(--aw-border-strong); background: var(--aw-panel); color: var(--aw-ink);
+}
+.row.ghost .mode { opacity: .65; }
+
+.row-open {
+  display: grid; place-items: center;
+  width: 1.6rem; height: 1.6rem; border-radius: var(--aw-radius-control);
+  color: var(--aw-muted); text-decoration: none;
+  transition: background-color .12s ease, color .12s ease, transform .12s ease;
+}
+.row-open .aw-icon { font-size: var(--aw-text-xs); }
+.row:hover .row-open { color: var(--aw-teal-strong); }
+.row-open:hover { background: var(--aw-teal-soft); color: var(--aw-teal-strong); transform: translateX(1px); }
+.row-open:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; }
+
 /* Importing more is always possible and never the next step, so it is a
    link-weight control rather than a second button on the screen. */
 .rowlink {
@@ -1370,8 +1681,10 @@ a.door[data-kind='tool']:hover { color: var(--aw-teal-strong); }
    thing to do about it: an action that scrolls away from the row it belongs
    to is one nobody takes. */
 @container (max-width: 44rem) {
-  .progress { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: .875rem; }
+  .posture { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .progress { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: .625rem; }
   .pcol:nth-child(odd) { border-left: 0; }
+  .mode { display: none; }
 
   .row { grid-template-columns: 1rem 1rem minmax(0, 1fr) auto; }
   .row .dot, .row .state { grid-column: 1; grid-row: 1; }

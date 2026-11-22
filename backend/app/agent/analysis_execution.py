@@ -38,6 +38,7 @@ from .capabilities.analysis import (
     unanswered_frames,
     frame_ref,
     pair_join,
+    reference_tables,
     resolve_table_scope,
 )
 from .capabilities import ANALYSIS_REGISTRY
@@ -1060,6 +1061,7 @@ class AnalysisWorkflowExecution(BaseRunner):
                     ],
                     instruction=workflow_scope(self.run).get("instruction"),
                     profile=data_map.profile_digest(self.ws, table_scope.tables),
+                    reference_tables=sorted(reference_tables(self.ws, table_scope.tables)),
                 ),
             )
 
@@ -1544,6 +1546,14 @@ class AnalysisWorkflowExecution(BaseRunner):
                 f"{output.get('characters', 0)} characters, "
                 f"{counted(output.get('cited', 0), 'result')} cited.",
             )
+            unrepaired = list(output.get("unrepaired") or [])
+            if unrepaired:
+                self.warn(
+                    "The memo was committed with "
+                    f"{counted(len(unrepaired), 'shape fault')} its repair did not "
+                    "correct: " + "; ".join(unrepaired[:3])
+                    + ("…" if len(unrepaired) > 3 else "")
+                )
             self.task_status(task, "completed")
             self.emit(
                 "workspace_changed",

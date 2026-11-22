@@ -50,6 +50,8 @@ Run it directly to score a workspace::
 
 from __future__ import annotations
 
+import re
+
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -190,6 +192,27 @@ ANSWER_KEY: tuple[KeyItem, ...] = (
 # EDA's scope entirely: no table carries them.
 OUT_OF_SCOPE = ("D-01", "D-02", "D-03", "D-04", "D-05", "J-01", "J-02", "J-03")
 
+# The expenses pack's key: the "Expected exception ground truth" table of
+# ``docs/sample-expense/FACILITATOR_GUIDE.md``, one item per row. Every record is
+# a claim, and the line-item table carries the claim id, so a line-level test
+# reaches an item by the claims its flagged lines belong to.
+EXPENSE_KEY: tuple[KeyItem, ...] = (
+    KeyItem("E-01", "missing receipt on a 4,800 accommodation line", (_records("claim_id", "EXP-2025-003"),)),
+    KeyItem("E-02", "domestic meal above the 4,000 daily cap", (_records("claim_id", "EXP-2025-007"),)),
+    KeyItem("E-03", "claim approved above the approver's 30,000 limit", (_records("claim_id", "EXP-2025-012"),)),
+    KeyItem("E-04", "one receipt id on two claims", (_records("claim_id", "EXP-2025-004", "EXP-2025-018"),)),
+    KeyItem("E-05", "paid before it was approved", (_records("claim_id", "EXP-2025-023"),)),
+    KeyItem("E-06", "submitted 66 days after the expense", (_records("claim_id", "EXP-2025-029"),)),
+    KeyItem("E-07", "ineligible alcohol reimbursed", (_records("claim_id", "EXP-2025-035"),)),
+    KeyItem("E-08", "personal ride with no business purpose", (_records("claim_id", "EXP-2025-040"),)),
+)
+
+
+def key_for(workspace: Workspace) -> tuple[KeyItem, ...]:
+    """The key whose pack this workspace was imported from."""
+    names = {str(table.get("name") or "") for table in getattr(workspace, "tables", []) or []}
+    return EXPENSE_KEY if any("expense_claims" in name for name in names) else ANSWER_KEY
+
 #: Reads one analysis' flagged rows as ``{"columns": [...], "rows": [[...]]}``,
 #: or ``None`` where it flagged nothing or kept no evidence.
 EvidenceReader = Callable[[Mapping[str, object]], Mapping[str, object] | None]
@@ -279,17 +302,33 @@ def _analysis_root(workspace: Workspace, table: str) -> str:
 
 
 def _column_values(evidence: Mapping[str, object], column: str) -> set[str]:
-    """Every value the flagged rows hold in ``column``, as text."""
+    """Every value the flagged rows hold in ``column``, as text.
+
+    A grouped result names its records in a list column — ``claim_ids`` for an
+    employee-day of meals across claims — and that names the records as surely
+    as one row per record does. Measured on expenses: the daily meal-cap test
+    flagged exactly EXP-2025-007's employee-day and scored as broad, because
+    the claim sat in ``claim_ids`` as ``['EXP-2025-007']``.
+    """
     frame = evidence.get("frame") if isinstance(evidence.get("frame"), Mapping) else evidence
     columns = [str(name) for name in frame.get("columns") or []]
-    if column not in columns:
+    name = column if column in columns else f"{column}s" if f"{column}s" in columns else None
+    if name is None:
         return set()
-    index = columns.index(column)
-    return {
-        str(row[index]).strip()
-        for row in frame.get("rows") or []
-        if isinstance(row, (list, tuple)) and index < len(row) and row[index] is not None
-    }
+    index = columns.index(name)
+    values: set[str] = set()
+    for row in frame.get("rows") or []:
+        if not isinstance(row, (list, tuple)) or index >= len(row) or row[index] is None:
+            continue
+        cell = row[index]
+        if isinstance(cell, (list, tuple)):
+            values.update(str(item).strip() for item in cell if item is not None)
+        elif name != column:
+            # A list the evidence sidecar stored as its text: ['A', 'B'].
+            values.update(a or b for a, b in re.findall(r"'([^']+)'|\"([^\"]+)\"", str(cell)))
+        else:
+            values.add(str(cell).strip())
+    return values
 
 
 def _flagged_count(evidence: Mapping[str, object]) -> int:
@@ -302,6 +341,7 @@ def score_workspace(
     *,
     run_id: str | None = None,
     evidence: EvidenceReader | None = None,
+    key: Sequence[KeyItem] | None = None,
 ) -> Score:
     """Score every saved analysis in a workspace against the answer key.
 
@@ -333,8 +373,9 @@ def score_workspace(
         if rows:
             flagged.append((analysis, rows))
 
+    answer_key = key if key is not None else key_for(workspace)
     scored: list[ItemScore] = []
-    for key in ANSWER_KEY:
+    for key in answer_key:
         hits: list[Hit] = []
         rejected: list[tuple[str, str]] = []
         for analysis, rows in flagged:

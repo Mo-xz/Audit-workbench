@@ -493,6 +493,61 @@ def test_a_validator_that_offers_no_partial_still_fails_the_whole_unit():
         registry.execute(_request(), _Gateway())
 
 
+def _salvaging(implementation):
+    registry = WorkerRegistry()
+    registry.register(
+        _definition(
+            implementation,
+            response_schema=WorkerResponseSchema("planning.apm.response", HASH_C, _partial_validator),
+        )
+    )
+    return registry
+
+
+def test_a_repair_the_provider_cannot_generate_commits_the_draft_it_was_repairing():
+    """Measured on procurement: a memo whose one fault was shape went for repair,
+    the provider failed the repair, and the committable draft was discarded."""
+    from app.agent.runtime import ModelResponseUnusable
+
+    def implementation(request, gateway, attempt):
+        if attempt.number == 1:
+            return "invalid"
+        raise ModelResponseUnusable("finish reason 'error'")
+
+    result = _salvaging(implementation).execute(_request(), _Gateway())
+    assert result.partial is True
+    assert dict(result.proposal) == {"apm_markdown": "first section only"}
+    assert result.attempts == 2
+
+
+def test_a_first_turn_the_provider_cannot_generate_still_fails():
+    """There is no draft to fall back on, so the failure is the outcome."""
+    from app.agent.runtime import ModelResponseUnusable
+
+    def implementation(request, gateway, attempt):
+        raise ModelResponseUnusable("finish reason 'error'")
+
+    with pytest.raises(ModelResponseUnusable):
+        _salvaging(implementation).execute(_request(), _Gateway())
+
+
+def test_a_repair_that_makes_things_worse_commits_the_draft_instead():
+    def validator(response):
+        if response == "shape":
+            raise WorkerResponseValidationError(("misshapen",), partial={"apm_markdown": "the draft"})
+        raise WorkerResponseValidationError(("now untrue",))
+
+    def implementation(request, gateway, attempt):
+        return "shape" if attempt.number == 1 else "worse"
+
+    registry = WorkerRegistry()
+    registry.register(
+        _definition(implementation, response_schema=WorkerResponseSchema("planning.apm.response", HASH_C, validator))
+    )
+    result = registry.execute(_request(), _Gateway())
+    assert result.partial is True and dict(result.proposal) == {"apm_markdown": "the draft"}
+
+
 def test_a_clean_response_is_never_marked_partial():
     def implementation(request, gateway, attempt):
         return "complete draft"

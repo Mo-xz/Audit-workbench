@@ -17,6 +17,7 @@ artifacts, or a bounded fallback over the eligible workspace tables.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -29,6 +30,7 @@ from .. import alignment_catalog, data_map
 from ...analysis_inputs import source_refs, saved_input, InputWorkspace
 from ..workflow import Capability, Readiness, UnitSpec, semantic_unit_id
 from ..workflows import analysis as analysis_workflow
+from ..context.adapters import MAX_REFERENCE_TABLE_ROWS
 
 CAPABILITY_IDS: tuple[str, ...] = (
     "data.relationships_inferred",
@@ -57,6 +59,13 @@ ANALYSIS_SUMMARY_REF = "analysis_summary:current"
 # scope, so the cap is what keeps an unscoped request from turning a large
 # workspace into an unbounded Polars sweep.
 MAX_SCOPE_TABLES = 6
+# A table this small, and dwarfed by the largest beside it, is reference data —
+# a policy list, a limit matrix — and does not count against the cap: it costs
+# the pair sweep next to nothing, and it is what limit and policy tests read.
+# Measured on the expenses pack: seven tables and none named left out
+# ``07_policy_limits`` (six rows) in name order, and with it the meal cap and
+# the submission deadline two of the planted exceptions are tested against.
+REFERENCE_SCOPE_ROWS = MAX_REFERENCE_TABLE_ROWS
 
 # A reference table is a lookup an auditor reads directly — an approval matrix
 # of four designations, a status list — not a population a procedure can
@@ -130,6 +139,23 @@ def _requested_names(scope: dict) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
+def reference_tables(workspace: Workspace, names: Iterable[str]) -> set[str]:
+    """Tables small enough, beside the rest, to read as reference data."""
+    sizes: dict[str, int] = {}
+    for name in names:
+        try:
+            rows = workspace.get_profile(name).get("rows")
+        except (OSError, WorkspaceError):
+            continue
+        if isinstance(rows, int):
+            sizes[name] = rows
+    largest = max(sizes.values(), default=0)
+    return {
+        name for name, rows in sizes.items()
+        if 0 < rows <= REFERENCE_SCOPE_ROWS and rows * LOOKUP_SCALE_RATIO <= largest
+    }
+
+
 def resolve_table_scope(workspace: Workspace, scope: dict) -> TableScope:
     """Resolve explicit targets, selected artifacts, or a bounded fallback.
 
@@ -181,12 +207,17 @@ def resolve_table_scope(workspace: Workspace, scope: dict) -> TableScope:
         tables = tuple(dict.fromkeys(selected))
     else:
         eligible = tuple(sorted(base))
-        tables = eligible[:MAX_SCOPE_TABLES]
-        if len(eligible) > MAX_SCOPE_TABLES:
+        reference = reference_tables(workspace, eligible)
+        populations = tuple(name for name in eligible if name not in reference)
+        chosen = populations[:MAX_SCOPE_TABLES]
+        tables = tuple(name for name in eligible if name in reference or name in chosen)
+        if len(populations) > MAX_SCOPE_TABLES:
             ambiguity = (
-                f"{len(eligible)} tables are available and none was named; "
+                f"{len(populations)} tables are available and none was named; "
                 f"analysing the first {MAX_SCOPE_TABLES} in name order "
-                f"({', '.join(tables)}). Name the tables to analyse instead."
+                f"({', '.join(chosen)})"
+                + (f", with the reference tables {', '.join(sorted(reference))}" if reference else "")
+                + ". Name the tables to analyse instead."
             )
 
     # A join belongs to the scope when every base table it was built from is
@@ -1085,6 +1116,8 @@ __all__ = [
     "STAGE_CHECKPOINTS",
     "CAPABILITY_IDS",
     "MAX_SCOPE_TABLES",
+    "REFERENCE_SCOPE_ROWS",
+    "reference_tables",
     "TableScope",
     "agent_analyses",
     "capabilities",

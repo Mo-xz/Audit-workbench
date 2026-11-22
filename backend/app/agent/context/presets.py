@@ -54,6 +54,7 @@ _REPRESENTATION_PRIVACY_FIELD = {
     "table_aggregate": "allow_table_aggregates",
     "table_rows": "allow_table_rows",
     "table_rows_small": "allow_small_table_rows",
+    "table_rows_reference": "allow_reference_table_rows",
     "analysis_result": "allow_analysis_results",
     "analysis_exception_rows": "allow_analysis_exception_rows",
     "analysis_aggregate": "allow_analysis_aggregates",
@@ -1875,6 +1876,18 @@ PRESETS.register(
                     budget=ContextBudget(max_items=40, max_characters=40_000),
                 ),
                 ContextSource(
+                    id="reference_tables",
+                    source_type="tables",
+                    required=False,
+                    selector=ContextSelector(selector_id="tables.all"),
+                    # The reference tables in scope, whole: the policy limits
+                    # and approval matrices a test is written against. Reference
+                    # by the scope's own rule (small, and a tenth of the largest
+                    # table), capped again by the adapter.
+                    representations=(ContextRepresentation("table_rows_reference"),),
+                    budget=ContextBudget(max_items=6, max_characters=12_000),
+                ),
+                ContextSource(
                     id="instruction",
                     source_type="instructions",
                     required=False,
@@ -1883,7 +1896,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=618, max_characters=222_000),
+            budget=ContextBudget(max_items=624, max_characters=234_000),
             # The same class as ``analysis.definitions`` and no wider. Breadth
             # here is across frames, not down into rows: twenty column
             # inventories disclose what one column inventory discloses, twenty
@@ -1900,6 +1913,8 @@ PRESETS.register(
                 # what the engagement tests, and to the memo; never to a turn
                 # that writes code.
                 allow_analysis_aggregates=True,
+                # The reference tables above, whole — this preset alone.
+                allow_reference_table_rows=True,
             ),
         ),
     )

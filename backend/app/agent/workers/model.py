@@ -18,7 +18,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ..context import ContextBundle
-from ..runtime.model_gateway import ModelGateway
+from ..runtime.model_gateway import ModelGateway, ModelResponseUnusable
 
 
 _HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -782,6 +782,14 @@ class WorkerRegistry:
         )
         attempt_numbers = range(first_attempt, first_attempt + call_count)
         final_attempt = first_attempt + call_count - 1
+        # What the last rejected response could still commit, should a repair
+        # never arrive. Measured on procurement: a memo whose only fault was a
+        # procedure argued in two sections went out for repair, the provider
+        # failed the repair twice (finish reason 'error', six minutes each),
+        # and the draft — committable as it stood — was discarded with the
+        # unit. A repair that cannot be generated is the allowance running out
+        # by another route, and is answered the same way.
+        salvage: tuple[Mapping[str, Any], str] | None = None
         for attempt_number in attempt_numbers:
             attempt = WorkerAttempt(attempt_number, errors, previous_response)
             gateway_context = getattr(gateway, "context", None)
@@ -806,6 +814,20 @@ class WorkerRegistry:
                 gateway_context.json_response = definition.json_response
             try:
                 response = definition.implementation(request, gateway, attempt)
+            except ModelResponseUnusable:
+                if salvage is None:
+                    raise
+                partial, salvaged_response = salvage
+                return WorkerResult(
+                    worker_id=definition.worker_id,
+                    capability_id=request.capability_id,
+                    unit_id=request.unit_id,
+                    proposal=partial,
+                    attempts=attempt_number,
+                    response_hash=_sha256_text(salvaged_response),
+                    response_schema_hash=definition.response_schema.schema_hash,
+                    partial=True,
+                )
             finally:
                 if gateway_context is not None:
                     if previous_capabilities is None:
@@ -844,24 +866,26 @@ class WorkerRegistry:
                 # the registered worker.
                 previous_response = response
                 errors = definition.repair_policy.bounded_errors(error.errors)
+                if error.partial:
+                    salvage = (
+                        _frozen_json(json.loads(_canonical_object(error.partial, "worker_result.partial"))),
+                        response,
+                    )
                 if attempt_number == final_attempt:
                     # The allowance is spent. Where the validator could salvage
                     # part of the response, committing it beats discarding work
                     # that satisfied the contract because a sibling did not.
-                    if error.partial:
+                    # That is this response's salvage, or — where the repair
+                    # made things worse than shape — the draft it was repairing.
+                    if salvage is not None:
+                        partial, salvaged_response = salvage
                         return WorkerResult(
                             worker_id=definition.worker_id,
                             capability_id=request.capability_id,
                             unit_id=request.unit_id,
-                            proposal=_frozen_json(  # type: ignore[arg-type]
-                                json.loads(
-                                    _canonical_object(
-                                        error.partial, "worker_result.partial"
-                                    )
-                                )
-                            ),
+                            proposal=partial,
                             attempts=attempt_number,
-                            response_hash=_sha256_text(response),
+                            response_hash=_sha256_text(salvaged_response),
                             response_schema_hash=definition.response_schema.schema_hash,
                             partial=True,
                         )

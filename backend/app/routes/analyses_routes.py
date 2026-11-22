@@ -52,6 +52,9 @@ def get_analysis_memo(workspace_id: str):
         "cited_analysis_ids": list(memo.get("cited_analysis_ids") or []),
         "generated_at": memo.get("generated_at"),
         "run_id": memo.get("run_id"),
+        # Shape faults the memo was committed with because its repair never
+        # arrived. Empty for a memo that passed every check.
+        "unrepaired": list(memo.get("unrepaired") or []),
         # Written against a result set that has since moved. The memo is still
         # shown — it is what the analysis concluded at the time — but the
         # screen says so rather than passing it off as current.

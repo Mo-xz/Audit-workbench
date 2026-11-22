@@ -279,6 +279,15 @@ class ContextPrivacy(_JSONModel):
     # faithful description — a 4-row approval matrix's aggregate max/null
     # statistics cannot say what its one exceptional row actually contains.
     allow_small_table_rows: bool = False
+    # The complete rows of a *reference* table — a policy list, a limit matrix —
+    # for the one turn that decides what an exploratory run tests. Narrower
+    # than ``allow_small_table_rows``: small is not enough, because on a small
+    # engagement every population is small (forty claims), so a table must also
+    # be dwarfed by the largest table in scope, and the adapter refuses any over
+    # ``MAX_REFERENCE_TABLE_ROWS``. A threshold that lives in a cell — a daily
+    # meal cap of 4,000, a 60-day deadline — is what a test is written against,
+    # and is not a value domain: six rows repeat nothing.
+    allow_reference_table_rows: bool = False
     # What a saved procedure concluded: its definition, verdict, and bounded
     # statistics. Aggregate in the same sense as a table profile.
     allow_analysis_results: bool = False
@@ -352,6 +361,7 @@ class ContextPrivacy(_JSONModel):
         "allow_table_aggregates",
         "allow_table_rows",
         "allow_small_table_rows",
+        "allow_reference_table_rows",
         "allow_analysis_results",
         "allow_analysis_exception_rows",
         "allow_analysis_aggregates",

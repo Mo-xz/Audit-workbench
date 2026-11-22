@@ -412,6 +412,21 @@ def test_explicit_targets_and_selected_artifacts_resolve_the_same_scope(
     assert from_analysis.tables == ("transactions",)
 
 
+def test_a_reference_table_does_not_cost_a_population_its_place_in_scope():
+    """The expenses pack: seven tables, none named, and the six-row policy list
+    — the meal cap and the submission deadline — fell outside the first six."""
+    ws = workspaces.create_workspace("With a policy list")
+    for index in range(analysis_capabilities.MAX_SCOPE_TABLES):
+        frame = pl.DataFrame({"id": list(range(80)), "value": [index] * 80})
+        ws.add_table(f"table_{index}.csv", frame.write_csv().encode())
+    ws.add_table("z_policy_limits.csv", pl.DataFrame({"policy": ["meal", "days"], "limit": [4000, 60]}).write_csv().encode())
+
+    scope = analysis_capabilities.resolve_table_scope(workspaces.load_workspace(ws.id), {})
+    assert "z_policy_limits" in scope.tables
+    assert len(scope.tables) == analysis_capabilities.MAX_SCOPE_TABLES + 1
+    assert scope.ambiguity is None
+
+
 def test_unscoped_request_is_bounded_and_reports_its_own_ambiguity():
     ws = workspaces.create_workspace("Many tables")
     for index in range(analysis_capabilities.MAX_SCOPE_TABLES + 2):

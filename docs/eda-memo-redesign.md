@@ -528,6 +528,39 @@ Each phase is independently useful and measurable against the key.
    attempt failed at the provider): 18 exhibits instead of 37 — nine charts,
    nine tables — and the role matrix, step durations, authority grid and value
    bridge are drawn rather than tabulated.
+   **After phase 5: the expenses pack, and memo resilience.** First live run
+   on the second pack: three calls, 118k prompt tokens, a sixteen-exhibit memo
+   led by the right authority breach. Scored with the new expenses key
+   (`EXPENSE_KEY`, the guide's ground-truth table), it reaches 6 of 8. What it
+   exposed, and what changed:
+   - With seven tables and none named, the six-table cap dropped
+     `07_policy_limits` in name order. Reference-sized tables (at most
+     `REFERENCE_SCOPE_ROWS` rows and a tenth of the largest) no longer count
+     against the cap.
+   - Four of eleven authored analyses aggregated `df["x"]` inside `.agg()`,
+     which is one number for every group, and all four were dropped at
+     execution. That is now a static error the authoring repair corrects, and an
+     authoring response whose repair never arrives commits the items that
+     passed.
+   - The meal cap (E-02) and the 60-day deadline (E-06) were out of reach for
+     a reason that was not a bug: they are cells of a six-row policy table,
+     which is not a value domain, so the reading could ask what the policy sets
+     but never saw 4,000 or 60. Decided: `analysis.reading` alone gains
+     `allow_reference_table_rows`, the whole rows of a table at most
+     `MAX_REFERENCE_TABLE_ROWS` rows and a tenth of the largest in scope —
+     small is not enough, since every expenses population is under fifty rows.
+     Live, the reading wrote the POL-01, POL-02 and POL-04 assertions with
+     their numbers, the authoring turn wrote all of them with no code dropped,
+     and the pack reaches **8 of 8** (prompt 135k over four calls). The meal
+     test groups by employee-day and lists its claims, which the scorer now
+     reads from a pluralised list column.
+   - Memo resilience, from the failed procurement rewrite (a draft whose one
+     fault was a procedure argued twice, lost after two six-minute repairs
+     failed at the provider, 189k tokens): a repair is sent the reference
+     sheet, the draft and the errors and returns only what it changes, and a
+     repair that cannot be generated, or comes back worse, commits the draft
+     with its faults recorded. Live on expenses, the repair took 9.9k prompt
+     tokens and 24 seconds.
 6. **The cycle's shape moves ahead.** It reads the process documents instead of
    the memorandum, theme placement splits off after the APM, and analysis takes
    a partial edge on the shape. Last because phase 2 already feeds the map to

@@ -237,3 +237,93 @@ def test_an_explore_item_is_saved_as_an_informational_analysis(workspace_with_da
     saved = {item["title"]: item for item in workspaces.load_workspace(ws.id).analyses}
     assert saved["E01 on transactions"]["outcome_policy"] == {"mode": "informational"}
     assert saved["R01 on transactions"]["outcome_policy"] == {"mode": "exception_rows"}
+
+
+def test_a_series_inside_agg_is_caught_before_it_runs(sales):
+    """Expenses: four of eleven authored analyses aggregated df["x"] per group,
+    and every one was dropped at execution where no repair could reach it."""
+    request = _authoring_request(sales, ITEMS)
+    whole = 'df = tables["sales"]\nresult = df.group_by("region").agg(df["amount"].sum().alias("total"))'
+    with pytest.raises(WorkerResponseValidationError, match='use pl.col\\("amount"\\)') as error:
+        analysis_worker.validate_authoring_proposal({
+            "analyses": [
+                _answer("R01", "result = tables['sales'].filter(pl.col('amount') < 0)", "exception_rows"),
+                _answer("E01", whole, "informational"),
+            ],
+            "declined": [],
+        }, request)
+    # The item that passed is what an exhausted repair commits.
+    assert [item["ref"] for item in error.value.partial["analyses"]] == ["R01"]
+    # Outside an aggregation a whole-column reduction is an ordinary scalar.
+    scalar = 'df = tables["sales"]\ntotal = df["amount"].sum()\nresult = df.with_columns((pl.col("amount") / total).alias("share"))'
+    assert analysis_worker._whole_column_aggregations(scalar) == []
+
+
+# ---------------------------------------------------------- reference tables
+@pytest.fixture
+def with_policy():
+    """Expenses in miniature: forty claims, all small, and a six-row policy list."""
+    ws = workspaces.create_workspace("Claims and policy")
+    claims = pl.DataFrame({"claim_id": [f"C{n:02d}" for n in range(40)], "amount": [100.0 + n for n in range(40)]})
+    lines = pl.DataFrame({"line_id": list(range(62)), "claim_id": [f"C{n % 40:02d}" for n in range(62)]})
+    policy = pl.DataFrame({
+        "policy_ref": [f"POL-0{n}" for n in range(1, 7)],
+        "requirement": ["Receipts at or above 1,000", "Daily domestic meals may not exceed 4,000",
+                        "Transport needs a purpose", "Submit within 60 days", "No alcohol", "Business purpose"],
+        "threshold": ["1000", "4000", "No monetary cap", "60 days", "0", "Required"],
+    })
+    for name, frame in (("claims", claims), ("lines", lines), ("policy_limits", policy)):
+        ws.add_table(f"{name}.csv", frame.write_csv().encode())
+    return workspaces.load_workspace(ws.id)
+
+
+def test_only_the_reading_may_see_a_reference_table_whole():
+    from app.agent.context.presets import PRESETS
+
+    granted = {p.preset_id for p in PRESETS.all() if p.spec.privacy.allow_reference_table_rows}
+    assert granted == {"analysis.reading"}
+
+
+def test_a_reference_table_is_small_and_dwarfed_not_merely_small(with_policy):
+    """Every table here is under fifty rows; only the policy list is reference."""
+    from app.agent.capabilities import analysis as analysis_capabilities
+
+    assert analysis_capabilities.reference_tables(with_policy, with_policy.table_names()) == {"policy_limits"}
+
+
+def test_the_adapter_refuses_a_table_over_the_cap_whatever_the_caller_says(with_policy):
+    from app.agent.context import adapters
+
+    supplied = adapters.reference_table_row_candidates(with_policy, ["policy_limits", "lines"])
+    assert [item.metadata["table"] for item in supplied] == ["policy_limits"]
+    assert "Daily domestic meals may not exceed 4,000" in str(supplied[0].source)
+
+
+def test_the_reading_is_shown_the_policy_rows_and_nothing_else_whole(with_policy):
+    from app.agent.context import analysis_reading_scope
+
+    capability = ANALYSIS_REGISTRY.get("analysis.register_ready")
+    _manifest, bundle = ContextResolver().resolve(
+        with_policy, capability, {"id": "analysis_reading"},
+        analysis_reading_scope(with_policy, with_policy.table_names(), reference_tables=["policy_limits"]),
+    )
+    request = WorkerRequest(
+        worker_id=analysis_worker.ANALYSIS_READING_WORKER_ID, capability_id=capability.id,
+        unit_id="analysis_reading", context=bundle,
+    )
+    sent = {}
+
+    class Gateway:
+        def complete(self, system, user, activity, **kwargs):
+            sent["user"] = user
+            raise RuntimeError("stop")
+
+    from app.agent.workers.model import WorkerAttempt
+
+    with pytest.raises(RuntimeError):
+        analysis_worker.run_analysis_reading_worker(request, Gateway(), WorkerAttempt(1))
+    payload = json.loads(sent["user"].split("\n\nYour previous")[0])
+    assert [table["table"] for table in payload["REFERENCE TABLES"]] == ["policy_limits"]
+    assert "4,000" in json.dumps(payload["REFERENCE TABLES"])
+    # The claims are forty rows too, and are never sent as rows.
+    assert "C07" not in sent["user"]

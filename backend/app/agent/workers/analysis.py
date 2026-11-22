@@ -24,6 +24,7 @@ The worker never sees a table row: the declared context denies
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -130,7 +131,9 @@ evaluate (a null on either side) from rows it evaluated.
 Code reads a frame as `tables["name"]` or by its bare name, assigns a DataFrame
 to `result`, and nothing else: no imports, no files, no network. Use
 `series.len()`, not `series.height`; `.dt.total_days()` for a duration; and
-select or suffix columns before a join that would collide. VALUE DOMAINS gives
+select or suffix columns before a join that would collide. Inside `.agg(...)`
+name columns as `pl.col("x")`, never `df["x"]`: `df["x"]` is the whole column,
+so `df["x"].sum()` is one number for every group rather than one per group. VALUE DOMAINS gives
 the exact spelling of every value a low-cardinality column holds; never name a
 value it does not list. You are never shown a row and must not invent values,
 counts or relationships.
@@ -610,6 +613,40 @@ def _column_names(schema: Mapping[str, Any]) -> set[str]:
     }
 
 
+def _whole_column_aggregations(code: str) -> list[str]:
+    """Columns named as a frame's Series inside ``.agg(...)``.
+
+    ``df["x"]`` is the whole column, so inside a group-by's aggregation its
+    reduction is one number for every group — and ``.alias`` on that number
+    raises. Measured on the expenses pack: four of eleven authored analyses
+    were written this way and every one was dropped at execution, where no
+    repair could reach it. Said here it costs a repair turn instead.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "agg"):
+            continue
+        for argument in [*node.args, *(keyword.value for keyword in node.keywords)]:
+            for inner in ast.walk(argument):
+                if (
+                    isinstance(inner, ast.Subscript)
+                    and isinstance(inner.slice, ast.Constant)
+                    and isinstance(inner.slice.value, str)
+                ):
+                    column = inner.slice.value
+                    message = (
+                        f'names column "{column}" as a frame\'s Series inside .agg(); '
+                        f'use pl.col("{column}") so it is aggregated per group'
+                    )
+                    if message not in found:
+                        found.append(message)
+    return found
+
+
 def _validate_python_spec(
     spec: Mapping[str, Any],
     frames: set[str],
@@ -625,6 +662,7 @@ def _validate_python_spec(
         sandbox.validate(code)
     except sandbox.SandboxError as error:
         errors.append(f"{label} is not safe Polars: {error}")
+    errors.extend(f"{label} {message}" for message in _whole_column_aggregations(code))
     referenced = set(re.findall(r"tables\[['\"]([^'\"]+)['\"]\]", code))
     unknown = sorted(referenced - frames)
     if unknown:
@@ -838,7 +876,16 @@ def validate_authoring_proposal(
             f"{', '.join(missing)} {verb(len(missing), 'has', 'have')} no answer"
         )
     if errors:
-        raise WorkerResponseValidationError(errors)
+        # The items that passed stand on their own: should the repair never
+        # arrive, they are committed and the rest are reported as not written.
+        raise WorkerResponseValidationError(
+            errors,
+            partial=(
+                {"analyses": accepted, "declined": [*declined, *(f"not written: {e}" for e in errors)]}
+                if accepted
+                else None
+            ),
+        )
     if not accepted:
         raise WorkerResponseValidationError(
             f"{NOTHING_NEW_TO_ANALYSE}: every work item was declined — "
@@ -932,6 +979,7 @@ READING_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
 READING_DOMAIN_SOURCE_ID = "value_domains"
 READING_REGISTRY_SOURCE_ID = "analytics_registry"
 READING_PROFILE_SOURCE_ID = "population_profile"
+READING_REFERENCE_SOURCE_ID = "reference_tables"
 READING_SUBMISSION_TOOL = "submit_assertion_register"
 #: Questions about the population the profile did not already answer. Each is a
 #: piece of code the authoring turn writes, so this bounds that turn's work.
@@ -1015,6 +1063,15 @@ condition is ordinary operations, and the profile is where ordinary is shown: a
 requisition with no purchase order is mid-cycle only if others like it were
 ordered later, and is stale if every other one was ordered within days. A
 decline the profile contradicts is not a decline.
+
+REFERENCE TABLES, when present, are the engagement's small lookups shown whole:
+a policy list, a limit matrix. A threshold stated there — a daily cap, a
+deadline in days, a limit per role — is something a population can be tested
+against, so **add** the assertion with the number in it and name the reference
+row it comes from: "no domestic meal line exceeds the 4,000 per employee per
+day of POL-02". Read the unit each row states (per line, per claim, per
+employee per day) and write the assertion at that grain. A row stating no
+number is not a test.
 
 You may also **keep** a nomination with a better title and a note saying what
 its flagged condition would mean in terms of the business events the columns
@@ -1495,6 +1552,9 @@ def run_analysis_reading_worker(
     profile = [
         _plain_json(item) for item in _source_items(request, READING_PROFILE_SOURCE_ID)
     ]
+    reference = [
+        _plain_json(item) for item in _source_items(request, READING_REFERENCE_SOURCE_ID)
+    ]
     # The frame map, the nominations and the catalog are all promoted ahead of
     # the serialized bundle for the same reason the definition turn promotes its
     # target schema: they are what this turn acts on, and describing them twice
@@ -1507,6 +1567,7 @@ def run_analysis_reading_worker(
         READING_DOMAIN_SOURCE_ID,
         READING_HYPOTHESIS_SOURCE_ID,
         READING_PROFILE_SOURCE_ID,
+        READING_REFERENCE_SOURCE_ID,
         AUDITOR_INSTRUCTION_SOURCE_ID,
     )
     instruction = auditor_instruction(request)
@@ -1516,6 +1577,7 @@ def run_analysis_reading_worker(
             **({"ANALYTICS CATALOG": catalog} if catalog else {}),
             "FRAME MAP": frames,
             **({"POPULATION PROFILE": profile} if profile else {}),
+            **({"REFERENCE TABLES": reference} if reference else {}),
             **({"VALUE DOMAINS": domains} if domains else {}),
             "NOMINATIONS": nominations,
             **(
@@ -2135,7 +2197,7 @@ def _profile_parts(value: object) -> list[tuple[str, Mapping[str, Any]]]:
     return [(section, by_section[section]) for section in PROFILE_SECTIONS if section in by_section]
 
 
-def _summary_submission_tool(request: WorkerRequest) -> dict[str, Any]:
+def _summary_submission_tool(request: WorkerRequest, *, repair: bool = False) -> dict[str, Any]:
     """One forced tool whose schema binds every procedure reference in the memo.
 
     The references are an enum of the numbers actually supplied, which is the
@@ -2228,7 +2290,9 @@ def _summary_submission_tool(request: WorkerRequest) -> dict[str, Any]:
                         "items": {"type": "string", "minLength": 1},
                     },
                 },
-                "required": [
+                # A repair returns only the parts it changes; the rest is
+                # carried from the draft it repairs (``_carry_unrepaired_parts``).
+                "required": [] if repair else [
                     "lead",
                     "data_received",
                     "findings",
@@ -2751,7 +2815,7 @@ def validate_analysis_summary(
             partial=(
                 None
                 if untrue
-                else {"markdown": markdown, "cited_analysis_ids": cited}
+                else {"markdown": markdown, "cited_analysis_ids": cited, "unrepaired": list(errors)}
             ),
         )
 
@@ -2896,8 +2960,15 @@ def run_analysis_summary_worker(
     gateway: ModelGateway,
     attempt: WorkerAttempt,
 ) -> str:
-    """Transform only the supplied bundle into one budgeted model request."""
-    tool = _summary_submission_tool(request)
+    """Transform only the supplied bundle into one budgeted model request.
+
+    A repair is not the first turn asked again. It corrects a draft against
+    errors that name what is wrong, so it is sent the reference sheet, the draft
+    and the errors — not the 60k-token bundle the draft was written from — and
+    it returns only the parts it changes. Measured on procurement, the full
+    resend asked for a whole memo again and took six minutes to fail.
+    """
+    tool = _summary_submission_tool(request, repair=attempt.is_repair)
     user = json.dumps(
         {
             # Numbered ahead of the bundle, because the number is how the memo
@@ -2928,6 +2999,25 @@ def run_analysis_summary_worker(
             raise WorkerContractError(
                 "An analysis-summary repair requires the previous response."
             )
+        user = json.dumps(
+            {
+                "PROCEDURE REFERENCES": _summary_reference_sheet(request),
+                **(
+                    {"AUDITOR INSTRUCTION": auditor_instruction(request)}
+                    if auditor_instruction(request)
+                    else {}
+                ),
+                "NOTE": (
+                    "This turn corrects the draft below. The material it was "
+                    "written from is not resent: every figure and identifier the "
+                    "draft states stands, and a correction moves or removes "
+                    "wording rather than adding facts."
+                ),
+            },
+            indent=1,
+            ensure_ascii=False,
+            default=str,
+        )
         conversation = [
             {"role": "user", "content": user},
             {"role": "assistant", "content": attempt.previous_response},
@@ -2937,9 +3027,10 @@ def run_analysis_summary_worker(
                     "Correct every listed quality-gate error in the prior summary "
                     "while preserving all otherwise-valid wording and evidence: "
                     + "; ".join(attempt.validation_errors)
-                    + f". Call {SUMMARY_SUBMISSION_TOOL} once with the complete "
-                    "corrected summary, every part included — `profile` and "
-                    "`implications` as well, unchanged where no error names them."
+                    + f". Call {SUMMARY_SUBMISSION_TOOL} once with only the parts "
+                    "you change. A part you return replaces that part whole — "
+                    "`findings` is then the complete list of findings — and every "
+                    "part you leave out is kept from the draft unchanged."
                 ),
             },
         ]
@@ -2972,11 +3063,13 @@ def run_analysis_summary_worker(
     return response
 
 
-#: Parts a repair is never asked to change, and once dropped silently. Observed
-#: on procurement: asked to move one procedure out of the reliance section, the
-#: rewrite returned without the three profile sections the first draft had
-#: written, and the memo lost the population it described.
-_CARRIED_PARTS = ("profile", "implications")
+#: Every part of the memo. A repair returns only what it changes; anything it
+#: leaves out is the draft's. First added for the two optional parts after a
+#: rewrite asked to move one procedure out of the reliance section returned
+#: without the three profile sections the draft had written.
+_CARRIED_PARTS = (
+    "lead", "data_received", "findings", "reliance", "profile", "implications", "further_work",
+)
 
 
 def _carry_unrepaired_parts(response: str, previous: str) -> str:

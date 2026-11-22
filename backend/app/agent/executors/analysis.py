@@ -1205,7 +1205,14 @@ def _validated_summary(
         for value in (request.proposal.get("cited_analysis_ids") or [])
         if str(value or "").strip()
     ]
-    return target, {"markdown": markdown, "cited_analysis_ids": cited}
+    # Shape faults the memo was committed with because no repair arrived. Kept
+    # on the memo so the page and the run say it was not fully corrected.
+    unrepaired = [str(item) for item in request.proposal.get("unrepaired") or [] if str(item).strip()]
+    return target, {
+        "markdown": markdown,
+        "cited_analysis_ids": cited,
+        **({"unrepaired": unrepaired} if unrepaired else {}),
+    }
 
 
 def execute_analysis_summary(
@@ -1254,6 +1261,7 @@ def execute_analysis_summary(
             "action": "summarized",
             "cited": len(proposal["cited_analysis_ids"]),
             "characters": len(proposal["markdown"]),
+            "unrepaired": list(proposal.get("unrepaired") or []),
         },
     )
 

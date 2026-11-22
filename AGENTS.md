@@ -23,7 +23,7 @@ truncated sample that reads like a population. The default is therefore to
 compute locally and send the result. `allow_table_rows` is denied everywhere and
 the resolver rejects the `table_rows` representation structurally.
 
-Three declared permissions admit rows where the individual row *is* the answer
+Four declared permissions admit rows where the individual row *is* the answer
 rather than an input to one. Each is declared by exactly one preset and carries
 its own cap:
 
@@ -36,6 +36,13 @@ its own cap:
    capped by row count and serialized size (`FINDING_EXCEPTION_ROW_LIMIT`), for
    finding drafting. This is what lets a finding name the invoice that failed
    instead of only counting it.
+4. `allow_reference_table_rows` — a whole *reference* table (at most
+   `MAX_REFERENCE_TABLE_ROWS` rows and a tenth of the largest table in scope:
+   a policy list, a limit matrix) for `analysis.reading`, so that a threshold
+   living in a cell — a 4,000 daily meal cap, a 60-day deadline — can be
+   tested against. Narrower than the first door on purpose: on a small
+   engagement every population is under fifty rows, and only the relative
+   rule keeps forty claims out of it.
 
 They are separate permissions so that widening one never silently widens
 another, and each projection reports what it left out — `rows_withheld`,
@@ -43,7 +50,7 @@ another, and each projection reports what it left out — `rows_withheld`,
 as a complete population. That reporting, not the cap alone, is the property
 worth having: a bounded sample presented as the whole is worse than no sample.
 
-Beside the three row-level doors sits one key-level door,
+Beside the four row-level doors sits one key-level door,
 `allow_datatest_exception_keys`, for the one capability that must compare
 exceptions against each other: `findings.consolidated`, which runs before any
 finding is drafted so that a group is written once. It admits the values of a
@@ -1028,6 +1035,16 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   failures, `analysis_anomalies` for warnings) because deterministic selectors
   order candidates by reference: one source let a truncated budget drop a
   backdating failure while keeping a weekend-activity warning.
+  A memo repair is a correction, not the first turn again: it is sent the
+  reference sheet, the draft and the errors — not the bundle — and returns
+  only the parts it changes, the rest carried from the draft. And a repair is
+  never what loses a memo: where the provider cannot generate it, or it comes
+  back worse than shape, the worker loop (`workers/model.py`) commits the last
+  salvageable draft, as it does when the allowance runs out. A memo committed
+  that way carries its uncorrected shape faults in `unrepaired`; the run warns
+  and the Summary screen says so. Measured on procurement before the change: a
+  draft whose one fault was a procedure argued in two sections was lost after
+  two six-minute repairs failed at the provider, 189k prompt tokens in all.
 - **The assertion register decides what an exploratory run tests, once.**
   `analysis.register_ready` sits between the joins and the definitions and is
   the only stage that reads every frame together. It is built in two passes and
@@ -1315,7 +1332,9 @@ npm run build
   run-context key (`analysis_execution` additionally accepts `analysis_ids`),
   so the Analysis tab can scope a run to what is on screen instead of falling
   into the bounded `MAX_SCOPE_TABLES` fallback and its scope-ambiguity
-  checkpoint. Manual analysis execution (`POST /analyses/{id}/execute`,
+  checkpoint. The cap counts populations only: a table of at most
+  `REFERENCE_SCOPE_ROWS` rows and a tenth of the largest is reference data — a
+  policy list, a limit matrix — and is always in scope. Manual analysis execution (`POST /analyses/{id}/execute`,
   auditor-initiated) and workflow execution write through the same contract in
   `app/analysis_results.py`; a manual result's `run_id` is prefixed
   `manual_...` and opens nothing in the run drawer, unlike an agent run's id.

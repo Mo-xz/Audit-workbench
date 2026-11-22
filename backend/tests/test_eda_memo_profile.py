@@ -226,3 +226,65 @@ def test_an_authored_analysis_with_a_chart_is_drawn(regional):
         request,
     )["markdown"]
     assert [(e["analysis"], e["as"]) for e in analysis_worker.parse_embeds(markdown)] == [(analysis["id"], "chart")]
+
+
+def test_a_memo_repair_is_sent_the_draft_and_errors_not_the_bundle(regional):
+    """The repair that failed at the provider resent 61k tokens and asked for the
+    whole memo again; it now sends the reference sheet and asks for changes."""
+    import json
+
+    from app.agent.workers.model import WorkerAttempt
+
+    _save(regional, "Sales by region", BREAKDOWN)
+    request = _summary_request(workspaces.load_workspace(regional.id))
+    draft = json.dumps({"lead": "a", "data_received": "b", "findings": [{"title": "t", "prose": "p", "procedures": []}],
+                        "reliance": {"prose": "r"}, "implications": ["i"], "further_work": ["f"]})
+    sent = {}
+
+    class Gateway:
+        def complete(self, system, user, activity, **kwargs):
+            sent.update(kwargs, user=user)
+            return {"tool_calls": [{"function": {"name": analysis_worker.SUMMARY_SUBMISSION_TOOL,
+                                                 "arguments": json.dumps({"reliance": {"prose": "fixed"}})}}]}
+
+    response = analysis_worker.run_analysis_summary_worker(
+        request, Gateway(), WorkerAttempt(2, ("[#1] is argued twice",), draft)
+    )
+    first = json.loads(sent["conversation"][0]["content"])
+    assert "RESOLVED CONTEXT" not in first and "PROCEDURE REFERENCES" in first
+    assert sent["tools"][0]["function"]["parameters"]["required"] == []
+    merged = json.loads(response)
+    # The repair changed one part; every other part is the draft's.
+    assert merged["reliance"] == {"prose": "fixed"}
+    assert merged["findings"][0]["title"] == "t" and merged["further_work"] == ["f"]
+
+
+def test_an_uncorrected_memo_records_what_it_was_committed_with(regional):
+    _save(regional, "Sales by region", BREAKDOWN)
+    request = _summary_request(workspaces.load_workspace(regional.id))
+    ref = _ref_of(request, regional.analyses[0]["id"])
+    with pytest.raises(analysis_worker.WorkerResponseValidationError) as error:
+        analysis_worker.validate_analysis_summary(
+            _payload(
+                findings=[{"title": "x", "prose": "y", "procedures": [ref]}],
+                reliance={"prose": "z", "procedures": [ref]},
+            ),
+            request,
+        )
+    assert error.value.partial["unrepaired"] == list(error.value.errors)
+
+
+def test_the_committed_memo_keeps_the_faults_it_was_committed_with(regional):
+    from app.agent.executors import analysis as executors
+    from app.agent.executors.model import ExecutorRequest
+    from app.workspace_transactions import parent_hashes
+
+    ref = executors.ANALYSIS_SUMMARY_REF
+    request = ExecutorRequest(
+        executor_id=executors.SUMMARY_EXECUTOR_ID, capability_id="analysis.summarized", unit_id="analysis_summary",
+        proposal={"markdown": "Memo.", "cited_analysis_ids": [], "unrepaired": ["[#1] is argued twice"]},
+        expected_revision=regional.revision, expected_parents=parent_hashes(regional, [ref]),
+    )
+    result = executors.execute_analysis_summary(request, executors.AnalysisSummaryExecutorTarget(regional, "run-1"))
+    assert list(result.output["unrepaired"]) == ["[#1] is argued twice"]
+    assert workspaces.load_workspace(regional.id).analysis_summary["unrepaired"] == ["[#1] is argued twice"]

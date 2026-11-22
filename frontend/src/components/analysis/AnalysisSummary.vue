@@ -186,6 +186,9 @@ const staleSentence = computed(() => {
         </span>
       </template>
       <template #recorded>
+        <span v-if="memo?.unrepaired?.length" class="unrepaired" :title="memo.unrepaired.join('\n')">
+          Committed with {{ plural(memo.unrepaired.length, 'shape fault') }} its repair did not reach.
+        </span>
         <template v-if="uncitedFlagging.length">
           <b>{{ plural(uncitedFlagging.length, 'procedure') }}</b> that found something
           {{ uncitedFlagging.length === 1 ? 'is' : 'are' }} not cited.
@@ -311,6 +314,7 @@ const staleSentence = computed(() => {
 </template>
 
 <style scoped>
+.unrepaired { display: block; color: var(--aw-warn-ink); }
 /* Only a handle for Print to find the sheet by: it takes no part in the
    layout, so the document page still fills the tab as it did. */
 .memo-page { display: contents; }

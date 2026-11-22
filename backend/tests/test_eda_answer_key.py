@@ -180,3 +180,39 @@ def test_the_key_is_the_facilitator_guide():
             for record in reading.ids
         }
         assert keyed == _guide_records(cells[3]), item.id
+
+
+EXPENSE_GUIDE = GUIDE.parents[1] / "sample-expense" / "FACILITATOR_GUIDE.md"
+
+
+def test_the_expense_key_is_the_expense_guide():
+    """Every ground-truth row of the guide is one key item naming the same claims."""
+    from eda_answer_key import EXPENSE_KEY
+
+    rows = [line for line in EXPENSE_GUIDE.read_text(encoding="utf-8").splitlines() if line.startswith("| EXP-")]
+    assert len(rows) == len(EXPENSE_KEY)
+    for row, item in zip(rows, EXPENSE_KEY):
+        claims = set(re.findall(r"EXP-\d{4}-\d{3}", row.split("|")[1]))
+        assert claims == set(item.readings[0].ids), (row, item.id)
+
+
+def test_the_key_follows_the_pack_the_workspace_holds():
+    from eda_answer_key import EXPENSE_KEY, key_for
+
+    expenses = SimpleNamespace(tables=[{"name": "02_expense_claims"}])
+    procurement = SimpleNamespace(tables=[{"name": "requisitions"}])
+    assert key_for(expenses) is EXPENSE_KEY and key_for(procurement) is ANSWER_KEY
+
+
+def test_a_grouped_result_names_its_records_in_a_list_column():
+    """The meal-cap test groups lines by employee-day and lists their claims."""
+    from eda_answer_key import EXPENSE_KEY
+
+    analysis = {
+        "id": "A-M", "table": "lines", "kind": "python", "spec": {"code": "result = df"},
+        "outcome_policy": {"mode": "exception_rows"},
+        "last_result": {"exception_count": 1, "tested": 40, "verdict": "fail"},
+        "_evidence": {"frame": {"columns": ["employee_id", "claim_ids"], "rows": [["EMP-007", "['EXP-2025-007']"]]}},
+    }
+    score = score_workspace(_workspace(analysis), evidence=lambda a: a["_evidence"], key=EXPENSE_KEY)
+    assert "E-02" in _reached(score)

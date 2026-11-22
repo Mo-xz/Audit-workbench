@@ -3302,6 +3302,36 @@ READING_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
 READING_DOMAIN_SOURCE_ID = "value_domains"
 READING_REGISTRY_SOURCE_ID = "analytics_registry"
 READING_PROFILE_SOURCE_ID = "population_profile"
+READING_REFERENCE_SOURCE_ID = "reference_tables"
+#: The most rows a reference table may hold and still be supplied whole. The
+#: caller decides which tables are reference data; this is the structural cap
+#: that holds whatever it decides.
+MAX_REFERENCE_TABLE_ROWS = 50
+
+
+def reference_table_row_candidates(
+    workspace: Workspace, tables: Iterable[str]
+) -> tuple[ContextCandidate, ...]:
+    """The complete rows of the named reference tables, each under the cap."""
+    candidates = []
+    for name in tables:
+        try:
+            rows = workspace.get_profile(name).get("rows")
+        except (OSError, WorkspaceError):
+            continue
+        if not isinstance(rows, int) or rows <= 0 or rows > MAX_REFERENCE_TABLE_ROWS:
+            continue
+        try:
+            frame = workspace.get_frame(name)
+        except (OSError, WorkspaceError):
+            continue
+        content = {"table": name, **model_context.project_frame(frame, row_limit=MAX_REFERENCE_TABLE_ROWS)}
+        candidates.append(ContextCandidate(
+            source_ref=f"table:{name}", source=content,
+            representations={"table_rows_reference": content},
+            metadata={"table": name}, lexical_text=name,
+        ))
+    return tuple(candidates)
 
 
 def analysis_reading_scope(
@@ -3315,6 +3345,7 @@ def analysis_reading_scope(
     analytics_registry: object = None,
     instruction: str | None = None,
     profile: Iterable[Mapping[str, object]] = (),
+    reference_tables: Iterable[str] = (),
 ) -> ContextScope:
     """The whole map, once: every frame's columns and every measured nomination.
 
@@ -3404,6 +3435,7 @@ def analysis_reading_scope(
                 )
                 for item in profile
             ),
+            READING_REFERENCE_SOURCE_ID: reference_table_row_candidates(workspace, reference_tables),
             READING_REGISTRY_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="registry:analytics",
@@ -4548,6 +4580,9 @@ def intake_classification_scope(
 
 
 __all__ = [
+    "MAX_REFERENCE_TABLE_ROWS",
+    "READING_REFERENCE_SOURCE_ID",
+    "reference_table_row_candidates",
     "SUMMARY_READING_SOURCE_ID",
     "analysis_summary_reading_candidates",
     "FINDING_TEST_SOURCE_ID",

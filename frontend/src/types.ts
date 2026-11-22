@@ -2328,6 +2328,8 @@ export interface AnalysisMemo {
   generated_at: string | null
   run_id: string | null
   stale: boolean
+  /** Shape faults committed uncorrected because the memo's repair never arrived. */
+  unrepaired?: string[]
 }
 
 export interface AnalysisExceptions {

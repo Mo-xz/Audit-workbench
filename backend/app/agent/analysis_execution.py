@@ -33,7 +33,9 @@ from .capabilities.analysis import (
     MAX_SCOPE_TABLES,
     TableScope,
     agent_analyses,
+    ANALYSIS_REGISTER_REF,
     definable_targets,
+    unanswered_frames,
     frame_ref,
     pair_join,
     resolve_table_scope,
@@ -41,7 +43,7 @@ from .capabilities.analysis import (
 from .capabilities import ANALYSIS_REGISTRY
 from .context import (
     ContextResolver,
-    analysis_definition_scope,
+    analysis_authoring_scope,
     analysis_reading_scope,
     join_utility_scope,
     analysis_summary_scope,
@@ -1057,6 +1059,7 @@ class AnalysisWorkflowExecution(BaseRunner):
                         for domain in probes.value_domains(self.input_workspace(), frame)
                     ],
                     instruction=workflow_scope(self.run).get("instruction"),
+                    profile=data_map.profile_digest(self.ws, table_scope.tables),
                 ),
             )
 
@@ -1141,6 +1144,10 @@ class AnalysisWorkflowExecution(BaseRunner):
         had been handed — is a transaction.
         """
         settled = self.assertion_register()
+        # What the reading judged about the data — the facts that change how it
+        # should be tested, and the questions no field answers — kept where a
+        # memo written by a later run can still read it.
+        register.save_reading(self.input_workspace(), settled)
         definitions = [item.definition() for item in settled.kept]
         for definition in definitions:
             recipe = self.input_recipe(definition["table"])
@@ -1291,135 +1298,88 @@ class AnalysisWorkflowExecution(BaseRunner):
         stage: dict,
         unit: dict,
     ) -> BoundUnitPipeline | DeterministicUnitResult:
-        """Bind one frame's analysis-definition unit to the shared pipeline.
+        """Bind the one authoring unit: every authored item, as code, in one turn.
 
-        The domain-neutral scheduler owns manifest/proposal/receipt persistence,
-        proposal reuse, approval, and readiness reevaluation. This binding
-        supplies only the frame-scoped declared context, the definition commit
-        target, per-analysis approval items, and the post-commit bookkeeping.
+        The register decided what this run writes: assertions that should hold,
+        and questions about the population the profile did not answer. One turn
+        writes all of them against the frames they name — where the per-frame
+        turn it replaces spent eleven calls and 173k tokens on the procurement
+        engagement turning one-sentence assertions into specs, a third of every
+        prompt the library's catalog. A frame the register placed nothing on is
+        settled here, as the per-frame turn settled it.
         """
         self.ws = subject
-        parent_ref = str(unit["parent_refs"][0])
         table_scope = self.scope()
-        target_frame = next((name for name in table_scope.targets
-            if workflow.semantic_unit_id("analysis_definitions", name) == unit["id"]),
-            parent_ref.split(":", 1)[1])
+        targets = set(definable_targets(self.ws, table_scope))
         settled = self.assertion_register()
-        assertions = settled.assertions_for(target_frame)
-        # Analyses the register wrote are not evidence that this unit has run.
-        # Every frame carrying a measured nomination is populated before this
-        # stage begins now, so a guard that asked only "does this frame have an
-        # analysis" would answer yes for every frame and no definition turn
-        # would ever be taken.
-        from_register = {
-            item.nomination.semantic_id for item in settled.kept
-        }
-        existing = [
-            item
+        from_register = {item.nomination.semantic_id for item in settled.kept}
+        # Analyses a previous authoring commit wrote, which a stage re-run must
+        # not re-bill for: anything on the frame not committed by the register
+        # or the profile.
+        authored_frames = {
+            str(item.get("table") or "")
             for item in agent_analyses(self.ws, table_scope)
-            if str(item.get("table") or "") == target_frame
-            and str(item.get("semantic_id") or "") not in from_register
+            if str(item.get("semantic_id") or "") not in from_register
+            and not data_map.is_profile(item)
+        }
+        forced = workflow_scope(self.run).get("generation_mode") == "force"
+        work = [
+            item
+            for item in settled.authored
+            if item.frame in targets and (forced or item.frame not in authored_frames)
         ]
-        if existing and workflow_scope(self.run).get("generation_mode") != "force":
-            # The frame already carries definitions this unit wrote. Units are
-            # durable once materialized, so a stage re-run must not spend a
-            # provider turn re-deriving what already exists; only an explicit
-            # regeneration does that.
-            return DeterministicUnitResult(
-                "succeeded",
-                tuple(analysis_ref(str(item["id"])) for item in existing),
-            )
-        hypotheses = [
-            {
-                "ref": item.ref,
-                "hypothesis": item.assertion,
-                "why": item.why,
-                "columns": list(item.columns),
-                "requires": [],
-            }
-            for item in assertions
-        ]
-        # The register decided what this run tests, and it placed nothing here.
-        # Every nomination this frame measured is already saved — committed by
-        # the register, not proposed by a turn — so a definition turn here would
-        # have nothing to write that is not either already durable or already
-        # declined with a reason.
-        #
-        # This replaces the old rule, which skipped a joined frame carrying no
-        # retained hypothesis and no breaching nomination of its own. That rule
-        # was guessing at the same question from one frame's vantage; the
-        # register answers it from the whole map's.
-        if not assertions:
-            # A joined frame nothing was admitted to test, and nothing its own
-            # columns dispute.
-            #
-            # The first half is a routing rule: every hypothesis this frame's
-            # lineage carries is already prepared on the narrowest frame that
-            # can test it, so a turn here would re-derive that work against a
-            # wider population and then be dropped as a repeat. That reasoning
-            # holds for tests the gate imagined, and it was deciding alone —
-            # which meant a frame lost its turn before the sweep had been
-            # allowed to look at it. Six of eighteen frames went that way in one
-            # run, in three milliseconds each, among them a three-way frame
-            # carrying an invoice's payment status beside its requisition's
-            self.task_detail(
-                self.add_task(
-                    "analysis_definitions",
-                    "workflow:analysis_definitions",
-                    "Analysis definitions",
-                ),
-                f"The register places no assertion on '{target_frame}' that its "
-                "own measurements have not already saved.",
-            )
-            # The frame is answered, and the answer is that it carries nothing.
-            # Left unrecorded it reads as un-analysed on every later run, and
-            # both readiness checks phrased as "does every scoped frame carry an
-            # analysis" hold the whole chain — register, definitions, execution,
-            # summary — short of satisfied forever.
-            register.settle_frame(
-                self.input_workspace(),
-                target_frame,
-                "the register placed no assertion this frame had not already saved",
-            )
+        placed = {item.frame for item in settled.authored}
+        for frame in unanswered_frames(self.ws, table_scope):
+            if frame not in placed:
+                # Answered, and the answer is that it carries nothing: left
+                # unrecorded it reads as un-analysed on every later run.
+                register.settle_frame(
+                    self.input_workspace(),
+                    frame,
+                    "the register placed no assertion this frame had not already saved",
+                )
+        if not work:
             return DeterministicUnitResult("skipped")
-        recipe = self.input_recipe(target_frame)
-        extra = tuple(f"table:{t['name']}" for t in self.ws.tables
-                      if recipe and f"table:{t['name']}" not in source_refs(recipe))
-        expected = parent_hashes(self.ws, [*unit["parent_refs"], *extra])
+        frames = list(dict.fromkeys(item.frame for item in work))
+        recipes = {frame: self.input_recipe(frame) for frame in frames}
         target = AnalysisDefinitionExecutorTarget(
             self.ws,
             self.run["id"],
-            target_frame,
-            parent_ref,
-            alignment=recipe,
-            extra_parent_refs=extra,
+            recipes,
             allow_auditor_overwrite=self.run["mode"] == "permission",
         )
+        expected = parent_hashes(self.ws, sorted(target.parent_refs()))
         task = self.add_task(
-            "analysis_definitions", "workflow:analysis_definitions", "Analysis definitions"
+            "analysis_definitions", "workflow:analysis_definitions", "Authored analyses"
         )
+        items = [
+            {
+                "ref": item.ref,
+                "kind": item.kind,
+                "frame": item.frame,
+                "columns": list(item.columns),
+                "statement": item.assertion,
+                "why": item.why,
+            }
+            for item in work
+        ]
+
+        def settle_all(reason: str) -> None:
+            for frame in frames:
+                register.settle_frame(self.input_workspace(), frame, reason)
 
         def context_provider():
+            view = self.input_workspace()
             return self.context_resolver.resolve(
                 self.ws,
                 capability,
                 unit,
-                analysis_definition_scope(
-                    self.input_workspace(),
-                    target_frame,
-                    related=[
-                        name for name in table_scope.tables if name != target_frame
+                analysis_authoring_scope(
+                    view,
+                    items,
+                    value_domains=[
+                        domain for frame in frames for domain in probes.value_domains(view, frame)
                     ],
-                    relationships=self.relationship_records(),
-                    hypotheses=hypotheses,
-                    # Deliberately no probe findings. Every nomination this
-                    # frame measured is already a saved analysis, committed by
-                    # the register before this turn was bound, and it appears
-                    # here as one of ``current_analyses``. Sending it again as a
-                    # nomination would ask the model to re-propose a spec that
-                    # already exists, which the identity check then drops — a
-                    # slot spent to produce a duplicate.
-                    value_domains=probes.value_domains(self.input_workspace(), target_frame),
                     instruction=workflow_scope(self.run).get("instruction"),
                 ),
             )
@@ -1428,7 +1388,7 @@ class AnalysisWorkflowExecution(BaseRunner):
             proposed = [
                 self.proposal_item(
                     str(item.get("title")),
-                    f"Rerunnable {item.get('kind')} analysis for {target_frame}.",
+                    f"Authored Polars analysis for {item.get('frame')}.",
                     dict(item),
                 )
                 for item in proposal.get("analyses") or []
@@ -1452,74 +1412,36 @@ class AnalysisWorkflowExecution(BaseRunner):
                 )
             for preserved in output.get("preserved") or []:
                 self.warn(f"Preserved auditor-owned analysis '{preserved}'.")
-            for covered in output.get("covered") or []:
-                self.warn(
-                    f"Analysis '{covered}' already computes this from the same "
-                    "columns on a related frame; not duplicated here."
-                )
             for reason in output.get("dropped") or []:
-                # A proposal that failed local execution or established
-                # nothing is not evidence against its siblings, so it is
-                # dropped rather than failing the whole frame — but a dropped
-                # proposal is still a gap, and the auditor cannot see a
-                # proposal that was never saved unless it is said here.
-                self.warn(f"'{target_frame}': dropped a proposed analysis — {reason}")
+                self.warn(f"Authored analysis not saved — {reason}")
+            # A frame whose every item was declined or dropped is answered too.
+            written = {
+                str(item.get("table") or "")
+                for item in agent_analyses(self.ws, self.scope())
+            }
+            for frame in frames:
+                if frame not in written:
+                    register.settle_frame(
+                        self.input_workspace(), frame,
+                        "every analysis authored for this frame was declined or dropped",
+                    )
             self.task_status(task, "completed")
 
         def conflict_handler(_stage, _unit, error) -> tuple[str, str] | None:
             if str(error) == ANALYSIS_COVERED_ELSEWHERE:
-                # Nothing to write because everything proposed is already saved
-                # against a frame built from the same tables. That is the
-                # de-duplication working, not an outcome needing an auditor.
-                register.settle_frame(
-                    self.input_workspace(),
-                    target_frame,
-                    "every analysis proposed here is already saved against a "
-                    "related frame",
-                )
-                return (
-                    "skipped",
-                    "Every proposed analysis is already covered by a related frame.",
-                )
+                settle_all("every authored analysis is already saved against a related frame")
+                return ("skipped", "Every authored analysis is already covered by a related frame.")
             if str(error) != AUDITOR_ANALYSIS_PRESERVED:
                 return None
-            return (
-                "awaiting_confirmation",
-                "Auditor-owned analysis definitions were preserved.",
-            )
+            return ("awaiting_confirmation", "Auditor-owned analysis definitions were preserved.")
 
         def failure_handler(_stage, _unit, error) -> tuple[str, str] | None:
-            # The worker had its repair turn and still found nothing this frame
-            # computes that its join family does not already hold. A joined
-            # frame that adds no analysis of its own is a real answer about the
-            # data, so the unit settles instead of failing the run.
             if NOTHING_NEW_TO_ANALYSE in str(error):
-                register.settle_frame(
-                    self.input_workspace(),
-                    target_frame,
-                    "every analysis this frame supports is already saved against "
-                    "a frame built from the same tables",
-                )
-                return (
-                    "skipped",
-                    "Every analysis this frame supports is already saved against "
-                    "a frame built from the same tables.",
-                )
-            # The same shape of answer, reached by running the proposals rather
-            # than by comparing them: every one of them flagged nearly its whole
-            # population, which establishes nothing about any row in it.
+                settle_all("every work item placed here was declined with a reason")
+                return ("skipped", "Every work item was declined with a reason.")
             if NO_INFORMATIVE_ANALYSIS in str(error):
-                register.settle_frame(
-                    self.input_workspace(),
-                    target_frame,
-                    "no analysis proposed for this frame separated any of its "
-                    "rows from the rest",
-                )
-                return (
-                    "skipped",
-                    "No proposed analysis for this frame separated any of its "
-                    "rows from the rest.",
-                )
+                settle_all("no authored analysis separated any of its rows from the rest")
+                return ("skipped", "No authored analysis separated any of its rows from the rest.")
             return None
 
         return BoundUnitPipeline(
@@ -1532,18 +1454,17 @@ class AnalysisWorkflowExecution(BaseRunner):
                     "kind": unit.get("kind"),
                     "input_sha1": unit.get("input_sha1"),
                     "parent_refs": list(unit.get("parent_refs") or []),
+                    "work_items": items,
                 },
                 activity={
-                    "artifact_refs": [parent_ref],
+                    "artifact_refs": [ANALYSIS_REGISTER_REF],
                     "task_id": task["id"],
                 },
                 expected_revision=self.ws.revision,
                 expected_parents=expected,
                 capability_definition_hash=workflow.capability_definition_hash(capability),
                 approval_kind=(
-                    "analysis_definitions"
-                    if self.run["mode"] == "permission"
-                    else None
+                    "analysis_definitions" if self.run["mode"] == "permission" else None
                 ),
                 proposal_reference=unit.get("proposal_sidecar"),
                 receipt_reference=unit.get("receipt_sidecar"),
@@ -1556,8 +1477,6 @@ class AnalysisWorkflowExecution(BaseRunner):
             approval_provider=(
                 approval_provider if self.run["mode"] == "permission" else None
             ),
-            # Definitions fan out one unit per scoped frame, so this capability's
-            # readiness only holds once every unit has committed.
             readiness_provider=None,
             on_committed=on_committed,
             conflict_handler=conflict_handler,

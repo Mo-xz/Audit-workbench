@@ -251,34 +251,51 @@ def _promotion(getfixture):
 @builds("analysis.definitions")
 def _definitions(getfixture):
     from app.agent.capabilities import ANALYSIS_REGISTRY
-    from app.agent.context import ContextResolver, analysis_definition_scope
+    from app.agent.context import ContextResolver, analysis_authoring_scope
     from app.agent.workers.model import WorkerRequest
 
     ws = getfixture("workspace_with_data")
     capability = ANALYSIS_REGISTRY.get("analysis.definitions_ready")
+    items = [
+        {"ref": "R01", "kind": "assert", "frame": "transactions", "columns": ["invoice_no"],
+         "statement": "No invoice number repeats.", "why": "A reused key is a double posting."},
+        {"ref": "E01", "kind": "explore", "frame": "transactions", "columns": ["cust_id", "amount"],
+         "statement": "How is value spread across customers?", "why": "Where the value is."},
+    ]
     _manifest, bundle = ContextResolver().resolve(
         ws,
         capability,
-        {"id": "analysis_definitions:transactions"},
-        analysis_definition_scope(ws, "transactions"),
+        {"id": "analysis_authoring"},
+        analysis_authoring_scope(ws, items),
     )
     request = WorkerRequest(
         worker_id="analysis.definitions",
         capability_id=capability.id,
-        unit_id="analysis_definitions:transactions",
+        unit_id="analysis_authoring",
         context=bundle,
     )
     proposal = {
         "analyses": [
             {
-                "title": "Outlier test",
-                "kind": "analytics",
-                # A `columns` parameter: the list-valued shape the spec walker
-                # reads positionally, and the one a freeze would empty.
-                "spec": {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
+                "ref": "R01",
+                "frame": "transactions",
+                "title": "Repeated invoice numbers",
                 "note": "Reused keys signal double postings.",
-            }
-        ]
+                "code": "result = tables['transactions'].filter(pl.col('invoice_no').is_duplicated())",
+                "outcome_policy": "exception_rows",
+            },
+            {
+                "ref": "E01",
+                "frame": "transactions",
+                "title": "Value by customer",
+                "note": "Where the value sits.",
+                # A list-valued field: the shape a freeze would empty.
+                "code": "result = tables['transactions'].group_by('cust_id').agg(pl.col('amount').sum())",
+                "outcome_policy": "informational",
+                "chart": {"type": "bar", "x": "cust_id", "y": ["amount"]},
+            },
+        ],
+        "declined": [],
     }
     return proposal, request
 

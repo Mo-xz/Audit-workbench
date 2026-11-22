@@ -492,8 +492,27 @@ Each phase is independently useful and measurable against the key.
    `implications` forward from the draft it repairs. Still short of the
    benchmark: weekend-heavy dates are read as "no after-hours keying" rather
    than "keyed, not stamped", and 37 embeds is too many to read.
-4. **Reading and authoring.** The characterize, explore and outline sections,
-   and one batched code call replacing per-frame definitions.
+4. **Reading and authoring.** *Done.* The reading turn is shown the profile's
+   bounded summaries (`data_map.profile_digest`) and gains `characterize` and
+   `explore`; declines are argued against the profile. One authoring unit and
+   one `analysis.definitions` turn answer every authored assertion and explore
+   question as Polars code, against frame schemas alone — no catalog, no
+   figures — and the executor runs each before saving it. An explore answer is
+   `informational` with a chart. The reading's characterize and unanswerable
+   lists are kept beside the data (`analysis_reading.json`, stamped with every
+   table's signature) and reach the memo, where "What the data cannot answer"
+   is assembled by code. `outline` was dropped: the memo writer already has the
+   profile and orders its own sections. Live on procurement: three model calls
+   (reading 44k prompt tokens, authoring 15k, memo 67k) where phase 3 spent
+   eleven definition turns and 173k tokens before the memo; the key goes from
+   11 of 14 to 13 of 14, with P-05 partial. Ten authored analyses, four of them
+   charted explore answers, none dropped. The weekend reading is now right —
+   "dates were keyed rather than stamped" — and the memo names five things no
+   column can answer (vendor status at payment date, who received the goods,
+   credits and reversals, contract rates, the paying bank account). Still 37
+   embeds, which phase 5 is for. Building it surfaced a latent bug: a
+   definition with no `viz` could not be screened (`_cap_for(None)`), so an
+   uninformative python result was kept rather than dropped.
 5. **Exhibits.** The new chart types in `ChartView`, `MemoView` and `memoDocx`.
 6. **The cycle's shape moves ahead.** It reads the process documents instead of
    the memorandum, theme placement splits off after the APM, and analysis takes

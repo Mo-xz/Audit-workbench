@@ -2989,15 +2989,8 @@ def finding_consolidation_scope(
 # --------------------------------------------------------------------------- #
 # analysis.definitions (P8.6)
 # --------------------------------------------------------------------------- #
-ANALYSIS_TARGET_SCHEMA_SOURCE_ID = "target_schema"
-ANALYSIS_TARGET_PROFILE_SOURCE_ID = "target_profile"
-ANALYSIS_TARGET_AGGREGATE_SOURCE_ID = "target_aggregates"
-ANALYSIS_RELATED_FRAMES_SOURCE_ID = "related_frames"
-ANALYSIS_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
-ANALYSIS_RELATIONSHIP_SOURCE_ID = "relationship_evidence"
-ANALYSIS_REGISTRY_SOURCE_ID = "analytics_registry"
-ANALYSIS_LOOKUP_SOURCE_ID = "lookup_candidates"
-ANALYSIS_PROBE_SOURCE_ID = "probe_findings"
+AUTHORING_ITEMS_SOURCE_ID = "work_items"
+AUTHORING_FRAMES_SOURCE_ID = "frame_schemas"
 ANALYSIS_DOMAIN_SOURCE_ID = "value_domains"
 ANALYSIS_CURRENT_SOURCE_ID = "current_analyses"
 ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS = (
@@ -3119,69 +3112,6 @@ def _key_columns(workspace: Workspace, table: str) -> list[str]:
 # turns the reconciliation test into a third of the prompt.
 MAX_LOOKUP_KEYS = 3
 
-
-def analysis_lookup_candidates(
-    workspace: Workspace, target: str
-) -> tuple[ContextCandidate, ...]:
-    """Frames a reconciliation from ``target`` may read, and their key columns.
-
-    Base tables only, and never one the target already contains: reconciling a
-    joined frame against a table it was built from asks whether a key matches
-    itself. A frame with no key column is omitted — there is nothing on it for a
-    reference to resolve against.
-
-    Narrowed further to the frames the target plausibly *references*, by the same
-    schema-only name affinity the join diagnostics use before they measure
-    anything. Two reasons, and the second is the one that matters. Offering a
-    staff master to a frame carrying no person-shaped column invites a
-    reconciliation that can only report that two unrelated columns do not match.
-    And the offer is not free: each candidate costs a schema branch carrying the
-    target's whole column enum, so an unfiltered sweep of a twenty-table
-    workspace would spend more of the definition turn on this one test than on
-    every other test combined.
-    """
-    lineage = join_diagnostics.frame_lineage(workspace, target)
-    try:
-        columns = [
-            str(column.get("name"))
-            for column in workspace.get_profile(target).get("column_profiles") or []
-            if str(column.get("name") or "").strip()
-        ]
-    except (OSError, WorkspaceError):
-        columns = []
-    entities = join_diagnostics.entity_tokens(workspace.table_names())
-    candidates = []
-    for item in workspace.tables:
-        name = str(item.get("name") or "")
-        if not name or name in lineage or name == target:
-            continue
-        keys = _key_columns(workspace, name)
-        if not keys:
-            continue
-        referenced = list(
-            dict.fromkeys(
-                key
-                for _, key in join_diagnostics.reference_candidates(
-                    columns, keys, name, entities
-                )
-            )
-        )
-        # No column of the target looks like a reference to this frame. A
-        # reconciliation between them would be a comparison of two populations
-        # that were never meant to meet.
-        if not referenced:
-            continue
-        content = {"table": name, "key_columns": referenced[:MAX_LOOKUP_KEYS]}
-        candidates.append(
-            ContextCandidate(
-                source_ref=f"lookup:{name}",
-                source=content,
-                representations={"table_metadata": content},
-                metadata={"table": name},
-                lexical_text=" ".join([name, *content["key_columns"]]),
-            )
-        )
-    return tuple(candidates)
 
 
 def analysis_domain_candidates(
@@ -3371,6 +3301,7 @@ READING_RELATIONSHIP_SOURCE_ID = "relationship_map"
 READING_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
 READING_DOMAIN_SOURCE_ID = "value_domains"
 READING_REGISTRY_SOURCE_ID = "analytics_registry"
+READING_PROFILE_SOURCE_ID = "population_profile"
 
 
 def analysis_reading_scope(
@@ -3383,6 +3314,7 @@ def analysis_reading_scope(
     value_domains: Iterable[Mapping[str, object]] = (),
     analytics_registry: object = None,
     instruction: str | None = None,
+    profile: Iterable[Mapping[str, object]] = (),
 ) -> ContextScope:
     """The whole map, once: every frame's columns and every measured nomination.
 
@@ -3460,6 +3392,18 @@ def analysis_reading_scope(
                 for item in hypotheses
             ),
             READING_DOMAIN_SOURCE_ID: analysis_domain_candidates(value_domains),
+            # The population profile's summaries, computed for this turn: what
+            # the data looks like, against which a nomination is read.
+            READING_PROFILE_SOURCE_ID: tuple(
+                ContextCandidate(
+                    source_ref=f"profile:{item.get('ref')}",
+                    source=dict(item),
+                    representations={"analysis_aggregate": dict(item)},
+                    metadata={"ref": str(item.get("ref") or "")},
+                    lexical_text=str(item.get("title") or ""),
+                )
+                for item in profile
+            ),
             READING_REGISTRY_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="registry:analytics",
@@ -3473,179 +3417,75 @@ def analysis_reading_scope(
     )
 
 
-def _without_digest(item: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in item.items() if key != "flagged_digest"}
 
-
-def analysis_definition_scope(
+def analysis_authoring_scope(
     workspace: Workspace,
-    target: str,
+    items: Iterable[Mapping[str, object]],
     *,
-    related: Iterable[str] = (),
-    relationships: Iterable[Mapping[str, object]] | None = None,
-    hypotheses: Iterable[Mapping[str, object]] = (),
-    probe_findings: Iterable[Mapping[str, object]] = (),
     value_domains: Iterable[Mapping[str, object]] = (),
-    analytics_registry: object = None,
     instruction: str | None = None,
 ) -> ContextScope:
-    """Build the local candidate scope for one analysis-definition unit.
+    """Everything the one authoring turn writes against, for every frame at once.
 
-    Every model-facing input is metadata, a bounded statistical profile, or a
-    value-free aggregate. ``table_rows`` is never produced, and the declaration
-    denies the permission as well, so row-level data cannot reach the worker
-    even if an adapter regressed.
+    The work items are the register's: what each should establish, on which
+    frame, reading which columns. Each frame they name is described by its
+    schema, the table each column comes from and the table its rows are rows of
+    — metadata only. Value domains name a category's real spellings. The
+    analyses already saved on those frames' join families are listed so a
+    computation is not written twice. No row reaches this turn.
     """
-    from ... import analytics as analytics_module
-
-    if target not in workspace.table_names():
-        raise WorkspaceError(f"Unknown table '{target}'.")
-    schema = next(
-        (
-            item
-            for item in assistant.schema_brief(workspace, tables=[target])
-            if str(item.get("table") or "") == target and not item.get("error")
-        ),
-        None,
-    )
-    if schema is None:
-        raise WorkspaceError(f"Table '{target}' has no readable schema.")
-    profile_candidates = tuple(
-        candidate
-        for candidate in apm_table_profile_candidates(workspace, names=[target])
-        if candidate.metadata.get("table") == target
-    )
-    # A frame whose lineage the target already contains has no column the
-    # target does not: sending its schema costs a description of the same data
-    # under another name, and invites a proposal that reads one side of the
-    # target through a frame that is only part of it.
-    lineage = join_diagnostics.frame_lineage(workspace, target)
-    related_names = [
-        name
-        for name in dict.fromkeys(str(value) for value in related)
-        if name != target
-        and name in workspace.table_names()
-        and not join_diagnostics.frame_lineage(workspace, name) <= lineage
-    ]
-    related_candidates = tuple(
-        candidate
-        for candidate in apm_table_metadata_candidates(workspace, names=related_names)
-        if candidate.metadata.get("table") in set(related_names)
-    )
-    # The complete public contract for every workflow-eligible library test.
-    # Low-impact digit-pattern scans remain available in the manual analytics
-    # library, but the autonomous workflow does not propose them.  The worker
-    # receives parameter defaults, allowed select values, optionality, and
-    # column type constraints — not merely parameter names.
-    registry = (
-        analytics_registry
-        if analytics_registry is not None
-        else [
-            item
-            for item in analytics_module.registry_payload()
-            if item["id"] not in ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS
-        ]
-    )
-    # Analyses already saved anywhere in this frame's join family, not only on
-    # the frame itself. A join is a view over its sides, so the same
-    # computation is reachable from every frame sharing a base table with the
-    # target; showing only the target's own analyses is what let one invoice
-    # date-lag check be proposed three times, once per frame that could see the
-    # invoice columns. A proposal can only avoid repeating what it was shown.
-    family = {
-        name
-        for name in workspace.table_names()
-        if join_diagnostics.frame_lineage(workspace, name) & lineage
-    }
+    work = [dict(item) for item in items]
+    frames = list(dict.fromkeys(str(item.get("frame") or "") for item in work if item.get("frame")))
+    schemas = []
+    for frame in frames:
+        if frame not in workspace.table_names():
+            continue
+        brief = next(
+            (
+                entry
+                for entry in assistant.schema_brief(workspace, tables=[frame])
+                if str(entry.get("table") or "") == frame and not entry.get("error")
+            ),
+            None,
+        )
+        if brief is None:
+            continue
+        schemas.append({
+            **brief,
+            "column_origins": join_diagnostics.column_origins(workspace, frame),
+            "frame_root": join_diagnostics.frame_root(workspace, frame),
+        })
+    lineage = set()
+    for frame in frames:
+        if frame in workspace.table_names():
+            lineage |= set(join_diagnostics.frame_lineage(workspace, frame))
     current = [
-        {
-            key: item.get(key)
-            for key in ("id", "title", "kind", "table", "spec", "semantic_id", "created_by")
-        }
+        {key: item.get(key) for key in ("id", "title", "kind", "table", "spec")}
         for item in workspace.analyses
-        if str(item.get("table") or "") in family
+        if str(item.get("table") or "") in workspace.table_names()
+        and set(join_diagnostics.frame_lineage(workspace, str(item.get("table")))) & lineage
     ]
-    # Which base table each column comes from. Identity for an analysis is the
-    # computation — these columns, from these tables — rather than the frame it
-    # was written against, so the worker needs the mapping to recognise its
-    # own proposal in a sibling frame's saved analysis.
-    schema = {
-        **schema,
-        "column_origins": join_diagnostics.column_origins(workspace, target),
-        # The population the computation was asked over: which table the frame's
-        # rows are rows of, and which key each joined-in table was reached by.
-        # Identity above says which computation a proposal is; without these it
-        # cannot tell a repeat from a sibling frame's different question about
-        # the same column, and the difference is the finding.
-        "frame_root": join_diagnostics.frame_root(workspace, target),
-        "frame_route": join_diagnostics.frame_route(workspace, target),
-    }
     return ContextScope(
         candidates={
-            ANALYSIS_TARGET_SCHEMA_SOURCE_ID: (
+            AUTHORING_ITEMS_SOURCE_ID: tuple(
                 ContextCandidate(
-                    source_ref=f"table:{target}",
+                    source_ref=f"work:{item.get('ref')}",
+                    source=item,
+                    representations={"current_artifact": item},
+                    metadata={"ref": str(item.get("ref") or "")},
+                    lexical_text=str(item.get("statement") or ""),
+                )
+                for item in work
+            ),
+            AUTHORING_FRAMES_SOURCE_ID: tuple(
+                ContextCandidate(
+                    source_ref=f"table:{schema['table']}",
                     source=schema,
                     representations={"table_metadata": schema},
-                    metadata={"table": target},
-                    lexical_text=target,
-                ),
-            ),
-            ANALYSIS_TARGET_PROFILE_SOURCE_ID: profile_candidates,
-            ANALYSIS_TARGET_AGGREGATE_SOURCE_ID: analysis_aggregate_candidates(
-                workspace, target
-            ),
-            ANALYSIS_RELATED_FRAMES_SOURCE_ID: related_candidates,
-            # Why this frame was materialized at all. The utility gate admitted
-            # each retained relationship against a stated, falsifiable test; a
-            # frame asked to invent one from schemas alone reinvents a worse
-            # question than the one already asked of it.
-            ANALYSIS_HYPOTHESIS_SOURCE_ID: tuple(
-                ContextCandidate(
-                    source_ref=f"hypothesis:{item.get('ref')}",
-                    source=dict(item),
-                    representations={"current_artifact": dict(item)},
-                    metadata={"ref": str(item.get("ref") or "")},
-                    lexical_text=str(item.get("hypothesis") or ""),
+                    metadata={"table": str(schema["table"])},
+                    lexical_text=str(schema["table"]),
                 )
-                for item in hypotheses
-                if set(str(name) for name in item.get("requires") or ()) <= lineage
-            ),
-            ANALYSIS_RELATIONSHIP_SOURCE_ID: analysis_relationship_candidates(
-                workspace, target, relationships
-            ),
-            ANALYSIS_REGISTRY_SOURCE_ID: (
-                ContextCandidate(
-                    source_ref="registry:analytics",
-                    source=registry,
-                    representations={"current_artifact": registry},
-                    metadata={"registry": "analytics"},
-                ),
-            ),
-            ANALYSIS_LOOKUP_SOURCE_ID: analysis_lookup_candidates(workspace, target),
-            # What this frame's own data already asserts, measured before the
-            # turn rather than guessed during it. Each is a runnable spec with
-            # the counts it produced, so the model is choosing among measured
-            # questions instead of deriving candidate questions from the schema
-            # and finding out afterwards which of them had anything in them.
-            # Counts and column names only — the rows behind a nomination stay
-            # in the evidence sidecar its execution writes.
-            # ``flagged_digest`` is the register's merge key, a hash of row
-            # values; it says nothing a model can use, so it is not supplied.
-            ANALYSIS_PROBE_SOURCE_ID: tuple(
-                ContextCandidate(
-                    source_ref=(
-                        f"probe:{item.get('frame')}:{item.get('test')}:{index}"
-                    ),
-                    source=_without_digest(item),
-                    representations={"table_aggregate": _without_digest(item)},
-                    metadata={
-                        "table": str(item.get("frame") or ""),
-                        "family": str(item.get("family") or ""),
-                    },
-                    lexical_text=str(item.get("reading") or ""),
-                )
-                for index, item in enumerate(probe_findings)
+                for schema in schemas
             ),
             ANALYSIS_DOMAIN_SOURCE_ID: analysis_domain_candidates(value_domains),
             ANALYSIS_CURRENT_SOURCE_ID: tuple(
@@ -3659,7 +3499,6 @@ def analysis_definition_scope(
             ),
             INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),
         },
-        selector_context={"analysis_query": target},
     )
 
 
@@ -3669,6 +3508,9 @@ def analysis_definition_scope(
 SUMMARY_RESULTS_SOURCE_ID = "analysis_results"
 SUMMARY_EXCEPTIONS_SOURCE_ID = "analysis_exceptions"
 SUMMARY_AGGREGATES_SOURCE_ID = "analysis_aggregates"
+#: What the reading turn said about the data that no procedure records: facts
+#: that change what can be tested, and questions no column answers.
+SUMMARY_READING_SOURCE_ID = "analysis_reading"
 
 
 def _frame_label(analysis: Mapping[str, object]) -> str:
@@ -4006,6 +3848,28 @@ def analysis_coverage_gaps(workspace: Workspace) -> dict[str, object]:
     }
 
 
+def analysis_summary_reading_candidates(workspace: Workspace) -> tuple[ContextCandidate, ...]:
+    """The last reading's judgement, while the data it read is the data here.
+
+    Model-written text about metadata and bounded summaries — no value the
+    profile withheld, no row — kept by ``register.save_reading`` and read only
+    while every table it stamped is unchanged.
+    """
+    from .. import register  # the register reads frames; context stays a leaf
+
+    reading = register.load_reading(workspace)
+    if not reading:
+        return ()
+    return (
+        ContextCandidate(
+            source_ref="analysis:reading",
+            source=reading,
+            representations={"analysis_result": reading},
+            metadata={"kind": "analysis_reading"},
+        ),
+    )
+
+
 def analysis_summary_scope(
     workspace: Workspace, *, instruction: str | None = None
 ) -> ContextScope:
@@ -4029,6 +3893,7 @@ def analysis_summary_scope(
                 workspace, failures=False
             ),
             SUMMARY_AGGREGATES_SOURCE_ID: analysis_summary_aggregate_candidates(workspace),
+            SUMMARY_READING_SOURCE_ID: analysis_summary_reading_candidates(workspace),
             SUMMARY_GAPS_SOURCE_ID: (
                 ContextCandidate(
                     source_ref="analysis:coverage_gaps",
@@ -4675,19 +4540,17 @@ def intake_classification_scope(
 
 
 __all__ = [
+    "SUMMARY_READING_SOURCE_ID",
+    "analysis_summary_reading_candidates",
     "FINDING_TEST_SOURCE_ID",
     "linked_test_projections",
     "ANALYSIS_CURRENT_SOURCE_ID",
-    "ANALYSIS_REGISTRY_SOURCE_ID",
     "ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS",
-    "ANALYSIS_RELATED_FRAMES_SOURCE_ID",
-    "ANALYSIS_RELATIONSHIP_SOURCE_ID",
-    "ANALYSIS_TARGET_AGGREGATE_SOURCE_ID",
-    "ANALYSIS_TARGET_PROFILE_SOURCE_ID",
-    "ANALYSIS_TARGET_SCHEMA_SOURCE_ID",
     "MAX_AGGREGATE_COLUMNS",
     "analysis_aggregate_candidates",
-    "analysis_definition_scope",
+    "analysis_authoring_scope",
+    "AUTHORING_ITEMS_SOURCE_ID",
+    "AUTHORING_FRAMES_SOURCE_ID",
     "analysis_reading_scope",
     "analysis_relationship_candidates",
     "PROMOTION_SUBJECT_SOURCE_ID",

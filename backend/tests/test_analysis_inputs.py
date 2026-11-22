@@ -332,14 +332,14 @@ def test_definition_reconciliation_checks_every_recipe_source(mixed):
         capability_id="analysis.definitions_ready", unit_id="definition",
         proposal={"analyses": [{
             "title": "Authority", "kind": "analytics", "semantic_id": "authority",
-            "table": recipe["name"], "spec": {"test": "compare_columns", "params": {
+            "frame": recipe["name"], "spec": {"test": "compare_columns", "params": {
                 "column": "AMOUNT", "other": "REQ_AMOUNT", "op": "le",
             }},
         }]},
         expected_revision=mixed.revision, expected_parents=parent_hashes(mixed, refs),
     )
     target = executors.AnalysisDefinitionExecutorTarget(
-        mixed, "definition-conflict", recipe["name"], refs[0], alignment=recipe,
+        mixed, "definition-conflict", {recipe["name"]: recipe},
     )
     # Alter the second guarded source; checking only the first would miss it.
     path = mixed.data_dir / next(t["file"] for t in mixed.tables if t["name"] == "requisitions")

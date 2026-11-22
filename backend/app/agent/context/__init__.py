@@ -45,15 +45,9 @@ from .resolver import (
 )
 from .adapters import (
     ANALYSIS_CURRENT_SOURCE_ID,
-    ANALYSIS_REGISTRY_SOURCE_ID,
     ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS,
-    ANALYSIS_RELATED_FRAMES_SOURCE_ID,
-    ANALYSIS_RELATIONSHIP_SOURCE_ID,
-    ANALYSIS_TARGET_AGGREGATE_SOURCE_ID,
-    ANALYSIS_TARGET_PROFILE_SOURCE_ID,
-    ANALYSIS_TARGET_SCHEMA_SOURCE_ID,
     analysis_aggregate_candidates,
-    analysis_definition_scope,
+    analysis_authoring_scope,
     analysis_reading_scope,
     join_utility_scope,
     analysis_summary_scope,
@@ -132,15 +126,9 @@ from .adapters import (
 
 __all__ = [
     "ANALYSIS_CURRENT_SOURCE_ID",
-    "ANALYSIS_REGISTRY_SOURCE_ID",
     "ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS",
-    "ANALYSIS_RELATED_FRAMES_SOURCE_ID",
-    "ANALYSIS_RELATIONSHIP_SOURCE_ID",
-    "ANALYSIS_TARGET_AGGREGATE_SOURCE_ID",
-    "ANALYSIS_TARGET_PROFILE_SOURCE_ID",
-    "ANALYSIS_TARGET_SCHEMA_SOURCE_ID",
     "analysis_aggregate_candidates",
-    "analysis_definition_scope",
+    "analysis_authoring_scope",
     "analysis_reading_scope",
     "join_utility_scope",
     "analysis_summary_scope",

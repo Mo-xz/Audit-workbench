@@ -1065,10 +1065,23 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   list becomes a second, already-billed unit the moment one does.
   The register is run-durable like the relationship evidence beside it, not a
   workspace collection: it is a recomputable reading of frames that already
-  exist. `analysis.definitions_ready` then spends a turn only on the frames the
-  register placed an *authored* assertion on — a kept nomination is already an
-  exact spec with its counts measured, and re-deriving it through a model call
-  was, measured across four runs, sometimes declined.
+  exist. The reading is shown the population profile's bounded summaries
+  (`data_map.profile_digest`, under `allow_analysis_aggregates`) and must argue
+  a decline against them; beside its assertions it may **characterize** the
+  data (a fact that changes what can be tested, and what it changes) and
+  **explore** it (a question about the population, answered as an
+  informational result with a chart). Its characterize and unanswerable lists
+  outlive the run in `Data/.cache/analysis_reading.json`, stamped with every
+  table's signature (`register.save_reading` / `load_reading`), and reach the
+  memo writer as the `analysis_reading` source; the memo's "What the data
+  cannot answer" section is assembled from it by code.
+  `analysis.definitions_ready` is then **one** authoring unit, not one per
+  frame: a single `analysis.definitions` turn answers every authored assertion
+  and explore question in the register, once each, as Polars code or a declined
+  reason, against the schemas of the frames they name — no catalog, no figures.
+  A kept nomination is already an exact spec with its counts measured and is
+  never sent there. The executor runs each answer before saving it and drops,
+  and says, any that fails or returns its whole frame as exceptions.
 - **The profile describes the population before anything is tested.**
   `analysis.profiled` reads the scoped tables into a data map
   (`agent/data_map.py`) — which tables hold transactions and which are masters,

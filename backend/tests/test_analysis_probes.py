@@ -13,12 +13,6 @@ import pytest
 from app import analysis_results, analytics, workspaces
 from app.agent import probes
 from app.explore import QueryError
-from app.agent.context.adapters import analysis_definition_scope
-from app.agent.workers.analysis import (
-    MAX_MEASURED_ANALYSES,
-    MAX_PROPOSED_ANALYSES,
-    proposal_budget,
-)
 
 
 def _rows(count: int, start: int = 1) -> list[int]:
@@ -434,23 +428,6 @@ def test_a_sweep_is_stable_across_runs():
     assert first == probes.probe_frame(ws, "ledger")
 
 
-def test_measured_findings_widen_a_frame_beyond_its_size_budget():
-    """The size budget stops padding, and a measured finding is not padding.
-
-    Observed: a frame carrying ten measured findings saved four of them, because
-    four was all its row count allowed. The six that did not fit included the
-    invoices dated before their own purchase order.
-    """
-    # Size alone is unchanged where nothing has been measured.
-    assert proposal_budget(118) == MAX_PROPOSED_ANALYSES
-    assert proposal_budget(12) == 2
-    # A frame with more measured findings than slots gets the slots.
-    assert proposal_budget(118, 10) == MAX_MEASURED_ANALYSES
-    assert proposal_budget(12, 5) == 5
-    # Never narrower than the size budget, and never unbounded.
-    assert proposal_budget(118, 1) == MAX_PROPOSED_ANALYSES
-    assert proposal_budget(118, 500) == MAX_MEASURED_ANALYSES
-
 
 # ------------------------------------------------- value domains and samples
 def test_a_status_vocabulary_is_named_in_full():
@@ -729,25 +706,6 @@ def test_a_date_column_cannot_be_compared_against_itself():
             {"from_date": "APPROVED_DATE", "to_date": "APPROVED_DATE"},
         )
 
-
-def test_probe_findings_reach_the_definition_context():
-    ws = _workspace(
-        "Wired",
-        invoice_data=pl.DataFrame(
-            {
-                "INVOICE_ID": [f"INV{n:03d}" for n in _rows(30)],
-                "PO_NUMBER_LINK": [f"PO{n:03d}" if n > 3 else "MISSING" for n in _rows(30)],
-            }
-        ),
-        po_data=pl.DataFrame({"PO_NUMBER": [f"PO{n:03d}" for n in _rows(30)]}),
-    )
-    found = probes.probe_frame(ws, "invoice_data")
-    scope = analysis_definition_scope(ws, "invoice_data", probe_findings=found)
-    supplied = scope.candidates["probe_findings"]
-    assert len(supplied) == len(found)
-    assert {item.source["test"] for item in supplied} == {item["test"] for item in found}
-    # Absent by default rather than fabricated: a frame nobody swept supplies none.
-    assert not analysis_definition_scope(ws, "invoice_data").candidates["probe_findings"]
 
 
 # --------------------------------------------------------------- value filter

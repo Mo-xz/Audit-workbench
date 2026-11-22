@@ -29,6 +29,7 @@ from ...analysis_inputs import for_analysis, source_refs, validate_input, execut
 from ...workspace_transactions import ParentConflict, mutate, parent_hashes
 from ...workspaces import Workspace, WorkspaceError, slugify
 from .. import joins as join_diagnostics
+from ..analysis_identity import analysis_semantic_id
 from ..capabilities.analysis import ANALYSIS_SUMMARY_REF, frame_ref
 from .model import (
     EXECUTORS,
@@ -360,7 +361,7 @@ def reconcile_join(
 # --------------------------------------------------------------------------- #
 # The declared fields an accepted analysis proposal may write. Provenance,
 # identity, and result state are owned by the executor, never the proposal.
-ANALYSIS_FIELDS = ("title", "kind", "table", "spec", "note", "outcome_policy", "alignment")
+ANALYSIS_FIELDS = ("title", "kind", "table", "spec", "note", "outcome_policy", "alignment", "viz")
 
 
 def analysis_ref(analysis_id: str) -> str:
@@ -375,26 +376,54 @@ def analysis_stable_id(semantic_id: str) -> str:
 
 @dataclass
 class AnalysisDefinitionExecutorTarget:
-    """Mutable target for one frame's analysis-definition commit."""
+    """Mutable target for the authoring commit, across every frame it wrote on.
+
+    ``recipes`` maps each frame the authoring turn may write against to the
+    input recipe that builds it, or to ``None`` for a base table. The commit is
+    guarded on exactly the source tables those frames are built from.
+    """
 
     workspace: Workspace
     run_id: str
-    target_frame: str
-    parent_ref: str
+    recipes: dict = field(default_factory=dict)
     allow_auditor_overwrite: bool = False
-    alignment: dict | None = None
-    extra_parent_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace, Workspace):
             raise ValueError("Analysis definition target requires a Workspace.")
-        for field_name in ("run_id", "target_frame", "parent_ref"):
-            value = str(getattr(self, field_name) or "").strip()
-            if not value:
-                raise ValueError(f"Analysis definition target requires a {field_name}.")
-            setattr(self, field_name, value)
+        if not str(self.run_id or "").strip():
+            raise ValueError("Analysis definition target requires a run_id.")
+        self.run_id = str(self.run_id).strip()
+        if not isinstance(self.recipes, Mapping) or not self.recipes:
+            raise ValueError("Analysis definition target requires at least one frame.")
+        self.recipes = {str(frame): recipe for frame, recipe in self.recipes.items()}
         if not isinstance(self.allow_auditor_overwrite, bool):
             raise ValueError("allow_auditor_overwrite must be a boolean.")
+
+    def parent_refs(self) -> set[str]:
+        refs: set[str] = set()
+        for frame, recipe in self.recipes.items():
+            refs.update(source_refs(recipe) if recipe else (frame_ref(self.workspace, frame),))
+        return refs
+
+
+def authored_semantic_id(workspace: Workspace, definition: Mapping) -> str:
+    """The identity of authored code: the computation over this population.
+
+    Computed here rather than by the worker, which cannot reach the frames: the
+    columns the code reads, resolved to the tables they come from, and the
+    table the frame's rows are rows of.
+    """
+    view = for_analysis(workspace, definition, validate=False)
+    table = str(definition["table"])
+    return analysis_semantic_id(
+        str(definition.get("kind") or "python"),
+        table,
+        dict(definition.get("spec") or {}),
+        join_diagnostics.column_origins(view, table),
+        join_diagnostics.frame_root(view, table),
+        join_diagnostics.frame_route(view, table),
+    )
 
 
 class AnalysisEditPreserved(WorkspaceError):
@@ -408,11 +437,9 @@ def _validated_definitions(
         raise WorkspaceError(
             "Analysis definition executor requires an AnalysisDefinitionExecutorTarget."
         )
-    required = set(source_refs(target.alignment)) if target.alignment else {target.parent_ref}
-    required.update(target.extra_parent_refs)
-    if required != set(request.expected_parents):
+    if target.parent_refs() != set(request.expected_parents):
         raise WorkspaceError(
-            "Analysis definition executor requires exactly its target-frame parent hash."
+            "Analysis definition executor requires exactly its frames' source parent hashes."
         )
     raw = request.proposal.get("analyses")
     items = list(raw) if isinstance(raw, (list, tuple)) else []
@@ -421,13 +448,16 @@ def _validated_definitions(
         if not isinstance(entry, Mapping):
             continue
         definition = {key: _plain_json(entry[key]) for key in ANALYSIS_FIELDS if key in entry}
-        definition["table"] = target.target_frame
+        frame = str(entry.get("frame") or entry.get("table") or "").strip()
+        if frame not in target.recipes:
+            raise WorkspaceError(f"An authored analysis names an undeclared frame: '{frame}'.")
+        definition["table"] = frame
         definition.pop("alignment", None)
-        if target.alignment:
-            definition["alignment"] = validate_input(target.workspace, target.alignment)
-        semantic = str(entry.get("semantic_id") or "").strip()
-        if not semantic:
-            raise WorkspaceError("An accepted analysis definition has no semantic id.")
+        if target.recipes[frame]:
+            definition["alignment"] = validate_input(target.workspace, target.recipes[frame])
+        semantic = str(entry.get("semantic_id") or "").strip() or authored_semantic_id(
+            target.workspace, definition
+        )
         definition["semantic_id"] = semantic
         if not str(definition.get("title") or "").strip():
             raise WorkspaceError("An accepted analysis definition has no title.")
@@ -687,6 +717,7 @@ def _write_definitions(
                 # semantic id, it creates a new analysis instead.
                 "spec": dict(definition.get("spec") or {}),
                 **({"alignment": definition["alignment"]} if definition.get("alignment") else {}),
+                **({"viz": dict(definition["viz"])} if isinstance(definition.get("viz"), Mapping) else {}),
                 "note": str(definition.get("note") or ""),
                 **(
                     {"outcome_policy": dict(definition["outcome_policy"])}

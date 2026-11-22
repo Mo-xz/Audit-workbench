@@ -862,28 +862,30 @@ def input_parent_refs(workspace, table_scope, name):
     return source_refs(recipe) if recipe else (frame_ref(workspace, name),)
 
 
-def _definition_units(workspace: Workspace, scope: dict) -> list[UnitSpec]:
-    """One unit per definable frame; whether it spends a turn is the binder's.
+ANALYSIS_AUTHORING_UNIT = "analysis_authoring"
 
-    This deliberately no longer filters on "the frame already has an analysis".
-    The register commits every measured nomination before this stage begins, so
-    that test now answers yes for every frame that measured anything and would
-    expand no unit at all. What the filter was protecting against — re-deriving
-    definitions a previous run already wrote — is the binder's job now, and it
-    can make the distinction this cannot: which of a frame's analyses the
-    register wrote, and which a definition turn did.
+
+def _definition_units(workspace: Workspace, scope: dict) -> list[UnitSpec]:
+    """One unit: the authoring turn writes every frame's work at once.
+
+    Whether the stage runs at all is readiness's question (an unanswered frame);
+    which work items are still unwritten is the register's, and the binder's. The
+    unit id names no frame, for the reason the register's does not: a stage
+    re-expands as joins land, and an id derived from a frame list would become
+    a second, already-billed unit the moment one did.
     """
     table_scope = resolve_table_scope(workspace, scope)
-    joins = {str(item.get("name")) for item in workspace.joins}
+    targets = definable_targets(workspace, table_scope)
+    if not targets:
+        return []
     return [
         UnitSpec(
-            semantic_unit_id("analysis_definitions", target),
-            "analysis_definition",
-            f"Propose analyses — {target}",
-            input_parent_refs(workspace, table_scope, target),
-            {"target": target},
+            semantic_unit_id(ANALYSIS_AUTHORING_UNIT),
+            ANALYSIS_AUTHORING_UNIT,
+            "Write the authored analyses",
+            (ANALYSIS_REGISTER_REF,),
+            {"frames": list(targets)},
         )
-        for target in definable_targets(workspace, table_scope)
     ]
 
 

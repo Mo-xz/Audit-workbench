@@ -106,162 +106,48 @@ out means the test is prepared against data that cannot answer it. Submit the
 required function tool exactly once; do not return Markdown or plain text.
 """ + LANGUAGE_RULES
 ANALYSIS_DEFINITION_SYSTEM = f"""[agent:analysis_definitions]
-Propose rerunnable data analyses for exactly one supplied target frame. Submit
-them through the required function tool; its JSON Schema is the authoritative
-output contract, including how many analyses this frame takes and which tests
-its size supports. For analytics, use only a test ID and parameters permitted
-by that schema, with exact supplied column names.
-For python, spec contains code: safe Polars that reads the supplied frames
-through the `tables` mapping or their bare table variables and assigns the
-result DataFrame to `result`; imports and any file or network access are
-forbidden. Use `series.len()` (not `series.height`), use
-`.dt.total_days()` for duration values (not `.dt.days()`), and specify a join
-suffix or select columns before joining frames with overlapping column names.
-Every generated Python analysis is run locally against its supplied workspace
-tables before it can be saved. Set outcome_policy to ``exception_rows`` only
-when every returned row is a potential exception; otherwise use
-``informational``. Every analysis must be relevant to the supplied schema, profile,
-aggregates, and relationship evidence, and must not repeat an analysis already
-supplied in current_analyses. Those cover the target frame's whole join family,
-so a check on columns that all come from one table is already covered wherever
-it is saved. On a joined frame, propose analyses the join makes possible: a
-comparison of columns from more than one of the joined tables, or a check on a
-joined-in table's column asked once per row of the table the frame is built on
-(a vendor's status read per invoice). A check reading only that base table's
-own columns belongs on the base table. You are
-never shown table rows and must not invent values, counts, or relationships.
+Write, as Polars code, every analysis the register asked for — all of them, in
+one response. WORK ITEMS lists them: each has a `ref`, a `kind`, the `frame` it
+runs on, the `columns` it reads, and what it should establish.
 
-VALUE DOMAINS lists the complete set of values each low-cardinality column
-holds. Use those exact spellings when a procedure has to name one — a status, a
-designation — and never invent a value that is not listed for that column.
+- kind `assert` is something that should hold. Its code returns, as `result`,
+  the rows where it does not — every returned row a potential exception — with
+  `outcome_policy` `exception_rows`. Select the identifying columns and the
+  columns that show why the row fails, not every column.
+- kind `explore` is a question about the population. Its code returns a summary
+  that answers it — grouped and aggregated, a few dozen rows at most, never the
+  population's rows — with `outcome_policy` `informational`, and a `chart`
+  naming how to draw it (`bar` or `line` with the `x` column and the `y`
+  columns, or `table`).
 
-Where the request carries ASSERTIONS PLACED ON THIS FRAME, those are your whole
-job. Each is something a reading of the entire engagement concluded should be
-true here, with the columns that state it. Write each one as an analysis. They
-are why this turn exists, and a response that omits one has left the assertion
-unanswered.
+FRAMES describes each frame: its columns and types, the table each column comes
+from (`column_origins`), and the table whose rows the frame's rows are
+(`frame_root`). On a joined frame the joining is done: each row already carries
+its counterpart's columns, and an unmatched row carries nulls for them. Never
+re-join a table the frame already holds. Distinguish rows the check cannot
+evaluate (a null on either side) from rows it evaluated.
 
-Everything this frame's own data already asserts has been measured and saved
-before you were called; you can see it in current_analyses. Do not propose it
-again. The assertions you are given are, by construction, the things no single
-measurement reached — a comparison whose columns a join brought together, a
-limit that has to be read through two hops.
+Code reads a frame as `tables["name"]` or by its bare name, assigns a DataFrame
+to `result`, and nothing else: no imports, no files, no network. Use
+`series.len()`, not `series.height`; `.dt.total_days()` for a duration; and
+select or suffix columns before a join that would collide. VALUE DOMAINS gives
+the exact spelling of every value a low-cardinality column holds; never name a
+value it does not list. You are never shown a row and must not invent values,
+counts or relationships.
 
-An assertion may be stated in terms of the tables it was drawn from, before
-either was joined. The frame's rows already reflect the join: for every row
-here, the invoice's columns and the matching PO's columns sit side by side,
-aligned by that key. Unmatched rows retain null counterpart attributes; distinguish
-unmatched from tested populations. Do not re-establish the match
-— no join, self-join, or key lookup against the same table again — to write the
-test; read and compare the already-aligned columns directly. The open question
-an assertion leaves you is never "does X match Y" (that is why this frame
-exists); it is what should also hold, row by row, once they do.
+`note` is one sentence on what the result means in terms of the business events
+the columns record — "a GRN records receipt, so it cannot predate the order it
+receives", not "checks the dates". Do not repeat an analysis CURRENT ANALYSES
+already holds for the same frame and question.
 
-The array's maximum is a ceiling, not a quota. Return an empty array where an
-assertion turns out to be unwritable against these columns; saying so is a real
-answer and padding it with whatever column pairing the schema permits is not.
-
-Two columns being of the same type does not make them comparable. Use
-`column_origins` to see which table each column came from, and propose a
-comparison only where the two columns describe the same thing about the same
-entity or two steps in one chain of events. A purchase order's date and a
-vendor's supplier-approval date are both dates on the joined frame, and
-ordering one against the other measures nothing — the vendor was approved long
-before any order was raised, and always will have been. An amount and a limit
-are both numbers, and testing them for equality measures nothing, because a
-cost is never expected to equal the ceiling it must stay under; test the
-threshold instead. Before proposing, ask what result would mean the data is
-sound: if that is "every row is flagged" or "no row can be flagged", the
-comparison is wrong and the analysis should not be proposed.
-
-`note` is required and is where you say that: one sentence giving the
-relationship you expect to hold and why, in terms of the business events the
-columns record — "a GRN records receipt, so it cannot predate the order it
-receives" rather than "checks the dates". If you cannot write that sentence for
-a proposal, you have not established that the two columns belong together, and
-the analysis should not be proposed.
+Answer every work item exactly once: with an analysis, or in `declined` with the
+reason it cannot be written against these columns. Every analysis is run against
+the real frames before it is saved, and one that fails to run is dropped.
 {JSON_RULES} {LANGUAGE_RULES}""" + f"\n\n{AUDITOR_INSTRUCTION_RULE}"
 
-TARGET_SCHEMA_SOURCE_ID = "target_schema"
-JOIN_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
-ANALYTICS_REGISTRY_SOURCE_ID = "analytics_registry"
-LOOKUP_CANDIDATES_SOURCE_ID = "lookup_candidates"
-PROBE_FINDINGS_SOURCE_ID = "probe_findings"
-VALUE_DOMAINS_SOURCE_ID = "value_domains"
-CURRENT_ANALYSES_SOURCE_ID = "current_analyses"
-ANALYSIS_SUBMISSION_TOOL = "submit_analysis_definitions"
-
-MAX_PROPOSED_ANALYSES = 4
-ANALYSIS_KINDS = ("analytics", "python")
-
-# Tests whose answer is a property of a population rather than of a row. An
-# IQR fence over four values, a "rare" category among four, or a monthly trend
-# across two months is arithmetic without a finding in it — and it still spends
-# one of the frame's proposal slots and one execution. Below the threshold
-# these are dropped from the tool schema, so they cannot be proposed at all
-# rather than being rejected after the model has already spent a turn on them.
-# Integrity checks — completeness, duplicates, sequence gaps, date lags, sign
-# scans — are per-row and stay available at any size.
-POPULATION_TEST_IDS = frozenset(
-    {
-        "outliers",
-        "stratify",
-        "period_compare",
-        "threshold_check",
-        "rare_values",
-        "weekend_activity",
-        "sampling",
-        # A dominant format is a property of the population: across four values
-        # the majority shape is whatever two of them happen to share, and every
-        # remaining value is an anomaly by construction.
-        "format_anomaly",
-    }
-)
-MIN_ROWS_FOR_POPULATION_TESTS = 30
-
-# How many analyses one frame may be asked for. A frame supports a certain
-# amount of distinct, useful work and no more: a four-row lookup table has a
-# completeness check and a duplicate check in it, and asking for four means the
-# last two are padding that later has to be deduplicated, executed, and read.
-SMALL_FRAME_ROWS = 30
-MODEST_FRAME_ROWS = 100
-SMALL_FRAME_ANALYSES = 2
-MODEST_FRAME_ANALYSES = 3
-
-# The ceiling once a frame's findings have been measured rather than guessed.
-# The size budget above exists to stop padding, and that reasoning inverts when
-# the sweep arrives with runnable specs and the counts they produced: a
-# procedure that already flagged rows is not padding, it is a finding, and a
-# frame carrying ten of them cannot state them in four slots. Observed directly
-# — a frame with ten measured findings saved four, and the invoices dated before
-# their own purchase order were among the six that did not fit.
-#
-# Still bounded, because one turn has to write every analysis it returns and a
-# frame that measures fifteen things is better served by the sweep's own ranking
-# than by a completion long enough to hold all of them.
-MAX_MEASURED_ANALYSES = 8
-
-
-def proposal_budget(rows: int | None, measured: int = 0) -> int:
-    """How many analyses to ask of a frame.
-
-    From the frame's size, or from the number of measured findings supplied for
-    it where that is larger — a slot spent restating something the sweep already
-    computed is not speculative work, and refusing it drops a finding that has
-    already been established.
-    """
-    return max(_size_budget(rows), min(int(measured or 0), MAX_MEASURED_ANALYSES))
-
-
-def _size_budget(rows: int | None) -> int:
-    if rows is None:
-        return MAX_PROPOSED_ANALYSES
-    if rows < SMALL_FRAME_ROWS:
-        return SMALL_FRAME_ANALYSES
-    if rows < MODEST_FRAME_ROWS:
-        return MODEST_FRAME_ANALYSES
-    return MAX_PROPOSED_ANALYSES
-
+AUTHORING_ITEMS_SOURCE_ID = "work_items"
+AUTHORING_FRAMES_SOURCE_ID = "frame_schemas"
+AUTHORING_SUBMISSION_TOOL = "submit_authored_analyses"
 
 # Carried in the validation error when a frame has nothing of its own left to
 # contribute — every proposal either repeats a computation its join family
@@ -716,624 +602,12 @@ def _resolved_item(request: WorkerRequest, source_id: str) -> object:
     return matches[0]
 
 
-def _target_schema(request: WorkerRequest) -> dict[str, Any]:
-    schema = _plain_json(_resolved_item(request, TARGET_SCHEMA_SOURCE_ID))
-    if not isinstance(schema, dict) or not str(schema.get("table") or "").strip():
-        raise WorkerContractError("The supplied target schema names no table.")
-    return schema
-
-
-def _analytics_contract(request: WorkerRequest) -> dict[str, dict[str, Any]]:
-    """Return the complete test contract that was supplied to the worker."""
-    registry = _plain_json(_resolved_item(request, ANALYTICS_REGISTRY_SOURCE_ID))
-    supplied = {
-        str(item.get("id")): dict(item)
-        for item in (registry if isinstance(registry, list) else [])
-        if isinstance(item, Mapping) and item.get("id")
-    }
-    return supplied or {
-        str(item["id"]): item for item in analytics.registry_payload()
-    }
-
-
 def _column_names(schema: Mapping[str, Any]) -> set[str]:
     return {
         str(column.get("name"))
         for column in schema.get("columns") or []
         if str(column.get("name") or "").strip()
     }
-
-
-def _column_types(schema: Mapping[str, Any]) -> dict[str, str]:
-    """Map exact source columns to the type visible in the model's schema."""
-    return {
-        str(column.get("name")): str(column.get("type") or "")
-        for column in schema.get("columns") or []
-        if str(column.get("name") or "").strip()
-    }
-
-
-def _measured_findings(request: WorkerRequest) -> int:
-    """How many supplied nominations actually flagged rows.
-
-    A confirmed invariant buys no slot: it is worth one line in a memo and is
-    not a procedure competing with the ones that found something.
-    """
-    total = 0
-    for raw in _source_items(request, PROBE_FINDINGS_SOURCE_ID):
-        item = _plain_json(raw)
-        if isinstance(item, Mapping):
-            try:
-                total += 1 if int(item.get("flagged") or 0) else 0
-            except (TypeError, ValueError):
-                continue
-    return total
-
-
-def _target_rows(schema: Mapping[str, Any]) -> int | None:
-    """The target frame's row count, when the supplied schema declares one."""
-    raw = schema.get("rows")
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return None
-    return int(raw)
-
-
-def _column_origins(schema: Mapping[str, Any]) -> dict[str, str]:
-    """The base table each supplied column originates in, when declared."""
-    raw = schema.get("column_origins")
-    if not isinstance(raw, Mapping):
-        return {}
-    return {
-        str(column): str(origin)
-        for column, origin in raw.items()
-        if str(column or "").strip() and str(origin or "").strip()
-    }
-
-
-def _existing_semantic_ids(request: WorkerRequest, origins: Mapping[str, str]) -> set[str]:
-    """Semantic ids of every analysis the request was shown.
-
-    These come from the target frame's whole join family, so an id here may
-    belong to a sibling frame. That is the point: a sibling's saved computation
-    and this frame's proposal of it are the same id, and the repeat is caught
-    before it is written — where the two frames really did ask the same
-    question, which is what the saved id encodes.
-
-    An analysis that carries no stored id is identified from provenance alone.
-    That derivation cannot see the population the analysis was saved over, so it
-    will not match a population-aware id and will not suppress a proposal. The
-    direction is deliberate: this fallback exists for records the workflow did
-    not write, and letting one of those silently delete a measured proposal is
-    the failure this whole path was corrected for.
-    """
-    ids: set[str] = set()
-    for raw in _source_items(request, CURRENT_ANALYSES_SOURCE_ID):
-        item = _plain_json(raw)
-        if not isinstance(item, Mapping):
-            continue
-        semantic = str(item.get("semantic_id") or "").strip()
-        if semantic:
-            ids.add(semantic)
-            continue
-        ids.add(
-            analysis_semantic_id(
-                str(item.get("kind") or ""),
-                str(item.get("table") or ""),
-                item.get("spec") or {},
-                origins,
-            )
-        )
-    return ids
-
-
-def _parameter_json_schema(
-    parameter: Mapping[str, Any],
-    columns: set[str],
-    column_types: Mapping[str, str],
-) -> dict[str, Any] | None:
-    """Translate one library parameter contract into provider JSON Schema."""
-    kind = str(parameter.get("kind") or "")
-    if kind in {"column", "columns"}:
-        expected = str(parameter.get("column_kind") or "")
-        eligible = sorted(
-            column
-            for column in columns
-            if not expected or column_types.get(column) == expected
-        )
-        if not eligible:
-            return None
-        if kind == "column":
-            return {"type": "string", "enum": eligible}
-        return {
-            "type": "array",
-            "items": {"type": "string", "enum": eligible},
-            "minItems": 1,
-        }
-    if kind == "select":
-        values = [
-            option.get("value")
-            for option in parameter.get("options") or []
-            if isinstance(option, Mapping) and "value" in option
-        ]
-        return {"enum": values}
-    if kind == "number":
-        return {"type": "number"}
-    # Cross-frame kinds are not built here: ``lookup_column`` is only meaningful
-    # once ``lookup_table`` is fixed, so the two are emitted together as one
-    # branch per candidate table by ``_lookup_branches``. Reaching this point for
-    # any other kind means the registry grew a parameter shape this contract
-    # cannot constrain, and a permissive schema there would let the model write
-    # free text into a field the executor will act on.
-    return None
-
-
-def _lookup_catalog(request: WorkerRequest) -> list[tuple[str, list[str]]]:
-    """(table, key columns) the supplied context admits as reconciliation targets."""
-    catalog: list[tuple[str, list[str]]] = []
-    for raw in _source_items(request, LOOKUP_CANDIDATES_SOURCE_ID):
-        item = _plain_json(raw)
-        if not isinstance(item, Mapping):
-            continue
-        table = str(item.get("table") or "").strip()
-        keys = [
-            str(column).strip()
-            for column in item.get("key_columns") or []
-            if str(column or "").strip()
-        ]
-        if table and keys:
-            catalog.append((table, keys))
-    catalog.sort()
-    return catalog
-
-
-def _domain_catalog(request: WorkerRequest) -> list[tuple[str, list[str]]]:
-    """(column, its complete value vocabulary) for the supplied domains."""
-    catalog: list[tuple[str, list[str]]] = []
-    for raw in _source_items(request, VALUE_DOMAINS_SOURCE_ID):
-        item = _plain_json(raw)
-        if not isinstance(item, Mapping):
-            continue
-        column = str(item.get("column") or "").strip()
-        values = [
-            str(value) for value in item.get("values") or [] if str(value).strip()
-        ]
-        if column and values:
-            catalog.append((column, values))
-    catalog.sort()
-    return catalog
-
-
-def _value_branches(
-    request: WorkerRequest, base: Mapping[str, Any], required: list[str]
-) -> list[dict[str, Any]]:
-    """One params branch per column that has a vocabulary.
-
-    ``values`` only means anything relative to a chosen column, and the values a
-    column actually holds are the only ones worth checking against: a filter on a
-    status that does not occur flags nothing and reads as a clean pass. Emitting a
-    branch per column, each carrying that column's own domain as an enum, makes
-    an invented value unrepresentable rather than merely wrong — which matters
-    here more than anywhere, because a value is the one part of a spec that
-    cannot be checked against a schema.
-    """
-    branches = []
-    for column, values in _domain_catalog(request):
-        properties = {
-            **{key: value for key, value in base.items() if key != "column"},
-            "column": {"type": "string", "enum": [column]},
-            "values": {
-                "type": "array",
-                "items": {"type": "string", "enum": sorted(values)},
-                "minItems": 1,
-            },
-        }
-        branches.append(
-            {
-                "type": "object",
-                "properties": properties,
-                "required": [*(key for key in required if key != "column"), "column", "values"],
-                "additionalProperties": False,
-            }
-        )
-    return branches
-
-
-def _lookup_branches(
-    request: WorkerRequest, base: Mapping[str, Any], required: list[str]
-) -> list[dict[str, Any]]:
-    """One params branch per candidate lookup table.
-
-    ``lookup_column`` only means anything relative to a chosen ``lookup_table``,
-    and a single pair of independent enums would admit every cross product of
-    them — most of which name a column the chosen table does not have. Emitting a
-    branch per table, each with its own single-valued table enum and that table's
-    own key columns, makes the invalid combinations unrepresentable instead of
-    leaving them to be caught after a turn has been spent. This is the same shape
-    the ``test`` discriminator already uses.
-    """
-    branches = []
-    for table, keys in _lookup_catalog(request):
-        properties = {
-            **base,
-            "lookup_table": {"type": "string", "enum": [table]},
-            "lookup_column": {"type": "string", "enum": sorted(keys)},
-        }
-        branches.append(
-            {
-                "type": "object",
-                "properties": properties,
-                "required": [*required, "lookup_table", "lookup_column"],
-                "additionalProperties": False,
-            }
-        )
-    return branches
-
-
-def _analytics_spec_schemas(
-    request: WorkerRequest,
-) -> list[dict[str, Any]]:
-    """Build exact per-test schemas from the contract and target columns."""
-    schema = _target_schema(request)
-    columns = _column_names(schema)
-    column_types = _column_types(schema)
-    rows = _target_rows(schema)
-    populous = rows is None or rows >= MIN_ROWS_FOR_POPULATION_TESTS
-    branches: list[dict[str, Any]] = []
-    for test_id, metadata in sorted(_analytics_contract(request).items()):
-        if not populous and test_id in POPULATION_TEST_IDS:
-            continue
-        properties: dict[str, Any] = {}
-        required: list[str] = []
-        usable = True
-        needs_lookup = bool(metadata.get("needs_lookup"))
-        needs_values = bool(metadata.get("needs_values"))
-        for raw in metadata.get("params") or []:
-            if not isinstance(raw, Mapping):
-                continue
-            name = str(raw.get("name") or "").strip()
-            if not name:
-                continue
-            if needs_lookup and name in {"lookup_table", "lookup_column"}:
-                # Supplied by the per-table branch below, where the two are
-                # constrained together rather than independently.
-                continue
-            if needs_values and name == "values":
-                # Supplied by the per-column branch below, from that column's
-                # own vocabulary.
-                continue
-            parameter_schema = _parameter_json_schema(raw, columns, column_types)
-            is_required = not raw.get("optional") and "default" not in raw
-            if parameter_schema is None:
-                if is_required:
-                    usable = False
-                    break
-                continue
-            if "default" in raw:
-                parameter_schema["default"] = _plain_json(raw["default"])
-            properties[name] = parameter_schema
-            if is_required:
-                required.append(name)
-        if not usable:
-            continue
-        if needs_lookup or needs_values:
-            # With no candidate the test cannot be written at all — a workspace
-            # of one table has nothing to reconcile against, and a frame whose
-            # every column is unique per row has no vocabulary to check — so it
-            # is dropped rather than offered with an empty enum.
-            params_branches = (
-                _lookup_branches(request, properties, required)
-                if needs_lookup
-                else _value_branches(request, properties, required)
-            )
-            if not params_branches:
-                continue
-            params_schema: dict[str, Any] = (
-                params_branches[0]
-                if len(params_branches) == 1
-                else {"oneOf": params_branches}
-            )
-        else:
-            params_schema = {
-                "type": "object",
-                "properties": properties,
-                "additionalProperties": False,
-            }
-            if required:
-                params_schema["required"] = required
-        branches.append(
-            {
-                "type": "object",
-                "properties": {
-                    "test": {"type": "string", "enum": [test_id]},
-                    "params": params_schema,
-                },
-                "required": ["test", "params"],
-                "additionalProperties": False,
-            }
-        )
-    return branches
-
-
-def _analysis_submission_tool(request: WorkerRequest) -> dict[str, Any]:
-    """One forced function tool whose schema constrains every generated spec."""
-    analytics_specs = _analytics_spec_schemas(request)
-    item_branches: list[dict[str, Any]] = []
-    if analytics_specs:
-        item_branches.append(
-            {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "minLength": 1},
-                    "kind": {"type": "string", "enum": ["analytics"]},
-                    "spec": {"oneOf": analytics_specs},
-                    "note": {"type": "string", "minLength": 1},
-                },
-                "required": ["title", "kind", "spec", "note"],
-                "additionalProperties": False,
-            }
-        )
-    item_branches.append(
-        {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "minLength": 1},
-                "kind": {"type": "string", "enum": ["python"]},
-                "spec": {
-                    "type": "object",
-                    "properties": {
-                        "code": {"type": "string", "minLength": 1},
-                    },
-                    "required": ["code"],
-                    "additionalProperties": False,
-                },
-                "note": {"type": "string", "minLength": 1},
-                "outcome_policy": {
-                    "type": "object",
-                    "properties": {
-                        "mode": {
-                            "type": "string",
-                            "enum": ["exception_rows", "informational"],
-                        }
-                    },
-                    "required": ["mode"],
-                    "additionalProperties": False,
-                },
-            },
-            "required": ["title", "kind", "spec", "note"],
-            "additionalProperties": False,
-        }
-    )
-    return {
-        "type": "function",
-        "function": {
-            "name": ANALYSIS_SUBMISSION_TOOL,
-            "description": (
-                "Submit the rerunnable analysis definitions this frame supports, "
-                "up to the array's maximum — fewer where it supports fewer, and "
-                "an empty array where it supports none. The schema contains "
-                "every permitted analytics ID, parameter, and column."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "analyses": {
-                        "type": "array",
-                        "items": {"oneOf": item_branches},
-                        # No minimum. A frame that relates two tables with
-                        # nothing meaningful to compare across them should say
-                        # so by proposing nothing, rather than filling its slots
-                        # with whatever column pairing the schema permits.
-                        "minItems": 0,
-                        "maxItems": proposal_budget(
-                            _target_rows(_target_schema(request)),
-                            _measured_findings(request),
-                        ),
-                    }
-                },
-                "required": ["analyses"],
-                "additionalProperties": False,
-            },
-        },
-    }
-
-
-def _submission_response(message: object) -> str:
-    return _forced_tool_arguments(message, ANALYSIS_SUBMISSION_TOOL)
-
-
-def _analysis_response_schema(response: str) -> Mapping[str, Any]:
-    payload = decode_json_response(response)
-    if not isinstance(payload, dict):
-        raise WorkerResponseValidationError("the response must be a JSON object")
-    proposed = payload.get("analyses")
-    if proposed is None and isinstance(payload.get("analysis"), dict):
-        # A single-object answer is a common shape slip; normalize rather than
-        # spending a repair turn on it.
-        proposed = [payload["analysis"]]
-    # An empty array is a permitted answer, not a malformed response: the prompt
-    # asks for one where the frame supports nothing, the submission schema sets
-    # `minItems: 0` to allow it, and `validate_analysis_proposal` turns it into
-    # NOTHING_NEW_TO_ANALYSE so the binder settles the unit as skipped. Rejecting
-    # it here short-circuited that path — a model that complied with the prompt
-    # spent both attempts being told its compliant answer was invalid, and the
-    # run failed over an answer the workflow already knows how to accept.
-    if not isinstance(proposed, list):
-        raise WorkerResponseValidationError(
-            "the response must be a JSON object with an `analyses` array"
-        )
-    if any(not isinstance(item, dict) for item in proposed):
-        raise WorkerResponseValidationError("every analyses entry must be an object")
-    return {"analyses": proposed}
-
-
-def _qualifying_key_columns(columns: list[str]) -> list[tuple[str, str]]:
-    """(qualifier, qualified) pairs where one key column only narrows another.
-
-    A duplicate-detection key is a claim about what "the same thing twice" means.
-    Adding a column whose subject is already contained in another column's
-    subject does not widen that claim, it narrows it — and narrows it along
-    exactly the dimension the test was supposed to look across.
-
-    The case this exists for: duplicates keyed on ``(VENDOR_ID,
-    VENDOR_INVOICE_NUMBER)``. A vendor invoice number is the reference *the
-    vendor assigned*, so grouping it by vendor asks whether one supplier billed
-    the same number twice and can never see the same number arriving from two
-    suppliers. That result was reported as "No duplicate keys found" over a
-    population holding two such pairs — an affirmative clear of the risk the test
-    was named for, which is worse than not having run it.
-
-    Deliberately a name-shape rule and nothing more. ``(VENDOR_ID,
-    INVOICE_DATE, INVOICE_AMOUNT)`` is a legitimate same-payment key and does not
-    trip it: no subject there contains another.
-    """
-    subjects = {column: subject_tokens(column) for column in columns}
-    pairs = []
-    for qualifier, qualified in permutations(columns, 2):
-        narrow, wide = subjects[qualifier], subjects[qualified]
-        if narrow and narrow < wide:
-            pairs.append((qualifier, qualified))
-    return pairs
-
-
-def _validate_analytics_spec(
-    spec: Mapping[str, Any],
-    registry: Mapping[str, Mapping[str, Any]],
-    columns: set[str],
-    column_types: Mapping[str, str],
-    label: str,
-    lookups: Mapping[str, set[str]] | None = None,
-    domains: Mapping[str, set[str]] | None = None,
-) -> tuple[dict[str, Any], list[str]]:
-    errors: list[str] = []
-    test_id = analytics.canonical_test_id(spec.get("test") or spec.get("test_id"))
-    if test_id not in registry:
-        errors.append(f"{label} names unknown analytics test '{test_id or ''}'")
-        return {"test": test_id, "params": {}}, errors
-    raw_params = spec.get("params")
-    if raw_params is not None and not isinstance(raw_params, Mapping):
-        errors.append(f"{label} params must be an object")
-    params = dict(raw_params) if isinstance(raw_params, Mapping) else {}
-    meta = registry[test_id]
-    definitions = list(meta.get("params") or [])
-    allowed = {
-        str(parameter.get("name"))
-        for parameter in definitions
-        if isinstance(parameter, Mapping) and str(parameter.get("name") or "").strip()
-    }
-    unexpected = sorted(str(name) for name in params if str(name) not in allowed)
-    if unexpected:
-        errors.append(f"{label} has unsupported parameter '{unexpected[0]}' for '{test_id}'")
-    for parameter in definitions:
-        if not isinstance(parameter, Mapping):
-            continue
-        name = str(parameter.get("name"))
-        kind = parameter.get("kind")
-        has_value = name in params and params[name] not in (None, "", [])
-        value = params.get(name)
-        if not has_value:
-            if not parameter.get("optional") and "default" not in parameter:
-                errors.append(f"{label} is missing the required '{name}' parameter")
-            continue
-        if kind == "column":
-            if str(value) not in columns:
-                errors.append(
-                    f"{label} names column '{value}' which is not in the supplied schema"
-                )
-            elif parameter.get("column_kind") and column_types.get(str(value)) != parameter["column_kind"]:
-                errors.append(
-                    f"{label} requires a {parameter['column_kind']} column for '{name}', "
-                    f"but '{value}' is {column_types.get(str(value)) or 'unknown'}"
-                )
-        elif kind == "columns":
-            values = value if isinstance(value, list) else []
-            if not values:
-                errors.append(f"{label} is missing the '{name}' column list")
-            else:
-                normalized_values = [str(item) for item in values]
-                if len(normalized_values) != len(set(normalized_values)):
-                    errors.append(f"{label} repeats a column in the '{name}' column list")
-                unknown = [item for item in normalized_values if item not in columns]
-                if unknown:
-                    errors.append(
-                        f"{label} names column '{unknown[0]}' which is not in the "
-                        "supplied schema"
-                    )
-        elif kind == "select":
-            allowed_values = [
-                option.get("value")
-                for option in parameter.get("options") or []
-                if isinstance(option, Mapping) and "value" in option
-            ]
-            if not any(
-                type(value) is type(allowed_value) and value == allowed_value
-                for allowed_value in allowed_values
-            ):
-                errors.append(
-                    f"{label} parameter '{name}' must be one of {allowed_values!r}"
-                )
-        elif kind == "number" and (
-            isinstance(value, bool) or not isinstance(value, (int, float))
-        ):
-            errors.append(f"{label} parameter '{name}' must be a number")
-    # The lookup pair is checked together, because either half is meaningless
-    # alone: a real table with a column it does not have, and a real column name
-    # against a table nobody offered, are both a reconciliation against nothing.
-    # The submission schema already makes both unrepresentable; this holds when a
-    # provider returns something the schema did not describe.
-    if test_id == "duplicates":
-        key = [str(value) for value in params.get("columns") or []]
-        for qualifier, qualified in _qualifying_key_columns(key):
-            remaining = [column for column in key if column != qualifier]
-            errors.append(
-                f"{label} keys duplicates on '{qualifier}' together with "
-                f"'{qualified}', and '{qualifier}' only narrows what "
-                f"'{qualified}' already identifies — the test can then never see "
-                f"the same {qualified} arriving under two different {qualifier} "
-                f"values, which is the duplication worth finding. Key on "
-                f"{', '.join(remaining)} instead"
-            )
-    if registry[test_id].get("needs_lookup"):
-        catalog = dict(lookups or {})
-        table = str(params.get("lookup_table") or "").strip()
-        key = str(params.get("lookup_column") or "").strip()
-        if table not in catalog:
-            errors.append(
-                f"{label} names lookup table '{table}' which was not supplied; "
-                f"use one of {', '.join(sorted(catalog)) or 'the supplied tables'}"
-            )
-        elif key not in catalog[table]:
-            errors.append(
-                f"{label} names lookup column '{key}', which is not a key of "
-                f"'{table}'; use one of {', '.join(sorted(catalog[table]))}"
-            )
-    if registry[test_id].get("needs_values"):
-        vocabulary = dict(domains or {})
-        column = str(params.get("column") or "").strip()
-        raw = params.get("values")
-        named = [
-            str(value).strip()
-            for value in (raw if isinstance(raw, (list, tuple)) else [raw])
-            if str(value or "").strip()
-        ]
-        if not named:
-            errors.append(f"{label} names no value to check against")
-        elif column not in vocabulary:
-            errors.append(
-                f"{label} checks values in '{column}', whose vocabulary was not "
-                f"supplied; use one of {', '.join(sorted(vocabulary)) or 'the supplied columns'}"
-            )
-        else:
-            # A value is the one part of a spec no schema can vouch for. A
-            # filter on a status the column never holds flags nothing and
-            # records a clean pass over a question that was never asked.
-            unknown = sorted(set(named) - vocabulary[column])
-            if unknown:
-                errors.append(
-                    f"{label} names {', '.join(unknown)}, which "
-                    f"{verb(len(unknown), 'does', 'do')} not occur in '{column}'; "
-                    f"its values are {', '.join(sorted(vocabulary[column]))}"
-                )
-    return {"test": test_id, "params": params}, errors
 
 
 def _validate_python_spec(
@@ -1360,334 +634,261 @@ def _validate_python_spec(
     return {"code": code}, errors
 
 
-def validate_analysis_proposal(
+# --------------------------------------------------------------------------- #
+# analysis.definitions — the authoring turn
+# --------------------------------------------------------------------------- #
+#: How a chart is drawn from an explore answer. ``table`` is always available.
+CHART_TYPES = ("bar", "line", "table")
+OUTCOME_POLICIES = ("exception_rows", "informational")
+
+
+def _authoring_items(request: WorkerRequest) -> dict[str, Mapping[str, Any]]:
+    return {
+        str(entry.get("ref")): entry
+        for entry in (_plain_json(item) for item in _source_items(request, AUTHORING_ITEMS_SOURCE_ID))
+        if isinstance(entry, Mapping) and entry.get("ref")
+    }
+
+
+def _authoring_frames(request: WorkerRequest) -> dict[str, Mapping[str, Any]]:
+    return {
+        str(entry.get("table")): entry
+        for entry in (_plain_json(item) for item in _source_items(request, AUTHORING_FRAMES_SOURCE_ID))
+        if isinstance(entry, Mapping) and entry.get("table")
+    }
+
+
+def _authoring_submission_tool(request: WorkerRequest) -> dict[str, Any]:
+    refs = sorted(_authoring_items(request))
+    frames = sorted(_authoring_frames(request))
+    if not refs:
+        raise WorkerContractError("The authoring context supplied no work items.")
+    return {
+        "type": "function",
+        "function": {
+            "name": AUTHORING_SUBMISSION_TOOL,
+            "description": "Submit one Polars analysis per work item, or decline it with a reason.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["analyses", "declined"],
+                "properties": {
+                    "analyses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["ref", "frame", "title", "note", "code", "outcome_policy"],
+                            "properties": {
+                                "ref": {"type": "string", "enum": refs},
+                                "frame": {"type": "string", "enum": frames},
+                                "title": {"type": "string", "minLength": 3},
+                                "note": {"type": "string", "minLength": 10},
+                                "code": {"type": "string", "minLength": 10},
+                                "outcome_policy": {"type": "string", "enum": list(OUTCOME_POLICIES)},
+                                "chart": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["type"],
+                                    "properties": {
+                                        "type": {"type": "string", "enum": list(CHART_TYPES)},
+                                        "x": {"type": "string"},
+                                        "y": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "declined": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["ref", "reason"],
+                            "properties": {
+                                "ref": {"type": "string", "enum": refs},
+                                "reason": {"type": "string", "minLength": 15},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def _authoring_response_schema(response: str) -> Mapping[str, Any]:
+    payload = decode_json_response(response)
+    if not isinstance(payload, dict):
+        raise WorkerResponseValidationError("the response must be a JSON object")
+    out: dict[str, Any] = {}
+    for section in ("analyses", "declined"):
+        value = payload.get(section)
+        if value is None:
+            value = []
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise WorkerResponseValidationError(f"`{section}` must be an array of objects")
+        out[section] = value
+    return out
+
+
+def validate_authoring_proposal(
     proposal: Mapping[str, Any],
     request: WorkerRequest,
 ) -> Mapping[str, Any]:
-    """Apply everything the supplied context can decide about the proposal.
+    """Hold the authoring contract the supplied work items and frames can decide.
 
-    Every violation across every proposed analysis is collected so one bounded
-    repair turn can correct them together. The target frame is taken from the
-    supplied schema rather than from the model, so a proposal cannot retarget
-    itself at a frame it was never shown.
+    Every work item is answered exactly once: with code, or with a reason it
+    cannot be written against these columns. The code is checked statically
+    here — it is run against the real frames by the executor, which can reach
+    them — and a check on a joined frame that reads only the columns of the
+    table the frame is built on is set aside as belonging on that table.
     """
-    schema = _target_schema(request)
-    target = str(schema["table"])
-    columns = _column_names(schema)
-    column_types = _column_types(schema)
-    origins = _column_origins(schema)
-    registry = _analytics_contract(request)
-    lookups = {table: set(keys) for table, keys in _lookup_catalog(request)}
-    domains = {column: set(values) for column, values in _domain_catalog(request)}
-    root = str(schema.get("frame_root") or target)
-    route = {
-        str(table): str(key)
-        for table, key in (schema.get("frame_route") or {}).items()
-        if str(table or "").strip()
-    }
-    existing = _existing_semantic_ids(request, origins)
-    related = {
-        str((_plain_json(item) or {}).get("table"))
-        for item in _source_items(request, "related_frames")
-        if isinstance(_plain_json(item), Mapping)
-    }
-    frames = {target, *(name for name in related if name)}
-
-    proposed = list(proposal.get("analyses") or [])
+    items = _authoring_items(request)
+    frames = _authoring_frames(request)
     errors: list[str] = []
-    duplicates: list[str] = []
-    single_sided: list[str] = []
-    # A frame built from more than one table exists to relate them. A spec there
-    # that reads only the frame's own root computes what the root alone
-    # computes, so it belongs on the root table, not here — and it is exactly
-    # the shape that filled a joined frame's slots with its root's work.
-    #
-    # A spec that reads only a joined-in side is not the same thing. Its rows
-    # are still the root's rows, so it asks its question once per root row: a
-    # vendor status read on an invoice frame flags invoices raised against an
-    # inactive vendor, which no check on the vendor master can say. Judging by
-    # where the columns came from dropped exactly that check on procurement —
-    # the spec was right, and the population was the finding.
-    joined_frame = len(set(origins.values())) > 1
-    budget = proposal_budget(_target_rows(schema), _measured_findings(request))
-    if len(proposed) > budget:
-        # Reported, but every proposal is still validated: an over-budget
-        # response raises anyway, and trimming first would hide the violations
-        # the one repair turn exists to correct together.
-        errors.append(
-            f"return at most {budget} analyses for a frame of this size; "
-            f"{len(proposed)} were proposed"
-        )
-
+    answered: dict[str, str] = {}
     accepted: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for index, raw in enumerate(proposed):
-        label = f"analyses[{index}]"
-        item = _plain_json(raw)
-        if not isinstance(item, Mapping):
-            errors.append(f"{label} must be an object")
-            continue
-        title = str(item.get("title") or "").strip()
-        if not title:
-            errors.append(f"{label} is missing a title")
-        # The rationale is required because writing it is the check. A
-        # proposal whose author cannot say which business relationship the two
-        # columns stand in has not established that they stand in one, and that
-        # is precisely the proposal that compares a purchase order's date to a
-        # vendor's approval date and flags the whole frame.
-        note = str(item.get("note") or "").strip()
-        if not note:
-            errors.append(
-                f"{label} is missing a note; state the relationship you expect "
-                "to hold between these columns and why, in terms of the "
-                "business events they record"
-            )
-        kind = str(item.get("kind") or "").strip()
-        if kind not in ANALYSIS_KINDS:
-            errors.append(
-                f"{label} kind must be one of: {', '.join(ANALYSIS_KINDS)}"
-            )
-            continue
-        raw_spec = item.get("spec")
-        raw_spec = raw_spec if isinstance(raw_spec, Mapping) else {}
-        if kind == "analytics":
-            spec, spec_errors = _validate_analytics_spec(
-                raw_spec, registry, columns, column_types, label, lookups, domains
-            )
-        else:
-            spec, spec_errors = _validate_python_spec(raw_spec, frames, label)
-        outcome_policy = item.get("outcome_policy")
-        if kind == "python":
-            outcome_policy = dict(outcome_policy) if isinstance(outcome_policy, Mapping) else {"mode": "informational"}
-            if outcome_policy.get("mode") not in {"exception_rows", "informational"}:
-                spec_errors.append(
-                    f"{label} outcome_policy.mode must be exception_rows or informational"
-                )
-        else:
-            outcome_policy = None
-        errors.extend(spec_errors)
-        if spec_errors or not title or not note:
-            continue
-        if joined_frame:
-            if kind == "analytics":
-                # An analytics spec names its columns in declared parameters,
-                # so an empty scope is a real answer: it reads nothing.
-                scope = spec_scope(spec, origins)
-                # A reconciliation reads a second frame by name rather than by
-                # column, so counting only its columns makes every lookup test
-                # look one-sided and drops it from exactly the frames it is
-                # worth most on. Reconciling the approver's job title against
-                # the approval matrix reads one column of the join — and asks it
-                # once per invoice, which is a different population from asking
-                # it once per member of staff, and the difference is the finding.
-                lookup = str((spec.get("params") or {}).get("lookup_table") or "")
-                if lookup:
-                    scope = scope | {lookup}
-                single = not (scope - {root})
-            else:
-                # Code is read for the column names it quotes, which no
-                # procedure is obliged to quote — a frame-wide preview names
-                # none and is exactly the work only the joined frame can do.
-                # Naming none is therefore absence of evidence, not evidence of
-                # one-sidedness; only code that does name columns, all from one
-                # side, has shown itself to belong on that side.
-                scope = python_spec_scope(spec, origins)
-                single = bool(scope) and not (scope - {root})
-            if single:
-                # Dropped, not rejected, for the same reason a repeat is: the
-                # rest of the response is still good work.
-                single_sided.append(f"{label} ({title or 'untitled'})")
-                continue
-        semantic = analysis_semantic_id(kind, target, spec, origins, root, route)
-        if semantic in existing:
-            # Dropped rather than rejected: the rest of the response is still
-            # good work, and spending the repair turn to re-ask for four when
-            # three were fine would cost a model call to gain nothing.
-            duplicates.append(f"{label} ({title or 'untitled'})")
-            continue
-        if semantic in seen:
-            errors.append(f"{label} duplicates an earlier proposal in this response")
-            continue
-        seen.add(semantic)
-        accepted.append(
-            {
-                "title": title,
-                "kind": kind,
-                # The frame comes from the supplied context, never the model.
-                "table": target,
-                "spec": spec,
-                "note": str(item.get("note") or "").strip(),
-                **({"outcome_policy": outcome_policy} if outcome_policy else {}),
-                "semantic_id": semantic,
-            }
-        )
+    declined: list[str] = []
 
+    for index, entry in enumerate(proposal.get("declined") or ()):
+        ref = str(entry.get("ref") or "").strip()
+        reason = str(entry.get("reason") or "").strip()
+        if ref not in items:
+            errors.append(f"declined[{index}] names no supplied work item: '{ref}'")
+            continue
+        if not reason:
+            errors.append(f"declined[{index}] declines {ref} with no reason")
+            continue
+        if ref in answered:
+            errors.append(f"{ref} is answered twice")
+            continue
+        answered[ref] = "declined"
+        declined.append(f"{ref}: {reason}")
+
+    for index, entry in enumerate(proposal.get("analyses") or ()):
+        label = f"analyses[{index}]"
+        ref = str(entry.get("ref") or "").strip()
+        frame = str(entry.get("frame") or "").strip()
+        if ref not in items:
+            errors.append(f"{label} names no supplied work item: '{ref}'")
+            continue
+        if ref in answered:
+            errors.append(f"{ref} is answered twice")
+            continue
+        if frame not in frames:
+            errors.append(f"{label} names no supplied frame: '{frame}'")
+            continue
+        title = str(entry.get("title") or "").strip()
+        note = str(entry.get("note") or "").strip()
+        if not title or not note:
+            errors.append(f"{label} needs a title and a note saying what its result means")
+            continue
+        spec, spec_errors = _validate_python_spec({"code": entry.get("code")}, set(frames), label)
+        if spec_errors:
+            errors.extend(spec_errors)
+            continue
+        kind = str(items[ref].get("kind") or "assert")
+        policy = str(entry.get("outcome_policy") or "")
+        if policy not in OUTCOME_POLICIES:
+            policy = "exception_rows" if kind == "assert" else "informational"
+        if kind == "explore" and policy == "exception_rows":
+            errors.append(
+                f"{label} answers an explore question; its result describes the "
+                "population and is `informational`, not rows of exceptions"
+            )
+            continue
+        schema = frames[frame]
+        origins = {str(k): str(v) for k, v in (schema.get("column_origins") or {}).items()}
+        root = str(schema.get("frame_root") or frame)
+        if kind == "assert" and len(set(origins.values())) > 1:
+            # The rule the per-frame turn enforced, judged by population: a
+            # check reading only the root's own columns belongs on the root.
+            scope = python_spec_scope(spec, origins)
+            if scope and not (scope - {root}):
+                answered[ref] = "declined"
+                declined.append(
+                    f"{ref}: reads only the columns of {root}, which this frame is "
+                    "built on, and belongs on that table"
+                )
+                continue
+        definition: dict[str, Any] = {
+            "ref": ref,
+            "frame": frame,
+            "title": title,
+            "kind": "python",
+            "spec": spec,
+            "note": note,
+            "outcome_policy": {"mode": policy},
+        }
+        chart = entry.get("chart")
+        if isinstance(chart, Mapping) and str(chart.get("type") or "") in CHART_TYPES:
+            definition["viz"] = {
+                "type": str(chart["type"]),
+                **({"x": str(chart["x"])} if chart.get("x") else {}),
+                **({"y": [str(c) for c in chart.get("y") or []]} if chart.get("y") else {}),
+            }
+        answered[ref] = "analysis"
+        accepted.append(definition)
+
+    missing = sorted(set(items) - set(answered))
+    if missing:
+        errors.append(
+            f"every work item is answered once, with code or a declined reason; "
+            f"{', '.join(missing)} {verb(len(missing), 'has', 'have')} no answer"
+        )
     if errors:
         raise WorkerResponseValidationError(errors)
     if not accepted:
-        if duplicates or single_sided:
-            # Worth one repair turn — a joined frame usually has something its
-            # sides cannot compute. If the retry says the same thing, the frame
-            # genuinely adds nothing, and the binder settles the unit as
-            # skipped rather than failing the run over it.
-            reasons = []
-            if duplicates:
-                reasons.append(
-                    "repeats a computation already saved for these columns, on "
-                    "this frame or another built from the same tables"
-                )
-            if single_sided:
-                reasons.append(
-                    f"reads only columns of {root}, which this frame is built on, "
-                    "and belongs on that table"
-                )
-            raise WorkerResponseValidationError(
-                f"{NOTHING_NEW_TO_ANALYSE}: every proposed analysis "
-                + ", or ".join(reasons)
-                + f". Propose an analysis that reads a table joined to {root}: "
-                "either a comparison across the join, or a check on a joined "
-                f"table's columns asked once per {root} row."
-            )
-        # Nothing was proposed at all. That is now a permitted answer — the
-        # budget is a ceiling, and a frame whose tables have nothing meaningful
-        # to compare across them should say so rather than pad. It still costs
-        # the one repair turn, because an empty array and a model that failed
-        # to produce one are indistinguishable from here; if the retry agrees,
-        # the binder settles the unit as skipped.
         raise WorkerResponseValidationError(
-            f"{NOTHING_NEW_TO_ANALYSE}: no analysis was proposed for this frame. "
-            "Propose one only if this frame genuinely supports it."
+            f"{NOTHING_NEW_TO_ANALYSE}: every work item was declined — "
+            + "; ".join(declined)
         )
-    # Carried out so the run can say what it silently declined. A dropped
-    # proposal is invisible from every artifact an auditor sees: the frame shows
-    # the analyses it kept, and nothing records that four more were written and
-    # discarded. The comment above is right that re-asking would cost a turn to
-    # gain nothing — but only the turn was ever in question, never the disclosure.
-    return {
-        "analyses": accepted,
-        **(
-            {"declined": _declined(duplicates, single_sided)}
-            if duplicates or single_sided
-            else {}
-        ),
-    }
+    return {"analyses": accepted, **({"declined": declined} if declined else {})}
 
 
-def _declined(duplicates: list[str], single_sided: list[str]) -> list[str]:
-    """One line per proposal that was written and not saved, and why."""
-    return [
-        *(
-            f"{item} repeats a computation already saved for these columns on "
-            "this frame or another built from the same tables"
-            for item in duplicates
-        ),
-        *(
-            f"{item} reads only the columns of the table this frame is built on"
-            for item in single_sided
-        ),
-    ]
+def _authoring_submission_response(message: object) -> str:
+    return _forced_tool_arguments(message, AUTHORING_SUBMISSION_TOOL)
 
 
-def run_analysis_definition_worker(
+def run_analysis_authoring_worker(
     request: WorkerRequest,
     gateway: ModelGateway,
     attempt: WorkerAttempt,
 ) -> str:
-    """Transform only the supplied bundle into one budgeted model request."""
-    schema = _target_schema(request)
-    tool = _analysis_submission_tool(request)
-    item_branches = tool["function"]["parameters"]["properties"]["analyses"]["items"][
-        "oneOf"
-    ]
-    analytics_branch = next(
-        (
-            item
-            for item in item_branches
-            if item["properties"]["kind"]["enum"] == ["analytics"]
-        ),
-        None,
-    )
-    eligible_ids = (
-        [
-            item["properties"]["test"]["enum"][0]
-            for item in analytics_branch["properties"]["spec"]["oneOf"]
-        ]
-        if analytics_branch is not None
-        else []
-    )
-    # The target schema is named once, above, in the shape the submission
-    # tool's enums were built from. Repeating it inside the serialized bundle
-    # bills the same 4 KB twice on every frame.
-    #
-    # The analytics catalog leaves the bundle for a different reason. One
-    # definition turn is taken per frame, and the catalog is byte-identical on
-    # every one of them — the same ~1,500 tokens re-sent per frame. A provider
-    # can only reuse a prompt prefix it has already seen, and the prefix ends at
-    # the first byte that differs, so a stable block sitting behind the frame
-    # description can never be part of one. Promoted here it sits ahead of
-    # everything frame-specific, extending the identical head from the system
-    # prompt alone to the system prompt plus the catalog. Nothing is dropped:
-    # the same content is sent, earlier.
-    catalog = _plain_json(_resolved_item(request, ANALYTICS_REGISTRY_SOURCE_ID))
-    # Named once, ahead of the bundle, for the same reason the target schema is:
-    # the nominations are the part of this turn the model acts on directly, and
-    # burying them among the aggregates they were derived from bills the same
-    # content twice and reads as one more description of the frame.
-    context = _model_facing_context(
-        request,
-        TARGET_SCHEMA_SOURCE_ID,
-        ANALYTICS_REGISTRY_SOURCE_ID,
-        PROBE_FINDINGS_SOURCE_ID,
-        VALUE_DOMAINS_SOURCE_ID,
-        JOIN_HYPOTHESIS_SOURCE_ID,
-        AUDITOR_INSTRUCTION_SOURCE_ID,
-    )
-    measured = [
-        _plain_json(item) for item in _source_items(request, PROBE_FINDINGS_SOURCE_ID)
-    ]
-    domains = [
-        _plain_json(item) for item in _source_items(request, VALUE_DOMAINS_SOURCE_ID)
-    ]
-    hypotheses = [
-        _plain_json(item) for item in _source_items(request, JOIN_HYPOTHESIS_SOURCE_ID)
-    ]
-    instruction = auditor_instruction(request)
+    """One turn writing every work item the register placed, as code."""
+    tool = _authoring_submission_tool(request)
     user = json.dumps(
         {
-            **({"ANALYTICS CATALOG": catalog} if catalog else {}),
-            # Omitted rather than sent empty: a key present and blank invites a
-            # model to invent what should have been in it.
-            **({"auditor_instruction": instruction} if instruction else {}),
-            "TARGET FRAME": schema,
-            **({"VALUE DOMAINS": domains} if domains else {}),
-            **({"MEASURED ON THIS FRAME": measured} if measured else {}),
-            # What the register placed here. Authoritative about this turn's
-            # purpose in a way no amount of schema reading recovers: it was
-            # decided with every frame in view, and this turn sees one.
-            **({"ASSERTIONS PLACED ON THIS FRAME": hypotheses} if hypotheses else {}),
-            "RESOLVED CONTEXT": context,
-            "ALLOWED ANALYTICS IDS FOR THIS FRAME": eligible_ids,
-            "REQUIRED OUTPUT": (
-                f"Call {ANALYSIS_SUBMISSION_TOOL} exactly once. Its JSON Schema "
-                "is authoritative; do not invent test IDs or parameters."
+            **(
+                {"AUDITOR INSTRUCTION": auditor_instruction(request)}
+                if auditor_instruction(request)
+                else {}
+            ),
+            "WORK ITEMS": list(_authoring_items(request).values()),
+            "FRAMES": list(_authoring_frames(request).values()),
+            "RESOLVED CONTEXT": _model_facing_context(
+                request,
+                AUTHORING_ITEMS_SOURCE_ID,
+                AUTHORING_FRAMES_SOURCE_ID,
+                AUDITOR_INSTRUCTION_SOURCE_ID,
             ),
         },
         indent=1,
         ensure_ascii=False,
+        default=str,
     )
     if attempt.is_repair:
         user += (
             "\n\nYour previous response could not be used: "
             + "; ".join(attempt.validation_errors)
-            + ". Allowed analytics IDs are: "
-            + ", ".join(eligible_ids)
-            + f". Call {ANALYSIS_SUBMISSION_TOOL} once with a complete correction."
+            + f". Call {AUTHORING_SUBMISSION_TOOL} once, answering every work item."
         )
     activity = dict(request.activity)
     activity.setdefault(
         "context_metrics",
         {
-            "worker_kind": "analysis_definition",
+            "worker_kind": "analysis_authoring",
             "total_characters": request.context.supplied_size.characters,
             "estimated_tokens": request.context.supplied_size.estimated_tokens,
             "selected_items": request.context.supplied_size.items,
@@ -1699,21 +900,16 @@ def run_analysis_definition_worker(
         activity,
         attempt=attempt.number,
         tools=[tool],
-        tool_choice={
-            "type": "function",
-            "function": {"name": ANALYSIS_SUBMISSION_TOOL},
-        },
+        tool_choice={"type": "function", "function": {"name": AUTHORING_SUBMISSION_TOOL}},
         return_message=True,
     )
-    return _submission_response(message)
+    return _authoring_submission_response(message)
 
 
 ANALYSIS_DEFINITION_RESPONSE_SCHEMA = WorkerResponseSchema(
     schema_id="analysis.definitions.response",
-    schema_hash=_sha256_text(
-        "analysis-definitions-response:v2:json-object-with-analyses-empty-permitted"
-    ),
-    validator=_analysis_response_schema,
+    schema_hash=_sha256_text("analysis-authoring-response:v1:analyses-declined-code-only"),
+    validator=_authoring_response_schema,
 )
 ANALYSIS_DEFINITION_WORKER = WorkerDefinition(
     worker_id=ANALYSIS_DEFINITION_WORKER_ID,
@@ -1721,28 +917,28 @@ ANALYSIS_DEFINITION_WORKER = WorkerDefinition(
     response_schema=ANALYSIS_DEFINITION_RESPONSE_SCHEMA,
     repair_policy=WorkerRepairPolicy(
         max_repair_attempts=1,
-        guidance_hash=_sha256_text(
-            "Repair analysis-definition contract violations against the supplied "
-            "schema, aggregates, and analytics registry."
-        ),
+        guidance_hash=_sha256_text("Answer every work item once, with safe Polars or a reason."),
     ),
-    implementation=run_analysis_definition_worker,
-    semantic_validator=validate_analysis_proposal,
+    implementation=run_analysis_authoring_worker,
+    semantic_validator=validate_authoring_proposal,
 )
 
 WORKERS.register(ANALYSIS_DEFINITION_WORKER)
 
-
-# --------------------------------------------------------------------------- #
-# analysis.reading — the assertion register (E4)
-# --------------------------------------------------------------------------- #
 ANALYSIS_READING_WORKER_ID = "analysis.reading"
 READING_FRAMES_SOURCE_ID = "frame_map"
 READING_NOMINATIONS_SOURCE_ID = "nominations"
 READING_HYPOTHESIS_SOURCE_ID = "join_hypotheses"
 READING_DOMAIN_SOURCE_ID = "value_domains"
 READING_REGISTRY_SOURCE_ID = "analytics_registry"
+READING_PROFILE_SOURCE_ID = "population_profile"
 READING_SUBMISSION_TOOL = "submit_assertion_register"
+#: Questions about the population the profile did not already answer. Each is a
+#: piece of code the authoring turn writes, so this bounds that turn's work.
+MAX_EXPLORE_QUESTIONS = 6
+#: Facts about the data that change how it should be tested. A handful is the
+#: whole of what a memo can carry.
+MAX_CHARACTERIZED = 8
 
 # How many assertions one reading turn may add. The kept nominations are not
 # bounded here — they are already measured and already deduplicated — but an
@@ -1764,7 +960,7 @@ relationships, or controls that are not in the supplied context.
 **The nominations are settled.** Each is a valid spec and the arithmetic is
 done. They are already saved unless you say otherwise, so you do not need to
 list them to keep them, and listing one buys nothing but a better name for it.
-Spend the turn on the three things that are genuinely yours:
+Spend the turn on the five things that are genuinely yours:
 
 1. **add** — what should be true that no nomination measures. This is the whole
    reason a turn reads every frame together. A comparison whose two columns sit
@@ -1791,11 +987,34 @@ Spend the turn on the three things that are genuinely yours:
    master is the wrong domain rejects the finding on the strength of a detail
    the measurement explicitly disclaims.
 
-3. **unanswerable** — what an auditor would want to test and this data cannot
+3. **characterize** — what kind of data this is, read off POPULATION PROFILE:
+   facts that change which tests can prove anything, each with what it means
+   for testing. A figure equal to the step before it on every row makes a test
+   comparing them unable to fail. Prices that never vary between suppliers
+   leave only a price that breaks the list to find. Dates spread over weekends
+   as evenly as weekdays were keyed, not stamped, so day counts measure what
+   was typed. Identifiers carried from one record to the next show which
+   records were created apart. State only what a supplied figure shows, and
+   give the figure.
+
+4. **explore** — what the profile does not answer and an auditor would ask of
+   this population: a breakdown the profile did not cut, a duration it did not
+   measure, a figure derived within a group. A question, not an assertion —
+   its answer describes the population rather than flagging rows. Name the
+   frame and the columns it reads. Leave this empty when the profile already
+   answers what matters; a question it already answers costs a turn to restate.
+
+5. **unanswerable** — what an auditor would want to test and this data cannot
    answer, because no field anywhere records it. You are the only stage that can
    see this: it is a statement about the whole column inventory, and no
    frame-scoped turn holds enough of the engagement to make it. A control the
    file gives no column for is a finding, and it will never appear as a result.
+
+Read the nominations against POPULATION PROFILE. A decline argues that a flagged
+condition is ordinary operations, and the profile is where ordinary is shown: a
+requisition with no purchase order is mid-cycle only if others like it were
+ordered later, and is stale if every other one was ordered within days. A
+decline the profile contradicts is not a decline.
 
 You may also **keep** a nomination with a better title and a note saying what
 its flagged condition would mean in terms of the business events the columns
@@ -1958,8 +1177,42 @@ def _reading_submission_tool(request: WorkerRequest) -> dict[str, Any]:
                             },
                         },
                     },
+                    "characterize": {
+                        "type": "array",
+                        "minItems": 0,
+                        "maxItems": MAX_CHARACTERIZED,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["fact", "implication"],
+                            "properties": {
+                                "fact": {"type": "string", "minLength": 10},
+                                "implication": {"type": "string", "minLength": 10},
+                            },
+                        },
+                    },
+                    "explore": {
+                        "type": "array",
+                        "minItems": 0,
+                        "maxItems": MAX_EXPLORE_QUESTIONS,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["frame", "columns", "question", "why"],
+                            "properties": {
+                                "frame": frame_schema,
+                                "columns": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {"type": "string"},
+                                },
+                                "question": {"type": "string", "minLength": 10},
+                                "why": {"type": "string", "minLength": 10},
+                            },
+                        },
+                    },
                 },
-                "required": ["keep", "add", "decline", "unanswerable"],
+                "required": ["keep", "add", "decline", "unanswerable", "characterize", "explore"],
             },
         },
     }
@@ -1993,7 +1246,7 @@ def _reading_submission_response(message: object) -> str:
     return _forced_tool_arguments(message, READING_SUBMISSION_TOOL)
 
 
-_READING_SECTIONS = ("keep", "add", "decline", "unanswerable")
+_READING_SECTIONS = ("keep", "add", "decline", "unanswerable", "characterize", "explore")
 
 
 def _reading_response_schema(response: str) -> Mapping[str, Any]:
@@ -2076,6 +1329,44 @@ def validate_reading_proposal(
             continue
         decided.add(ref)
         keeps.append({"ref": ref, "title": title, "note": note})
+
+    def placed(section: str, index: int, item: Mapping[str, Any], statement: str) -> dict | None:
+        label = f"{section}[{index}]"
+        frame = str(item.get("frame") or "").strip()
+        if frame not in frames:
+            errors.append(f"{label} names no supplied frame: '{frame}'")
+            return None
+        columns = [str(value).strip() for value in item.get("columns") or ()]
+        columns = [value for value in columns if value]
+        unknown = [value for value in columns if value not in frames[frame]]
+        if unknown:
+            errors.append(
+                f"{label} names {', '.join(unknown)}, which "
+                f"{verb(len(unknown), 'is', 'are')} not a column of '{frame}'"
+            )
+            return None
+        if not columns:
+            errors.append(f"{label} names no column of '{frame}'")
+            return None
+        text = str(item.get(statement) or "").strip()
+        why = str(item.get("why") or "").strip()
+        if not text or not why:
+            errors.append(f"{label} is missing the {statement} or the reason it matters")
+            return None
+        return {"frame": frame, "columns": columns, statement: text, "why": why}
+
+    explored = [
+        entry
+        for index, item in enumerate(proposal.get("explore") or ())
+        if (entry := placed("explore", index, item, "question")) is not None
+    ]
+    if len(explored) > MAX_EXPLORE_QUESTIONS:
+        errors.append(f"explore at most {MAX_EXPLORE_QUESTIONS} questions; {len(explored)} were written")
+    characterized = [
+        {"fact": str(item.get("fact") or "").strip(), "implication": str(item.get("implication") or "").strip()}
+        for item in proposal.get("characterize") or ()
+        if str(item.get("fact") or "").strip()
+    ][:MAX_CHARACTERIZED]
 
     authored: list[dict[str, Any]] = []
     for index, item in enumerate(proposal.get("add") or ()):
@@ -2173,6 +1464,8 @@ def validate_reading_proposal(
         "add": authored,
         "decline": declines,
         "unanswerable": unanswerable,
+        "characterize": characterized,
+        "explore": explored,
         **({"instruction_response": answered} if answered else {}),
     }
 
@@ -2199,6 +1492,9 @@ def run_analysis_reading_worker(
         _plain_json(item)
         for item in _source_items(request, READING_HYPOTHESIS_SOURCE_ID)
     ]
+    profile = [
+        _plain_json(item) for item in _source_items(request, READING_PROFILE_SOURCE_ID)
+    ]
     # The frame map, the nominations and the catalog are all promoted ahead of
     # the serialized bundle for the same reason the definition turn promotes its
     # target schema: they are what this turn acts on, and describing them twice
@@ -2210,6 +1506,7 @@ def run_analysis_reading_worker(
         READING_REGISTRY_SOURCE_ID,
         READING_DOMAIN_SOURCE_ID,
         READING_HYPOTHESIS_SOURCE_ID,
+        READING_PROFILE_SOURCE_ID,
         AUDITOR_INSTRUCTION_SOURCE_ID,
     )
     instruction = auditor_instruction(request)
@@ -2218,6 +1515,7 @@ def run_analysis_reading_worker(
             **({"AUDITOR INSTRUCTION": instruction} if instruction else {}),
             **({"ANALYTICS CATALOG": catalog} if catalog else {}),
             "FRAME MAP": frames,
+            **({"POPULATION PROFILE": profile} if profile else {}),
             **({"VALUE DOMAINS": domains} if domains else {}),
             "NOMINATIONS": nominations,
             **(
@@ -2329,6 +1627,10 @@ PROFILE_SECTIONS: tuple[str, ...] = (
 # procedures run is no help to an auditor planning the work; "test the 18
 # requisitions over 10M individually" is.
 IMPLICATIONS_SECTION = "Implications for the plan"
+# What no column in the data received can answer, as the reading named it. The
+# assembler writes this one from the reading itself: it is a judgement already
+# made, and a writer asked to restate it rewords a gap into further work.
+UNANSWERABLE_SECTION = "What the data cannot answer"
 # Profile results whose summary reads best as a chart; every other profile
 # result is placed as its summary table.
 _CHART_TESTS = frozenset({"breakdown", "value_bands", "calendar_profile", "period_compare", "skipped_steps"})
@@ -2340,6 +1642,7 @@ _SECTION_LIST = "\n".join(
         *(f"{name}  (optional, from `profile`)" for name in PROFILE_SECTIONS),
         *SUMMARY_SECTIONS[1:3],
         IMPLICATIONS_SECTION,
+        f"{UNANSWERABLE_SECTION}  (assembled for you, from WHAT THE READING ESTABLISHED)",
         SUMMARY_SECTIONS[3],
     )
 )
@@ -2391,6 +1694,14 @@ an analyst would, for what they say about how this business runs:
 importance — where to point the testing, which records to examine individually,
 which evidence to obtain, which planned test the data makes pointless. One
 entry per decision, at most 40 words each.
+
+WHAT THE READING ESTABLISHED, when present, is the judgement of the turn that
+read every frame before anything was tested. Its `characterized` facts say what
+kind of data this is and what that does to testing: carry each into
+`data_received`, and its implication into `implications`, in your own words and
+against the results that bear it out. Its `unanswerable` questions are placed
+for you under "{UNANSWERABLE_SECTION}"; do not repeat them in `further_work`
+unless there is evidence somebody could obtain to answer one.
 
 When AUDITOR INSTRUCTION is present, the auditor asked for particular tests.
 `lead` says, in one sentence, which of them the data could test and which it
@@ -2569,6 +1880,7 @@ Call {SUMMARY_SUBMISSION_TOOL} exactly once, with every part filled in.
 SUMMARY_RESULTS_SOURCE_ID = "analysis_results"
 SUMMARY_EXCEPTIONS_SOURCE_ID = "analysis_exceptions"
 SUMMARY_GAPS_SOURCE_ID = "coverage_gaps"
+SUMMARY_READING_SOURCE_ID = "analysis_reading"
 SUMMARY_TABLE_METADATA_SOURCE_ID = "table_metadata"
 SUMMARY_TABLE_PROFILE_SOURCE_ID = "table_profiles"
 
@@ -3175,6 +2487,16 @@ def _render_summary_markdown(
             out += [f"{position}. {text}"]
         out += [""]
 
+    unanswerable = _summary_reading(request).get("unanswerable") or []
+    if unanswerable:
+        out += [f"## {UNANSWERABLE_SECTION}", ""]
+        for entry in unanswerable:
+            question = re.sub(r"\s+", " ", str(entry.get("question") or "")).strip()
+            why = re.sub(r"\s+", " ", str(entry.get("why") or "")).strip()
+            if question:
+                out += [f"- **{question}**" + (f" {why}" if why else "")]
+        out += [""]
+
     out += [f"## {SUMMARY_SECTIONS[3]}", ""]
     for position, item in enumerate(_memo_items(payload.get("further_work")), start=1):
         # One line per item: a newline inside a numbered entry ends the list as
@@ -3539,6 +2861,15 @@ def _summary_response_schema(response: str) -> Mapping[str, Any]:
     }
 
 
+def _summary_reading(request: WorkerRequest) -> Mapping[str, Any]:
+    """The reading's kept judgement, or an empty mapping when none was supplied."""
+    for item in _source_items(request, SUMMARY_READING_SOURCE_ID):
+        reading = _plain_json(item)
+        if isinstance(reading, Mapping):
+            return reading
+    return {}
+
+
 def run_analysis_summary_worker(
     request: WorkerRequest,
     gateway: ModelGateway,
@@ -3557,8 +2888,13 @@ def run_analysis_summary_worker(
                 if auditor_instruction(request)
                 else {}
             ),
+            **(
+                {"WHAT THE READING ESTABLISHED": dict(_summary_reading(request))}
+                if _summary_reading(request)
+                else {}
+            ),
             "RESOLVED CONTEXT": _model_facing_context(
-                request, AUDITOR_INSTRUCTION_SOURCE_ID
+                request, AUDITOR_INSTRUCTION_SOURCE_ID, SUMMARY_READING_SOURCE_ID
             ),
         },
         indent=1,
@@ -3675,6 +3011,7 @@ WORKERS.register(ANALYSIS_SUMMARY_WORKER)
 
 
 __all__ = [
+    "UNANSWERABLE_SECTION",
     "ANALYSIS_DEFINITION_RESPONSE_SCHEMA",
     "ANALYSIS_DEFINITION_SYSTEM",
     "ANALYSIS_DEFINITION_WORKER",
@@ -3687,14 +3024,13 @@ __all__ = [
     "ANALYSIS_SUMMARY_WORKER",
     "ANALYSIS_SUMMARY_WORKER_ID",
     "EMBED_KINDS",
-    "MAX_PROPOSED_ANALYSES",
     "SUMMARY_SECTIONS",
     "analysis_semantic_id",
     "parse_embeds",
-    "run_analysis_definition_worker",
+    "run_analysis_authoring_worker",
     "run_join_utility_worker",
     "run_analysis_summary_worker",
-    "validate_analysis_proposal",
+    "validate_authoring_proposal",
     "validate_join_utility_proposal",
     "validate_analysis_summary",
 ]

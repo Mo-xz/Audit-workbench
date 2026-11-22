@@ -71,28 +71,26 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 def _analysis_definitions_response(user: str) -> dict:
-    """Answer for whichever frame the analysis-definitions worker was given."""
+    """Answer every work item the authoring turn was given, as Polars code."""
     payload = json.loads(user.split("\n\nYour previous response")[0])
-    frame = payload["TARGET FRAME"]
-    table = frame["table"]
-    columns = [column["name"] for column in frame["columns"]]
-    key = "invoice_no" if "invoice_no" in columns else columns[0]
-    return {
-        "analyses": [
-            {
-                "title": f"Duplicates in {table}",
-                "kind": "analytics",
-                "spec": {"test": "duplicates", "params": {"columns": [key]}},
-                "note": "Reused keys signal double postings.",
-            },
-            {
-                "title": f"Preview {table}",
-                "kind": "python",
-                "spec": {"code": f"result = tables['{table}'].head(3)"},
-                "note": "A first look at the frame's shape.",
-            },
-        ]
-    }
+    analyses = []
+    for item in payload.get("WORK ITEMS") or []:
+        frame, column = item["frame"], (item.get("columns") or ["*"])[0]
+        if item.get("kind") == "explore":
+            code = (f"result = tables['{frame}'].group_by('{column}').agg(pl.len().alias('rows'))")
+            policy = "informational"
+        else:
+            code = f"result = tables['{frame}'].filter(pl.col('{column}').is_duplicated())"
+            policy = "exception_rows"
+        analyses.append({
+            "ref": item["ref"],
+            "frame": frame,
+            "title": f"{item['ref']} on {frame}",
+            "note": "A reused key is the shape a double posting takes.",
+            "code": code,
+            "outcome_policy": policy,
+        })
+    return {"analyses": analyses, "declined": []}
 
 
 def _analysis_reading_response(user: str) -> dict:

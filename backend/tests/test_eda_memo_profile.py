@@ -82,9 +82,10 @@ def test_the_memo_writer_reads_aggregates_under_their_own_permission(regional):
     assert set(supplied[0].representations) == {"analysis_aggregate"}
     privacy = PRESETS.get("analysis.summary").spec.privacy
     assert privacy.allow_analysis_aggregates
-    # Granted here and nowhere else.
-    others = [preset for preset in PRESETS.all() if preset.preset_id != "analysis.summary"]
-    assert not any(preset.spec.privacy.allow_analysis_aggregates for preset in others)
+    # Granted to the memo and to the reading that decides what is tested, and
+    # to no turn that writes code.
+    granted = {preset.preset_id for preset in PRESETS.all() if preset.spec.privacy.allow_analysis_aggregates}
+    assert granted == {"analysis.summary", "analysis.reading"}
 
 
 def test_a_recipe_frame_is_named_by_the_tables_it_was_built_from(workspace_with_data):

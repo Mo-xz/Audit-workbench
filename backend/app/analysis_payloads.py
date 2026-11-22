@@ -21,8 +21,10 @@ from .text import counted
 VIZ_ROW_CAPS = {"bar": 30, "pie": 12, "line": 500, "table": 50}
 
 
-def _cap_for(viz: dict) -> int:
-    return VIZ_ROW_CAPS.get(str(viz.get("type") or "table"), 50)
+def _cap_for(viz: dict | None) -> int:
+    # An unsaved definition has no viz yet: the authoring screen runs code the
+    # model wrote without a chart before it becomes a record.
+    return VIZ_ROW_CAPS.get(str((viz or {}).get("type") or "table"), 50)
 
 
 def _frame_height(workspace: Workspace, name: object) -> int | None:

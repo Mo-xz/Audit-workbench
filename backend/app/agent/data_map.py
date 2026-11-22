@@ -527,6 +527,49 @@ def data_steps(data_map: dict) -> list[dict]:
     return out
 
 
+def profile_digest(workspace: Workspace, tables: Iterable[str] | None = None) -> list[dict]:
+    """What the population profile shows, computed now, for the reading turn.
+
+    The reading runs before the profile is executed as saved analyses, and it
+    is the turn that most needs to have read it: a requisition never ordered is
+    "normal mid-cycle state" to a turn that cannot see that every other one was
+    ordered within thirteen days. Each entry is the summary a profile analysis
+    computes, bounded exactly as the memo receives it — never its rows.
+    """
+    from .. import analysis_payloads
+
+    mapping = build_data_map(workspace, tables)
+    digest = []
+    for index, definition in enumerate(profile_definitions(workspace, mapping), 1):
+        try:
+            payload = analysis_payloads.compute_payload(workspace, {**definition, "id": f"P{index:02d}"})
+        except Exception:  # noqa: BLE001 - a profile entry that will not compute is left out
+            continue
+        if payload.get("error"):
+            continue
+        aggregate = payload.get("aggregate")
+        recipe = definition.get("alignment")
+        frame = definition["table"]
+        if recipe:
+            joined = [j["right"] for j in recipe.get("joins") or []]
+            frame = f"{recipe['root']} joined to {', '.join(joined)}"
+        digest.append({
+            "ref": f"P{index:02d}",
+            "title": definition["title"],
+            "frame": frame,
+            "test": definition["spec"]["test"],
+            "verdict": payload.get("verdict_text") or payload.get("verdict"),
+            "stats": payload.get("stats") or [],
+            **({
+                "columns": aggregate.get("columns"),
+                "rows": aggregate.get("rows"),
+                "groups_withheld": aggregate.get("groups_withheld"),
+                "rows_withheld": aggregate.get("rows_withheld"),
+            } if isinstance(aggregate, Mapping) else {}),
+        })
+    return digest
+
+
 def is_profile(analysis: Mapping) -> bool:
     return str(analysis.get("semantic_id") or "").startswith(PROFILE_PREFIX)
 

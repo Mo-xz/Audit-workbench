@@ -92,7 +92,7 @@ def validate(reading_request):
 
 
 def _empty() -> dict:
-    return {"keep": [], "add": [], "decline": [], "unanswerable": []}
+    return {"keep": [], "add": [], "decline": [], "unanswerable": [], "characterize": [], "explore": []}
 
 
 def test_an_empty_answer_is_valid_because_the_floor_already_stands(validate):
@@ -255,8 +255,8 @@ def test_a_duplicate_submission_is_read_rather_than_discarded():
          analysis_worker._summary_submission_response),
         (analysis_worker.READING_SUBMISSION_TOOL,
          analysis_worker._reading_submission_response),
-        (analysis_worker.ANALYSIS_SUBMISSION_TOOL,
-         analysis_worker._submission_response),
+        (analysis_worker.AUTHORING_SUBMISSION_TOOL,
+         analysis_worker._authoring_submission_response),
         (analysis_worker.JOIN_UTILITY_SUBMISSION_TOOL,
          analysis_worker._join_utility_submission_response),
     ):

@@ -30,7 +30,6 @@ from app.agent.context import (
     ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS,
     PRESETS,
     ContextResolver,
-    analysis_definition_scope,
     analysis_summary_scope,
 )
 from app.agent.context import adapters
@@ -83,29 +82,71 @@ def _scripted_summary(user: str) -> dict:
 
 
 def _scripted_definitions(user: str) -> dict:
-    """A model script that answers for whichever frame it was actually given."""
-
+    """Answer every work item the authoring turn was given, as Polars code."""
     payload = json.loads(user.split("\n\nYour previous response")[0])
-    frame = payload["TARGET FRAME"]
-    table = frame["table"]
-    columns = [column["name"] for column in frame["columns"]]
-    key = "invoice_no" if "invoice_no" in columns else columns[0]
-    return {
-        "analyses": [
-            {
-                "title": f"Duplicates in {table}",
-                "kind": "analytics",
-                "spec": {"test": "duplicates", "params": {"columns": [key]}},
-                "note": "Reused keys signal double postings.",
-            },
-            {
-                "title": f"Preview {table}",
-                "kind": "python",
-                "spec": {"code": f"result = tables['{table}'].head(3)"},
-                "note": "Expected to hold across these columns.",
-            },
-        ]
-    }
+    analyses = []
+    for item in payload.get("WORK ITEMS") or []:
+        frame, column = item["frame"], (item.get("columns") or ["*"])[0]
+        if item.get("kind") == "explore":
+            code = (f"result = tables['{frame}'].group_by('{column}').agg(pl.len().alias('rows'))")
+            policy = "informational"
+        else:
+            code = f"result = tables['{frame}'].filter(pl.col('{column}').is_duplicated())"
+            policy = "exception_rows"
+        analyses.append({
+            "ref": item["ref"],
+            "frame": frame,
+            "title": f"{item['ref']} on {frame}",
+            "note": "A reused key is the shape a double posting takes.",
+            "code": code,
+            "outcome_policy": policy,
+        })
+    return {"analyses": analyses, "declined": []}
+
+
+
+def _authoring_script(answer):
+    """Answer each work item through ``answer(item)``.
+
+    It returns ``(title, code)`` or ``(title, code, policy)`` to write the item,
+    or a string to decline it with that reason.
+    """
+    def script(user: str) -> dict:
+        payload = json.loads(user.split("\n\nYour previous response")[0])
+        analyses, declined = [], []
+        for item in payload.get("WORK ITEMS") or []:
+            got = answer(item)
+            if isinstance(got, str):
+                declined.append({"ref": item["ref"], "reason": got})
+                continue
+            title, code, *policy = got
+            analyses.append({
+                "ref": item["ref"],
+                "frame": item["frame"],
+                "title": title,
+                "note": "What a result here would mean.",
+                "code": code,
+                "outcome_policy": (policy or ["exception_rows"])[0],
+            })
+        return {"analyses": analyses, "declined": declined}
+    return script
+
+
+def _reading_adding(frame: str, *columns: list[str]):
+    """A reading turn that places one assertion per column set on ``frame``."""
+    def script(user: str) -> dict:
+        return {
+            "keep": [], "decline": [], "unanswerable": [], "characterize": [], "explore": [],
+            "add": [
+                {"frame": frame, "columns": list(cols),
+                 "assertion": f"{frame} holds on {', '.join(cols)}.", "why": "It should."}
+                for cols in columns
+            ],
+        }
+    return script
+
+
+WHOLE_FRAME = "result = tables['orders']"
 
 
 def _fake_model(monkeypatch, script=None) -> FakeAgentLLM:
@@ -995,142 +1036,7 @@ def test_a_test_spanning_three_tables_is_placed_by_a_turn_that_sees_all_of_them(
     }
 
 
-def test_a_frame_the_sweep_found_something_on_keeps_its_turn(monkeypatch):
-    """The routing rule decides where a *guessed* test belongs. It was also
-    deciding frames the sweep had never been allowed to look at — six of
-    eighteen in one engagement, in three milliseconds each, one of them holding
-    an invoice's payment status beside its requisition's approval status. A
-    measurement that already found breaching rows outranks a rule about tests
-    nobody has run."""
 
-    ws = _three_hop_workspace_holding_a_minority_state()
-    fake = _fake_model(monkeypatch)
-    fake.overrides["agent:join_utility"] = _requires_script(
-        {
-            frozenset(("orders", "customers")): {"orders", "customers"},
-            frozenset(("customers", "plans")): {"orders", "customers", "plans"},
-        }
-    )
-    run = _join_analysis_run(ws, text="join these tables and analyse them")
-
-    _drive(ws, run, "data.relationships_inferred")
-    _drive(ws, run, "data.join_utility_ready")
-    _drive(ws, run, "data.joins_ready")
-    _drive(ws, run, "analysis.definitions_ready")
-
-    # Keyed by the frame each unit actually targets: a unit id is a slug, and
-    # the sweep has to be asked about the frame by the name the workspace holds.
-    units = {
-        str(unit["parent_refs"][0]).split(":", 1)[1]: unit["status"]
-        for unit in _stage(run, "analysis.definitions_ready")["units"]
-    }
-    pair_frame = "customers_plans_joined"
-
-    # The routing is identical to the test above — the three-table hypothesis
-    # lands on the chained frame, and this pair is left holding none of its own.
-    fresh = workspaces.load_workspace(ws.id)
-    assert [item for item in probes.probe_frame(fresh, pair_frame) if item["flagged"]], (
-        "fixture must give the pair frame something of its own to say"
-    )
-    assert units[pair_frame] == "succeeded"
-    assert pair_frame in [
-        json.loads(call["messages"][-1]["content"].split("\n\nYour previous")[0])
-        .get("TARGET FRAME", {})
-        .get("table")
-        for call in fake.calls
-        if call["tag"] == "agent:analysis_definitions"
-    ]
-
-
-def test_a_frame_is_told_the_assertion_the_register_placed_on_it(monkeypatch):
-    """A frame left to re-derive its purpose from schemas writes a worse
-    question than the one already asked of it — a completeness check on a
-    dimension frame rather than the control the join was admitted for.
-
-    The carrier changed with E4 and the guarantee did not. The gate's admitted
-    tests reach the reading turn; the reading turn's assertions reach the frame
-    they were placed on. What a definition turn must never be is unbriefed."""
-
-    ws = _mixed_strength_workspace()
-    fake = _fake_model(monkeypatch)
-    fake.overrides["agent:join_utility"] = _requires_script(
-        {frozenset(("orders", "regions")): {"orders", "regions"}}
-    )
-    run = _join_analysis_run(ws)
-
-    _drive(ws, run, "data.relationships_inferred")
-    _drive(ws, run, "data.join_utility_ready")
-    _drive(ws, run, "data.joins_ready")
-    _drive(ws, run, "analysis.definitions_ready")
-
-    joined = next(
-        call
-        for call in fake.calls
-        if call["tag"] == "agent:analysis_definitions"
-        and json.loads(
-            call["messages"][-1]["content"].split("\n\nYour previous")[0]
-        )["TARGET FRAME"]["table"].endswith("_joined")
-    )
-    payload = json.loads(
-        joined["messages"][-1]["content"].split("\n\nYour previous")[0]
-    )
-    carried = payload["ASSERTIONS PLACED ON THIS FRAME"]
-    assert carried and all(item["hypothesis"] and item["why"] for item in carried)
-    assert all(
-        column in {item["name"] for item in payload["TARGET FRAME"]["columns"]}
-        for item in carried
-        for column in item["columns"]
-    )
-    # Nominations are deliberately absent: every measurement this frame supports
-    # was committed by the register before this turn was bound, so re-sending
-    # them would ask for a spec that already exists.
-    assert "MEASURED ON THIS FRAME" not in payload
-    # The target schema is named once. It used to be sent again inside the
-    # serialized bundle, billing the same block twice on every frame.
-    supplied = payload["RESOLVED CONTEXT"]["items"]
-    assert not [item for item in supplied if item["source_id"] == "target_schema"]
-    # A frame's own sides describe no column it does not already hold.
-    assert not [
-        item
-        for item in supplied
-        if item["source_id"] == "related_frames"
-        and item["content"]["table"] in {"orders", "regions"}
-    ]
-
-
-def test_a_frame_carrying_a_hypothesis_is_told_the_join_already_happened(monkeypatch):
-    """The regression this guards: a hypothesis like "invoice X has a matching
-    GRN in po_data" describes the join condition that already built the frame.
-    A model told only that text, with no framing, wrote a self-join to
-    re-establish a match that was already true of every row — and the bad spec
-    then cost its working sibling too (see
-    test_one_broken_python_spec_does_not_cost_its_working_siblings). The system
-    prompt sent alongside a carried hypothesis has to say the match already
-    holds, not leave the model to infer it."""
-
-    ws = _mixed_strength_workspace()
-    fake = _fake_model(monkeypatch)
-    fake.overrides["agent:join_utility"] = _requires_script(
-        {frozenset(("orders", "regions")): {"orders", "regions"}}
-    )
-    run = _join_analysis_run(ws)
-
-    _drive(ws, run, "data.relationships_inferred")
-    _drive(ws, run, "data.join_utility_ready")
-    _drive(ws, run, "data.joins_ready")
-    _drive(ws, run, "analysis.definitions_ready")
-
-    joined = next(
-        call
-        for call in fake.calls
-        if call["tag"] == "agent:analysis_definitions"
-        and json.loads(
-            call["messages"][-1]["content"].split("\n\nYour previous")[0]
-        )["TARGET FRAME"]["table"].endswith("_joined")
-    )
-    system = joined["messages"][0]["content"]
-    assert "already reflect" in system
-    assert "no join, self-join" in system
 
 
 def test_a_retained_test_no_frame_can_carry_is_reported_rather_than_lost(monkeypatch):
@@ -1283,181 +1189,7 @@ def test_an_interrupted_promotion_reconciles_instead_of_crashing(workspace_with_
 # --------------------------------------------------------------------------- #
 # P8.6 — declared context and privacy
 # --------------------------------------------------------------------------- #
-def test_analysis_context_supplies_metadata_and_aggregates_without_row_values(
-    workspace_with_data,
-):
-    ws = workspace_with_data
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    scope = analysis_definition_scope(
-        ws,
-        "transactions",
-        related=["customers"],
-        relationships=[
-            {
-                "left": "transactions",
-                "right": "customers",
-                "left_on": ["cust_id"],
-                "right_on": ["id"],
-                "how": "left",
-                "strength": "strong",
-                "diagnostics": {"match_rate": 1.0},
-            }
-        ],
-    )
-    manifest, bundle = ContextResolver().resolve(
-        ws, capability, {"id": "analysis_definitions:transactions"}, scope
-    )
 
-    supplied = {item.source_id for item in bundle.items}
-    assert {"target_schema", "target_aggregates", "analytics_registry"} <= supplied
-    kinds = {item.representation.kind for item in bundle.items}
-    assert "table_rows" not in kinds
-    assert kinds <= {"table_metadata", "table_profile", "table_aggregate", "current_artifact"}
-
-    serialized = bundle.to_json()
-    # No row-level data and no category literals: the fixture's customer names
-    # and customer codes are exactly the value class the planning presets also
-    # withhold, and nothing supplies a row.
-    for literal in ("Alpha", "Beta", "Gamma", '"C1"', "top_values"):
-        assert literal not in serialized
-    assert "1001" not in serialized, "an invoice number is a row value"
-    # The manifest stays content-free: it records which references were
-    # selected and their hashes, never the values or metrics they carried.
-    manifest_json = manifest.to_json()
-    for content in ("1001", "Alpha", "duplicate_rows", "distinct_count", "match_rate"):
-        assert content not in manifest_json
-    assert manifest.selections and all(
-        selection.source_ref for selection in manifest.selections
-    )
-
-    aggregates = [
-        item.content for item in bundle.items if item.source_id == "target_aggregates"
-    ]
-    assert any(item.get("scope") == "table" for item in aggregates)
-    columns = [item for item in aggregates if item.get("scope") == "column"]
-    assert columns and all("top_values" not in item for item in columns)
-    amount = next(item for item in columns if item["column"] == "amount")
-    assert amount["inferred_type"] == "numeric"
-    assert amount["distinct_count"] == 4
-    # A categorical column contributes shape only — never its values.
-    cust = next(item for item in columns if item["column"] == "cust_id")
-    assert cust["inferred_type"] == "categorical"
-    assert set(cust) == {
-        "table",
-        "scope",
-        "column",
-        "dtype",
-        "inferred_type",
-        "rows",
-        "blank_count",
-        "blank_pct",
-        "distinct_count",
-        "distinct_pct",
-    }
-
-    relationship = [
-        item.content
-        for item in bundle.items
-        if item.source_id == "relationship_evidence"
-    ]
-    assert relationship and relationship[0]["diagnostics"]["match_rate"] == 1.0
-
-
-def test_values_reach_this_preset_only_through_their_own_declared_sources():
-    """The two value classes this preset admits, and the one it still does not.
-
-    The aggregates above stay value-free, and that is now a statement about the
-    aggregates rather than about the preset: a vocabulary and a bounded sample
-    are admitted, each under its own permission, and an arbitrary slice of a
-    table is still refused outright.
-    """
-    ws = workspaces.create_workspace("Values")
-    ws.add_table(
-        "requisitions.csv",
-        pl.DataFrame(
-            {
-                "REQ_ID": [f"R{n:03d}" for n in range(1, 31)],
-                "REQUISITION_STATUS": [
-                    ("Rejected" if n <= 4 else "Approved" if n % 2 else "Pending")
-                    for n in range(1, 31)
-                ],
-                "ESTIMATED_TOTAL_COST": [float(n * 100) for n in range(1, 31)],
-            }
-        )
-        .write_csv()
-        .encode(),
-    )
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    findings = probes.probe_frame(ws, "requisitions")
-    scope = analysis_definition_scope(
-        ws,
-        "requisitions",
-        probe_findings=findings,
-        value_domains=probes.value_domains(ws, "requisitions"),
-    )
-    _, bundle = ContextResolver().resolve(
-        ws, capability, {"id": "analysis_definitions:requisitions"}, scope
-    )
-    kinds = {item.representation.kind for item in bundle.items}
-    assert "value_domain" in kinds
-    # The wider disclosures a vocabulary does not reopen.
-    assert "table_rows" not in kinds
-    assert "population_sample" not in kinds
-
-    spec = PRESETS.get("analysis.definitions").spec
-    assert spec.privacy.allow_value_domains is True
-    assert spec.privacy.allow_table_rows is False
-    assert spec.privacy.allow_analysis_exception_rows is False
-    assert not hasattr(spec.privacy, "allow_population_sample")
-
-    domain = next(
-        item.content
-        for item in bundle.items
-        if item.representation.kind == "value_domain"
-    )
-    # A vocabulary names what values exist and never which row holds one.
-    assert domain["column"] == "REQUISITION_STATUS"
-    assert domain["values"] == ["Approved", "Pending", "Rejected"]
-    assert "R001" not in bundle.to_json(), "a requisition id is a row value"
-
-
-def test_analysis_context_supplies_the_complete_workflow_library_contract(
-    workspace_with_data,
-):
-    ws = workspace_with_data
-    capability = capability_registries.ANALYSIS_REGISTRY.get("analysis.definitions_ready")
-    _manifest, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:transactions"},
-        analysis_definition_scope(ws, "transactions"),
-    )
-    supplied_registry = next(
-        item.content for item in bundle.items if item.source_id == "analytics_registry"
-    )
-    expected = [
-        item
-        for item in analytics.registry_payload()
-        if item["id"] not in ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS
-    ]
-    assert supplied_registry == expected
-    supplied_ids = {item["id"] for item in supplied_registry}
-    assert ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS.isdisjoint(supplied_ids)
-    outliers = next(item for item in supplied_registry if item["id"] == "outliers")
-    assert next(item for item in outliers["params"] if item["name"] == "method") == {
-        "name": "method",
-        "kind": "select",
-        "label": "Method",
-        "options": [
-            {"label": "Z-score (mean ± kσ)", "value": "zscore"},
-            {"label": "IQR (Tukey fence)", "value": "iqr"},
-        ],
-        "default": "zscore",
-    }
 
 
 def test_low_impact_digit_tests_are_not_workflow_analyses(workspace_with_data):
@@ -1505,189 +1237,8 @@ def test_low_impact_digit_tests_are_not_workflow_analyses(workspace_with_data):
         ({"column": "cust_id", "method": "iqr"}, "requires a numeric column"),
     ],
 )
-def test_analysis_worker_enforces_library_test_contract(
-    workspace_with_data, params, error
-):
-    ws = workspace_with_data
-    capability = capability_registries.ANALYSIS_REGISTRY.get("analysis.definitions_ready")
-    _manifest, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:transactions"},
-        analysis_definition_scope(ws, "transactions"),
-    )
-    request = WorkerRequest(
-        worker_id=analysis_worker.ANALYSIS_DEFINITION_WORKER_ID,
-        capability_id=capability.id,
-        unit_id="analysis_definitions:transactions",
-        context=bundle,
-    )
-    with pytest.raises(WorkerResponseValidationError, match=error):
-        analysis_worker.validate_analysis_proposal(
-            {
-                "analyses": [
-                    {
-                        "title": "Outlier test",
-                        "kind": "analytics",
-                        "spec": {"test": "outliers", "params": params},
-                        "note": "Expected to hold across these columns.",
-                    }
-                ]
-            },
-            request,
-        )
 
 
-def test_analysis_worker_rejects_repeated_columns_locally(workspace_with_data):
-    ws = workspace_with_data
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    _manifest, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:transactions"},
-        analysis_definition_scope(ws, "transactions"),
-    )
-    request = WorkerRequest(
-        worker_id=analysis_worker.ANALYSIS_DEFINITION_WORKER_ID,
-        capability_id=capability.id,
-        unit_id="analysis_definitions:transactions",
-        context=bundle,
-    )
-
-    with pytest.raises(WorkerResponseValidationError, match="repeats a column"):
-        analysis_worker.validate_analysis_proposal(
-            {
-                "analyses": [
-                    {
-                        "title": "Duplicate test",
-                        "kind": "analytics",
-                        "spec": {
-                            "test": "duplicates",
-                            "params": {
-                                "columns": ["invoice_no", "invoice_no"],
-                            },
-                        },
-                        "note": "Expected to hold across these columns.",
-                    }
-                ]
-            },
-            request,
-        )
-
-
-def test_analysis_generation_is_constrained_by_a_forced_target_specific_tool(
-    workspace_with_data, monkeypatch
-):
-    ws = workspace_with_data
-    fake = _fake_model(monkeypatch)
-    run = _analysis_run(
-        ws,
-        command={
-            "source": "chat",
-            "text": "Explore the data in this workspace",
-            "target_refs": ["table:transactions"],
-        },
-    )
-    _drive(ws, run, "analysis.definitions_ready")
-
-    call = next(item for item in fake.calls if item["tag"] == ANALYSIS_TAG)
-    assert call["tool_choice"] == {
-        "type": "function",
-        "function": {"name": analysis_worker.ANALYSIS_SUBMISSION_TOOL},
-    }
-    assert len(call["tools"]) == 1
-    tool = call["tools"][0]
-    assert tool["function"]["name"] == analysis_worker.ANALYSIS_SUBMISSION_TOOL
-    assert "uniqueItems" not in json.dumps(tool)
-    item_branches = tool["function"]["parameters"]["properties"]["analyses"]["items"][
-        "oneOf"
-    ]
-    analytics_branch = next(
-        item
-        for item in item_branches
-        if item["properties"]["kind"]["enum"] == ["analytics"]
-    )
-    spec_branches = analytics_branch["properties"]["spec"]["oneOf"]
-    allowed_ids = {
-        item["properties"]["test"]["enum"][0] for item in spec_branches
-    }
-    assert ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS.isdisjoint(allowed_ids)
-    # The fixture holds six rows, so tests that answer a question about a
-    # population are not offered at all: an IQR fence over six values is
-    # arithmetic without a finding in it. Per-row integrity checks remain.
-    assert analysis_worker.POPULATION_TEST_IDS.isdisjoint(allowed_ids)
-    assert {"completeness", "duplicates", "date_lag", "sign_scan"} <= allowed_ids
-    # A frame this small is also asked for fewer analyses than a populous one.
-    assert tool["function"]["parameters"]["properties"]["analyses"]["maxItems"] == (
-        analysis_worker.SMALL_FRAME_ANALYSES
-    )
-
-    sign_scan = next(
-        item
-        for item in spec_branches
-        if item["properties"]["test"]["enum"] == ["sign_scan"]
-    )
-    amount_columns = sign_scan["properties"]["params"]["properties"]["column"]["enum"]
-    assert "amount" in amount_columns
-    assert "cust_id" not in amount_columns
-
-
-@pytest.mark.parametrize(
-    ("title", "code", "error"),
-    [
-        (
-            "Date lag",
-            "df = tables['transactions']\nresult = (df['tx_date'] - df['tx_date']).dt.days()",
-            "DateTimeNameSpace.*days",
-        ),
-        (
-            "Outlier count",
-            "values = tables['transactions']['amount']\nresult = pl.DataFrame({'count': [values.height]})",
-            "Series.*height",
-        ),
-        (
-            "Ambiguous join",
-            "left = tables['transactions'].rename({'cust_id': 'VENDOR_ID', 'amount': 'VENDOR_ID_right'})\nright = tables['transactions'].rename({'cust_id': 'VENDOR_ID'})\nresult = left.join(right, on='invoice_no', how='left')",
-            "DuplicateError.*VENDOR_ID_right",
-        ),
-    ],
-)
-def test_generated_python_analysis_must_run_before_it_is_saved(
-    workspace_with_data, title, code, error
-):
-    ws = workspace_with_data
-    parent_ref = "table:transactions"
-    semantic_id = analysis_worker.analysis_semantic_id(
-        "python", "transactions", {"code": code}
-    )
-    request = ExecutorRequest(
-        executor_id=analysis_executors.DEFINITIONS_EXECUTOR_ID,
-        capability_id="analysis.definitions_ready",
-        unit_id="analysis_definitions:transactions",
-        proposal={
-            "analyses": [
-                {
-                    "title": title,
-                    "kind": "python",
-                    "table": "transactions",
-                    "spec": {"code": code},
-                    "semantic_id": semantic_id,
-                }
-            ]
-        },
-        expected_revision=ws.revision,
-        expected_parents=parent_hashes(ws, [parent_ref]),
-    )
-    target = analysis_executors.AnalysisDefinitionExecutorTarget(
-        ws, "run-python-validation", "transactions", parent_ref
-    )
-
-    with pytest.raises(workspaces.WorkspaceError, match=error):
-        analysis_executors.execute_analysis_definitions(request, target)
-
-    assert not ws.analyses
 
 
 def _two_role_key_workspace() -> workspaces.Workspace:
@@ -1771,68 +1322,6 @@ def test_a_column_a_join_carries_through_unchanged_is_still_one_analysis():
     )
 
 
-def test_a_proposal_dropped_as_a_repeat_is_said_out_loud(workspace_with_data):
-    """A dropped proposal was invisible from every artifact an auditor sees.
-
-    Re-asking for it would cost a model turn to gain nothing, which is why it is
-    dropped rather than rejected — but only the turn was ever in question. One
-    frame wrote five analyses, had four removed here, and the run recorded a
-    frame that had proposed one.
-    """
-    ws = workspace_with_data
-    spec = {"test": "duplicates", "params": {"columns": ["invoice_no"]}}
-    ws.add_analysis(
-        {
-            "title": "Already saved",
-            "kind": "analytics",
-            "table": "transactions",
-            "spec": spec,
-            "semantic_id": _identity(ws, "transactions", spec),
-            "created_by": "agent",
-            "agent_run_id": "run-earlier",
-        }
-    )
-    capability = capability_registries.ANALYSIS_REGISTRY.get("analysis.definitions_ready")
-    _manifest, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:transactions"},
-        analysis_definition_scope(ws, "transactions"),
-    )
-    request = WorkerRequest(
-        worker_id=analysis_worker.ANALYSIS_DEFINITION_WORKER_ID,
-        capability_id=capability.id,
-        unit_id="analysis_definitions:transactions",
-        context=bundle,
-    )
-    accepted = analysis_worker.validate_analysis_proposal(
-        {
-            "analyses": [
-                {
-                    "title": "Repeated key scan",
-                    "kind": "analytics",
-                    "spec": spec,
-                    "note": "Every invoice number should appear once.",
-                },
-                {
-                    "title": "Completeness of the amount column",
-                    "kind": "analytics",
-                    "spec": {"test": "completeness", "params": {"columns": ["amount"]}},
-                    "note": "Every transaction should carry an amount.",
-                },
-            ]
-        },
-        request,
-    )
-
-    assert [item["title"] for item in accepted["analyses"]] == [
-        "Completeness of the amount column"
-    ]
-    declined = accepted["declined"]
-    assert len(declined) == 1
-    assert "Repeated key scan" in declined[0]
-    assert "already saved" in declined[0]
-
 
 def test_a_frame_names_the_population_its_rows_are_rows_of():
     ws = _two_role_key_workspace()
@@ -1846,7 +1335,9 @@ def test_a_frame_names_the_population_its_rows_are_rows_of():
 def test_the_declared_preset_denies_row_level_table_data():
     spec = PRESETS.compile("analysis.definitions")
     assert spec.privacy.allow_table_rows is False
-    assert spec.privacy.allow_table_aggregates is True
+    # The turn that writes code sees columns and value domains, never figures.
+    assert spec.privacy.allow_table_aggregates is False
+    assert spec.privacy.allow_analysis_aggregates is False
     representations = {
         representation.kind
         for source in spec.sources
@@ -1868,28 +1359,14 @@ def test_invalid_definitions_are_repaired_once_and_never_commit(
         if len(attempts) == 1:
             return {
                 "analyses": [
-                    {
-                        "title": "Invented test",
-                        "kind": "analytics",
-                        "spec": {"test": "three_way_match", "params": {}},
-                        "note": "Expected to hold across these columns.",
-                    },
-                    {
-                        "title": "Unsafe code",
-                        "kind": "python",
-                        "spec": {"code": "import os\nresult = 1"},
-                        "note": "Expected to hold across these columns.",
-                    },
-                    {
-                        "title": "Wrong column",
-                        "kind": "analytics",
-                        "spec": {
-                            "test": "duplicates",
-                            "params": {"columns": ["not_a_column"]},
-                        },
-                        "note": "Expected to hold across these columns.",
-                    },
-                ]
+                    {"ref": "R01", "frame": "transactions", "title": "Unsafe code",
+                     "note": "n", "code": "import os\nresult = 1"},
+                    {"ref": "R01", "frame": "nowhere", "title": "Wrong frame",
+                     "note": "n", "code": "result = tables['transactions']"},
+                    {"ref": "R99", "frame": "transactions", "title": "Invented item",
+                     "note": "n", "code": "result = tables['transactions']"},
+                ],
+                "declined": [],
             }
         return _scripted_definitions(user)
 
@@ -1907,23 +1384,21 @@ def test_invalid_definitions_are_repaired_once_and_never_commit(
 
     # Every violation was reported in one bounded repair turn.
     guidance = attempts[1]
-    assert "unknown analytics test 'three_way_match'" in guidance
     assert "not safe Polars" in guidance
-    assert "not in the supplied schema" in guidance
+    assert "names no supplied frame: 'nowhere'" in guidance
+    assert "names no supplied work item: 'R99'" in guidance
+    assert "R01 has no answer" in guidance
     assert len(attempts) == 2
     assert [
         call["tag"] for call in fake.calls if call["tag"] == ANALYSIS_TAG
     ] == [ANALYSIS_TAG, ANALYSIS_TAG]
 
     saved = workspaces.load_workspace(ws.id).analyses
-    assert {item["title"] for item in saved} == {
-        # The sweep nominated this one and the register saved it first, so the
-        # surviving record carries the title the measurement derives.
-        "invoice_no repeats",
-        "Preview transactions",
-    }
+    titles = {item["title"] for item in saved if not data_map.is_profile(item)}
+    # The sweep's own nomination, under the title its measurement derives, and
+    # the repaired authored item.
+    assert titles == {"invoice_no repeats", "R01 on transactions"}
     assert all(item["kind"] in {"analytics", "python"} for item in saved)
-
 
 def test_the_worker_uses_only_the_supplied_bundle():
     source = inspect.getsource(analysis_worker)
@@ -1944,9 +1419,9 @@ def test_the_worker_uses_only_the_supplied_bundle():
         for name in imported
     )
     assert "Workspace" not in source
-    # The frame a definition targets comes from the resolved context, never the
-    # model's own answer.
-    assert '"table": target' in source
+    # The frame a definition targets is one the resolved context supplied; a
+    # frame the model names itself is refused.
+    assert "names no supplied frame" in source
 
 
 # --------------------------------------------------------------------------- #
@@ -2200,32 +1675,20 @@ def test_the_base_rate_gate_scales_with_the_population(workspace_with_data):
 def test_an_uninformative_proposal_is_run_and_dropped_before_it_is_saved(
     workspace_with_data, monkeypatch
 ):
-    """Whether a comparison holds is not knowable from the schema — only by running it."""
+    """Whether code narrows a frame is not knowable from the schema — only by running it."""
     ws = workspace_with_data
     ws.add_table("orders.csv", ORDERS_CSV)
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Deliveries before their order",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "date_lag",
-                        "params": {"from_date": "delivered", "to_date": "ordered"},
-                    },
-                    "note": "A delivery cannot precede the order it fulfils.",
-                },
-                {
-                    "title": "Duplicate references",
-                    "kind": "analytics",
-                    "spec": {"test": "duplicates", "params": {"columns": ["ref"]}},
-                    "note": "One reference should identify one order.",
-                },
-            ]
-        }
+    def answer(item):
+        if "ref" in item["columns"]:
+            return ("Duplicate references",
+                    "result = tables['orders'].filter(pl.col('ref').is_duplicated())")
+        return ("Deliveries before their order", WHOLE_FRAME)
 
-    _fake_model(monkeypatch, script)
+    fake = _fake_model(monkeypatch, _authoring_script(answer))
+    fake.overrides["agent:analysis_reading"] = _reading_adding(
+        "orders", ["delivered", "ordered"], ["ref"]
+    )
     run = _analysis_run(
         ws,
         command={
@@ -2236,11 +1699,14 @@ def test_an_uninformative_proposal_is_run_and_dropped_before_it_is_saved(
     )
     _drive(ws, run, "analysis.definitions_ready")
 
-    saved = {item["title"] for item in workspaces.load_workspace(ws.id).analyses}
-    # The good proposal survives; the one that flags its whole population never
-    # becomes a procedure with a verdict for the memo to narrate.
+    saved = {
+        item["title"] for item in workspaces.load_workspace(ws.id).analyses
+        if not data_map.is_profile(item)
+    }
+    # The good proposal survives; the one that returns its whole population
+    # never becomes a procedure with a verdict for the memo to narrate.
     assert saved == {"Duplicate references"}
-
+    assert any("Deliveries before their order" in w and "not saved" in w for w in run["warnings"])
 
 def test_a_frame_whose_every_proposal_separates_nothing_settles(
     workspace_with_data, monkeypatch
@@ -2249,20 +1715,7 @@ def test_a_frame_whose_every_proposal_separates_nothing_settles(
     ws = workspace_with_data
     ws.add_table("orders.csv", ORDERS_CSV)
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Deliveries before their order",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "date_lag",
-                        "params": {"from_date": "delivered", "to_date": "ordered"},
-                    },
-                    "note": "A delivery cannot precede the order it fulfils.",
-                }
-            ]
-        }
+    script = _authoring_script(lambda item: ("Deliveries before their order", WHOLE_FRAME))
 
     _fake_model(monkeypatch, script)
     run = _analysis_run(
@@ -2278,7 +1731,10 @@ def test_a_frame_whose_every_proposal_separates_nothing_settles(
     unit = _stage(run, "analysis.definitions_ready")["units"][0]
     assert unit["status"] == "skipped"
     assert "separated any of its rows" in unit["error"]
-    assert not workspaces.load_workspace(ws.id).analyses
+    assert not [
+        item for item in workspaces.load_workspace(ws.id).analyses
+        if not data_map.is_profile(item)
+    ]
 
 
 def test_a_frame_left_empty_on_purpose_does_not_reopen_the_chain(
@@ -2297,20 +1753,7 @@ def test_a_frame_left_empty_on_purpose_does_not_reopen_the_chain(
     ws = workspace_with_data
     ws.add_table("orders.csv", ORDERS_CSV)
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Deliveries before their order",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "date_lag",
-                        "params": {"from_date": "delivered", "to_date": "ordered"},
-                    },
-                    "note": "A delivery cannot precede the order it fulfils.",
-                }
-            ]
-        }
+    script = _authoring_script(lambda item: ("Deliveries before their order", WHOLE_FRAME))
 
     _fake_model(monkeypatch, script)
     scope = {"target_refs": ["table:orders"]}
@@ -2329,7 +1772,7 @@ def test_a_frame_left_empty_on_purpose_does_not_reopen_the_chain(
     assert _stage(run, "analysis.definitions_ready")["units"][0]["status"] == "skipped"
 
     settled = workspaces.load_workspace(ws.id)
-    assert not settled.analyses
+    assert not [item for item in settled.analyses if not data_map.is_profile(item)]
     assert "orders" in assertion_register.settled_frames(settled)
     assert "separated any of its rows" in (
         assertion_register.settled_reasons(settled)["orders"]
@@ -2352,20 +1795,7 @@ def test_replacing_the_data_reopens_a_frame_settled_without_an_analysis(
     ws = workspace_with_data
     ws.add_table("orders.csv", ORDERS_CSV)
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Deliveries before their order",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "date_lag",
-                        "params": {"from_date": "delivered", "to_date": "ordered"},
-                    },
-                    "note": "A delivery cannot precede the order it fulfils.",
-                }
-            ]
-        }
+    script = _authoring_script(lambda item: ("Deliveries before their order", WHOLE_FRAME))
 
     _fake_model(monkeypatch, script)
     scope = {"target_refs": ["table:orders"]}
@@ -2389,51 +1819,6 @@ def test_replacing_the_data_reopens_a_frame_settled_without_an_analysis(
     )
 
 
-def test_a_proposal_without_its_rationale_is_rejected(workspace_with_data):
-    """Writing why the two columns belong together is the check."""
-    ws = workspace_with_data
-    request = _definition_request(workspaces.load_workspace(ws.id), "transactions")
-    proposal = {
-        "analyses": [
-            {
-                "title": "Duplicate invoice numbers",
-                "kind": "analytics",
-                "spec": {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
-            }
-        ]
-    }
-    with pytest.raises(WorkerResponseValidationError, match="missing a note"):
-        analysis_worker.validate_analysis_proposal(proposal, request)
-
-    proposal["analyses"][0]["note"] = "One invoice number should identify one invoice."
-    accepted = analysis_worker.validate_analysis_proposal(proposal, request)
-    assert accepted["analyses"][0]["note"].startswith("One invoice number")
-
-
-def test_the_budget_is_a_ceiling_and_a_frame_may_propose_nothing(workspace_with_data):
-    """Padding a frame that supports nothing is what produced the bad procedures."""
-    ws = workspace_with_data
-    request = _definition_request(workspaces.load_workspace(ws.id), "transactions")
-    tool = analysis_worker._analysis_submission_tool(request)
-    array = tool["function"]["parameters"]["properties"]["analyses"]
-    assert array["minItems"] == 0
-    assert array["maxItems"] >= 1
-
-    # An empty answer settles the unit rather than failing the run, by the same
-    # route as a frame whose every proposal was already saved.
-    with pytest.raises(WorkerResponseValidationError) as raised:
-        analysis_worker.validate_analysis_proposal({"analyses": []}, request)
-    assert analysis_worker.NOTHING_NEW_TO_ANALYSE in str(raised.value)
-
-    # The response schema has to let the empty array reach that judgement. It
-    # used to reject one as malformed, so the prompt asked for an answer the
-    # first validator called invalid: a model that complied spent both attempts
-    # being corrected and the run failed over a permitted answer.
-    assert analysis_worker._analysis_response_schema('{"analyses": []}') == {
-        "analyses": []
-    }
-    with pytest.raises(WorkerResponseValidationError):
-        analysis_worker._analysis_response_schema('{"analyses": "none"}')
 
 
 def test_a_broken_definition_is_rejected_before_it_is_saved(
@@ -2441,17 +1826,9 @@ def test_a_broken_definition_is_rejected_before_it_is_saved(
 ):
     ws = workspace_with_data
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Broken preview",
-                    "kind": "python",
-                    "spec": {"code": "result = tables['transactions'].group_by('nope').len()"},
-                    "note": "Expected to hold across these columns.",
-                }
-            ]
-        }
+    script = _authoring_script(lambda item: (
+        "Broken preview", "result = tables['transactions'].group_by('nope').len()"
+    ))
 
     _fake_model(monkeypatch, script)
     run = _analysis_run(
@@ -2470,7 +1847,10 @@ def test_a_broken_definition_is_rejected_before_it_is_saved(
     assert "failed local validation" in definition_unit["error"]
     # The register's own measured nomination is saved and executed; what must
     # not exist is a record for the definition that failed validation.
-    saved = workspaces.load_workspace(ws.id).analyses
+    saved = [
+        item for item in workspaces.load_workspace(ws.id).analyses
+        if not data_map.is_profile(item)
+    ]
     assert [item["title"] for item in saved] == ["invoice_no repeats"]
     assert "Broken preview" not in [
         unit["title"] for unit in _stage(run, "analysis.executed")["units"]
@@ -2482,35 +1862,20 @@ def test_one_broken_python_spec_does_not_cost_its_working_siblings(
 ):
     """A bug in one generated snippet is not evidence against the rest of the
     same response. This is the regression a self-join bug actually caused: an
-    unrelated, valid analytics check on the same frame was lost alongside it,
-    because the whole unit failed rather than only the broken proposal."""
+    unrelated, valid check on the same frame was lost alongside it, because the
+    whole unit failed rather than only the broken proposal."""
 
-    def script(user: str) -> dict:
-        return {
-            "analyses": [
-                {
-                    # Keyed on both columns deliberately: the sweep nominates
-                    # single near-unique columns, so a check on ``invoice_no``
-                    # alone is already saved by the register and this unit would
-                    # correctly have nothing new to write.
-                    "title": "Duplicate invoice numbers",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "duplicates",
-                        "params": {"columns": ["invoice_no", "cust_id"]},
-                    },
-                    "note": "Reused invoice numbers signal double postings.",
-                },
-                {
-                    "title": "Broken preview",
-                    "kind": "python",
-                    "spec": {"code": "result = tables['transactions'].group_by('nope').len()"},
-                    "note": "Expected to hold across these columns.",
-                },
-            ]
-        }
+    def answer(item):
+        if "cust_id" in item["columns"]:
+            return ("Duplicate invoice numbers",
+                    "result = tables['transactions'].filter("
+                    "pl.struct('invoice_no', 'cust_id').is_duplicated())")
+        return ("Broken preview", "result = tables['transactions'].group_by('nope').len()")
 
-    _fake_model(monkeypatch, script)
+    fake = _fake_model(monkeypatch, _authoring_script(answer))
+    fake.overrides["agent:analysis_reading"] = _reading_adding(
+        "transactions", ["invoice_no", "cust_id"], ["amount"]
+    )
     run = _analysis_run(
         ws := workspace_with_data,
         command={
@@ -2526,60 +1891,9 @@ def test_one_broken_python_spec_does_not_cost_its_working_siblings(
     saved = workspaces.load_workspace(ws.id).analyses
     assert "Duplicate invoice numbers" in [item["title"] for item in saved]
     assert any(
-        "dropped a proposed analysis" in warning and "Broken preview" in warning
+        "not saved" in warning and "Broken preview" in warning
         for warning in run["warnings"]
     ), "a proposal that never got saved has to be said out loud, not silently lost"
-
-
-def test_what_the_validator_removed_travels_on_the_path_every_run_takes(
-    workspace_with_data,
-):
-    """The disclosure has to leave by the commit path, not the approval one.
-
-    Reported from the approval callback it was silent on every run the auditor
-    was not approving each item by hand — which is every unattended run, and
-    every run this pipeline has been measured on. One of them removed thirty-
-    eight proposals across eighteen frames and said nothing about any of them.
-    """
-    ws = workspace_with_data
-    parent_ref = "table:transactions"
-    spec = {"test": "duplicates", "params": {"columns": ["invoice_no"]}}
-    request = ExecutorRequest(
-        executor_id=analysis_executors.DEFINITIONS_EXECUTOR_ID,
-        capability_id="analysis.definitions_ready",
-        unit_id="analysis_definitions:transactions",
-        proposal={
-            "analyses": [
-                {
-                    "title": "Duplicate invoice numbers",
-                    "kind": "analytics",
-                    "table": "transactions",
-                    "spec": spec,
-                    "note": "Reused invoice numbers signal double postings.",
-                    "semantic_id": _identity(ws, "transactions", spec),
-                }
-            ],
-            "declined": ["analyses[1] (Repeated key scan) already saved elsewhere"],
-        },
-        expected_revision=ws.revision,
-        expected_parents=parent_hashes(ws, [parent_ref]),
-    )
-    target = analysis_executors.AnalysisDefinitionExecutorTarget(
-        ws, "run-declined", "transactions", parent_ref
-    )
-
-    result = analysis_executors.execute_analysis_definitions(request, target)
-
-    # ``dropped`` is the channel the binder already turns into run warnings, so
-    # a validator removal now reaches the auditor by the same route as one the
-    # executor made itself.
-    assert any(
-        "Repeated key scan" in reason for reason in result.output["dropped"]
-    ), "a repeat the validator removed is invisible unless the commit says so"
-    assert [item["title"] for item in result.output["analyses"]] == [
-        "Duplicate invoice numbers"
-    ]
-
 
 # --------------------------------------------------------------------------- #
 # P8.10 — routing
@@ -2688,21 +2002,20 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
         for cited in memo["cited_analysis_ids"]
     )
     assert not fresh.joins
-    # One definition unit per scoped frame — both tables and the new join — but
-    # five analyses, not six. The script proposes the same duplicate check on
-    # every frame it is given, and on the join that check reads only columns
-    # originating in ``transactions``: the same computation, so it is dropped
-    # rather than saved twice. The join keeps only the analysis that is
-    # genuinely its own.
+    # One authoring turn answers the reading's three placed items — one per
+    # scoped frame. The item on the join reads only columns originating in
+    # ``transactions``, so it is set aside as belonging on that table rather
+    # than saved twice, and said out loud; the join frame is settled.
     # The population profile is saved beside them, written from the data map
     # with no model turn, and executed with everything else.
     profile = [item for item in fresh.analyses if data_map.is_profile(item)]
     authored = [item for item in fresh.analyses if not data_map.is_profile(item)]
     assert profile
-    assert len(authored) == 5
-    assert sum(bool(item.get("alignment")) for item in authored) == 1
+    assert len(authored) == 3
+    assert not any(item.get("alignment") for item in authored)
+    assert any("belongs on that table" in warning for warning in completed["warnings"])
     assert all(item["last_result"]["status"] == "ok" for item in fresh.analyses)
-    assert f"Analyses executed: {5 + len(profile)}" in completed["summary_markdown"]
+    assert f"Analyses executed: {3 + len(profile)}" in completed["summary_markdown"]
     assert [item["capability"] for item in completed["milestones"]] == [
         "analysis.executed"
     ]
@@ -2711,20 +2024,17 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     assert next(
         item["value"] for item in milestone["metrics"]
         if item["label"] == "Checks executed"
-    ) == 5 + len(profile)
+    ) == 3 + len(profile)
     assert "rows" not in milestone and "table_rows" not in milestone
     first_turns = len(fake.calls)
-    # One reading, three authored frames, one memo. Candidate alignments and
-    # deterministic floor definitions add no model turns; full EDA no longer
-    # spends a utility-gate turn.
+    # One reading, one authoring turn for every frame, one memo. Candidate
+    # alignments and deterministic floor definitions add no model turns.
     assert [call["tag"] for call in fake.calls] == [
         "agent:analysis_reading",
         "agent:analysis_definitions",
-        "agent:analysis_definitions",
-        "agent:analysis_definitions",
         "agent:analysis_summary",
     ]
-    assert first_turns == 5
+    assert first_turns == 3
 
     repeat = runner.start_command_run(
         # Materialization reads the caller's workspace, which is how a route
@@ -2745,7 +2055,7 @@ def test_full_analysis_run_completes_then_repeats_without_duplicating_work(
     assert len(fake.calls) == first_turns, "a repeat run must not re-bill the provider"
     unchanged = workspaces.load_workspace(ws.id)
     assert not unchanged.joins
-    assert len(unchanged.analyses) == 5 + len(profile)
+    assert len(unchanged.analyses) == 3 + len(profile)
 
 
 def test_analysis_and_audit_requests_use_one_scheduler_with_different_outcomes(
@@ -2849,154 +2159,7 @@ def test_one_computation_has_one_identity_across_a_join_family(workspace_with_da
     ) != analysis_worker.analysis_semantic_id("analytics", "tx_customers", spec)
 
 
-def test_definition_context_supplies_the_whole_join_family(workspace_with_data):
-    """A proposal can only avoid repeating an analysis it was actually shown."""
-    ws = _joined(workspace_with_data)
-    ws.add_analysis(
-        {
-            "title": "Duplicate invoice numbers",
-            "kind": "analytics",
-            "table": "transactions",
-            "spec": {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
-            "semantic_id": "analysis:already-saved",
-        }
-    )
-    ws = workspaces.load_workspace(ws.id)
 
-    scope = analysis_definition_scope(ws, "tx_customers")
-    shown = {
-        str(candidate.source["table"])
-        for candidate in scope.candidates["current_analyses"]
-    }
-    assert shown == {"transactions"}, (
-        "the join must see the analyses already saved on the tables behind it"
-    )
-    schema = scope.candidates["target_schema"][0].source
-    assert schema["column_origins"]["invoice_no"] == "transactions"
-    assert schema["column_origins"]["customer"] == "customers"
-
-
-def test_a_repeat_from_a_sibling_frame_is_dropped_not_saved(workspace_with_data):
-    """The duplicate is dropped and the rest of the response still stands."""
-    ws = _joined(workspace_with_data)
-    ws.add_analysis(
-        {
-            "title": "Duplicate invoice numbers",
-            "kind": "analytics",
-            "table": "transactions",
-            "spec": {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
-            "semantic_id": analysis_worker.analysis_semantic_id(
-                "analytics",
-                "transactions",
-                {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
-                join_diagnostics.column_origins(ws, "transactions"),
-            ),
-        }
-    )
-    ws = workspaces.load_workspace(ws.id)
-
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    _, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:tx_customers"},
-        analysis_definition_scope(ws, "tx_customers"),
-    )
-    request = WorkerRequest(
-        worker_id="analysis.definitions",
-        capability_id="analysis.definitions_ready",
-        unit_id="analysis_definitions:tx_customers",
-        context=bundle,
-        activity={},
-    )
-
-    accepted = analysis_worker.validate_analysis_proposal(
-        {
-            "analyses": [
-                {
-                    "title": "Duplicate invoice numbers",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "duplicates",
-                        "params": {"columns": ["invoice_no"]},
-                    },
-                    "note": "Expected to hold across these columns.",
-                },
-                {
-                    "title": "Duplicates across the join",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "duplicates",
-                        "params": {"columns": ["invoice_no", "customer"]},
-                    },
-                    "note": "Expected to hold across these columns.",
-                },
-            ]
-        },
-        request,
-    )
-    assert [item["title"] for item in accepted["analyses"]] == [
-        "Duplicates across the join"
-    ]
-
-
-def test_a_frame_with_nothing_of_its_own_reports_it_instead_of_erroring(
-    workspace_with_data,
-):
-    """Every proposal repeats a sibling's: a real answer about the data, and
-    the binder settles the unit rather than failing the run over it."""
-    ws = _joined(workspace_with_data)
-    spec = {"test": "duplicates", "params": {"columns": ["invoice_no"]}}
-    ws.add_analysis(
-        {
-            "title": "Duplicate invoice numbers",
-            "kind": "analytics",
-            "table": "transactions",
-            "spec": spec,
-            "semantic_id": analysis_worker.analysis_semantic_id(
-                "analytics",
-                "transactions",
-                spec,
-                join_diagnostics.column_origins(ws, "transactions"),
-            ),
-        }
-    )
-    ws = workspaces.load_workspace(ws.id)
-
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    _, bundle = ContextResolver().resolve(
-        ws,
-        capability,
-        {"id": "analysis_definitions:tx_customers"},
-        analysis_definition_scope(ws, "tx_customers"),
-    )
-    request = WorkerRequest(
-        worker_id="analysis.definitions",
-        capability_id="analysis.definitions_ready",
-        unit_id="analysis_definitions:tx_customers",
-        context=bundle,
-        activity={},
-    )
-
-    with pytest.raises(WorkerResponseValidationError) as raised:
-        analysis_worker.validate_analysis_proposal(
-            {
-                "analyses": [
-                    {
-                        "title": "Duplicate invoice numbers",
-                        "kind": "analytics",
-                        "spec": spec,
-                        "note": "One invoice number should appear once.",
-                    }
-                ]
-            },
-            request,
-        )
-    assert analysis_worker.NOTHING_NEW_TO_ANALYSE in str(raised.value)
 
 
 def _three_hop_workspace() -> workspaces.Workspace:
@@ -3150,77 +2313,8 @@ def test_auto_mode_applies_a_tied_role_join_and_names_what_it_passed_over(monkey
 # --------------------------------------------------------------------------- #
 # A frame is asked only for work it can actually support
 # --------------------------------------------------------------------------- #
-def test_proposal_budget_follows_frame_size():
-    assert analysis_worker.proposal_budget(4) == analysis_worker.SMALL_FRAME_ANALYSES
-    assert analysis_worker.proposal_budget(52) == analysis_worker.MODEST_FRAME_ANALYSES
-    assert analysis_worker.proposal_budget(118) == analysis_worker.MAX_PROPOSED_ANALYSES
-    # An undeclared row count must not silently shrink the contract.
-    assert analysis_worker.proposal_budget(None) == analysis_worker.MAX_PROPOSED_ANALYSES
 
 
-def _definition_request(workspace, target):
-    capability = capability_registries.ANALYSIS_REGISTRY.get(
-        "analysis.definitions_ready"
-    )
-    _, bundle = ContextResolver().resolve(
-        workspace,
-        capability,
-        {"id": f"analysis_definitions:{target}"},
-        analysis_definition_scope(workspace, target),
-    )
-    return WorkerRequest(
-        worker_id="analysis.definitions",
-        capability_id="analysis.definitions_ready",
-        unit_id=f"analysis_definitions:{target}",
-        context=bundle,
-        activity={},
-    )
-
-
-def test_a_populous_frame_keeps_its_population_tests(workspace_with_data):
-    """The gate is about frame size, not about the tests being unwelcome."""
-    ws = workspace_with_data
-    wide = pl.DataFrame(
-        {
-            "row_id": [f"R{index}" for index in range(200)],
-            "amount": [float(index) for index in range(200)],
-        }
-    )
-    ws.add_table("ledger.csv", wide.write_csv().encode())
-    ws = workspaces.load_workspace(ws.id)
-
-    tool = analysis_worker._analysis_submission_tool(_definition_request(ws, "ledger"))
-    branches = next(
-        item
-        for item in tool["function"]["parameters"]["properties"]["analyses"]["items"]["oneOf"]
-        if item["properties"]["kind"]["enum"] == ["analytics"]
-    )["properties"]["spec"]["oneOf"]
-    allowed = {item["properties"]["test"]["enum"][0] for item in branches}
-    # Both are population tests the small-frame gate withholds. They are asserted
-    # rather than `stratify`, which a populous frame also does not receive — but
-    # for the unrelated reason that a stratification is `descriptive` and the
-    # workflow proposes no descriptive test at any size.
-    assert "outliers" in allowed and "threshold_check" in allowed
-    assert tool["function"]["parameters"]["properties"]["analyses"]["maxItems"] == (
-        analysis_worker.MAX_PROPOSED_ANALYSES
-    )
-
-
-def _spec_branches(workspace, target: str) -> dict[str, dict]:
-    tool = analysis_worker._analysis_submission_tool(
-        _definition_request(workspace, target)
-    )
-    analytics_branch = next(
-        item
-        for item in tool["function"]["parameters"]["properties"]["analyses"]["items"][
-            "oneOf"
-        ]
-        if item["properties"]["kind"]["enum"] == ["analytics"]
-    )
-    return {
-        item["properties"]["test"]["enum"][0]: item
-        for item in analytics_branch["properties"]["spec"]["oneOf"]
-    }
 
 
 def test_the_workflow_proposes_no_descriptive_test(workspace_with_data):
@@ -3234,243 +2328,15 @@ def test_the_workflow_proposes_no_descriptive_test(workspace_with_data):
     """
     descriptive = analytics.ids_with_signal(analytics.SIGNAL_DESCRIPTIVE)
     assert descriptive <= ANALYSIS_WORKFLOW_EXCLUDED_TEST_IDS
-    assert descriptive.isdisjoint(_spec_branches(workspace_with_data, "transactions"))
 
 
-def _lookup_pairs(ws, target: str) -> set[tuple[str, tuple[str, ...]]]:
-    referential = _spec_branches(ws, target)["referential"]
-    branches = referential["properties"]["params"].get("oneOf") or [
-        referential["properties"]["params"]
-    ]
-    return {
-        (
-            branch["properties"]["lookup_table"]["enum"][0],
-            tuple(branch["properties"]["lookup_column"]["enum"]),
-        )
-        for branch in branches
-    }
 
 
-def test_a_reconciliation_may_only_name_a_supplied_lookup(workspace_with_data):
-    """``lookup_column`` means nothing except relative to a chosen table, so the
-    two are emitted as one branch per candidate. A single pair of independent
-    enums would admit every cross product, most of which name a column the
-    chosen table does not have."""
-    ws = workspace_with_data
-    ws.add_table(
-        "invoice_master.csv",
-        pl.DataFrame(
-            {
-                "invoice_no": [1001, 1002, 1003, 1005, 1006],
-                "region": ["north", "north", "south", "south", "north"],
-            }
-        ).write_csv().encode(),
-    )
-    ws = workspaces.load_workspace(ws.id)
-
-    pairs = _lookup_pairs(ws, "transactions")
-    # ``invoice_no`` is distinct on every row and populated throughout; ``region``
-    # repeats, so it identifies nothing and is not offered as a key.
-    assert ("invoice_master", ("invoice_no",)) in pairs
-    # A frame never reconciles against itself, nor against a frame it contains.
-    assert all(table != "transactions" for table, _ in pairs)
 
 
-def test_a_reconciliation_is_only_offered_where_the_target_references_it(
-    workspace_with_data,
-):
-    """Offering every table costs a schema branch each — carrying the target's
-    whole column enum — and invites a reconciliation between two populations that
-    were never meant to meet. Narrowed by the same schema-only name affinity the
-    join diagnostics use before they measure anything.
-    """
-    ws = workspace_with_data
-    ws.add_table(
-        "po_master.csv",
-        pl.DataFrame({"po_number": ["PO1", "PO2", "PO3"]}).write_csv().encode(),
-    )
-    ws = workspaces.load_workspace(ws.id)
-
-    offered = {table for table, _ in _lookup_pairs(ws, "transactions")}
-    # `transactions.cust_id` is a reference to `customers.id`, so that pair is
-    # worth offering. Nothing in the fixture names a purchase order at all.
-    assert "customers" in offered
-    assert "po_master" not in offered
 
 
-def test_a_reconciliation_is_not_offered_with_nothing_to_reconcile_against(
-    transactions_df,
-):
-    """A workspace of one table has no lookup, and a test offered with an empty
-    enum is a test the model cannot write — so it is withheld rather than
-    offered and then rejected after a turn has been spent on it."""
-    ws = workspaces.create_workspace("Single table")
-    ws.add_table("transactions.csv", transactions_df.write_csv().encode())
-    ws = workspaces.load_workspace(ws.id)
-    assert "referential" not in _spec_branches(ws, "transactions")
 
-
-def test_a_duplicate_key_may_not_be_qualified_by_what_it_already_identifies(
-    workspace_with_data,
-):
-    """The false clear this exists for: duplicates keyed on (VENDOR_ID,
-    VENDOR_INVOICE_NUMBER) reports "No duplicate keys found" over a population
-    holding two invoice numbers reused across different vendors, because the
-    vendor id is the very dimension the test was supposed to look across."""
-    ws = workspace_with_data
-    ws.add_table(
-        "invoices.csv",
-        pl.DataFrame(
-            {
-                "vendor_id": ["V1", "V2"],
-                "vendor_invoice_number": ["X1", "X1"],
-                "invoice_amount": [10.0, 10.0],
-            }
-        ).write_csv().encode(),
-    )
-    ws = workspaces.load_workspace(ws.id)
-    request = _definition_request(ws, "invoices")
-
-    def propose(columns: list[str]) -> dict:
-        return {
-            "analyses": [
-                {
-                    "title": "Duplicate vendor invoice references",
-                    "kind": "analytics",
-                    "note": "A vendor invoice number should identify one invoice.",
-                    "spec": {"test": "duplicates", "params": {"columns": columns}},
-                }
-            ]
-        }
-
-    with pytest.raises(WorkerResponseValidationError) as raised:
-        analysis_worker.validate_analysis_proposal(
-            propose(["vendor_id", "vendor_invoice_number"]), request
-        )
-    assert "only narrows" in str(raised.value)
-
-    # The corrected key, and a legitimate composite that shares no subject, both
-    # pass: the rule is about one column restating another, not about breadth.
-    for columns in (["vendor_invoice_number"], ["vendor_id", "invoice_amount"]):
-        accepted = analysis_worker.validate_analysis_proposal(propose(columns), request)
-        assert accepted["analyses"][0]["spec"]["params"]["columns"] == columns
-
-
-def test_a_joined_frame_may_not_restate_one_side_s_own_work(workspace_with_data):
-    """A join exists to relate its sides. An analytics spec there that reads
-    only one of them computes what that table alone computes, so it belongs on
-    the table — this is what filled joined frames with their sides' analyses."""
-    ws = _joined(workspace_with_data)
-    request = _definition_request(ws, "tx_customers")
-
-    accepted = analysis_worker.validate_analysis_proposal(
-        {
-            "analyses": [
-                {
-                    # Both columns originate in transactions.
-                    "title": "Duplicate invoice and customer id",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "duplicates",
-                        "params": {"columns": ["invoice_no", "cust_id"]},
-                    },
-                    "note": "Expected to hold across these columns.",
-                },
-                {
-                    # Spans the join: an invoice column and a customer column.
-                    "title": "Duplicate invoice per customer name",
-                    "kind": "analytics",
-                    "spec": {
-                        "test": "duplicates",
-                        "params": {"columns": ["invoice_no", "customer"]},
-                    },
-                    "note": "Expected to hold across these columns.",
-                },
-            ]
-        },
-        request,
-    )
-    assert [item["title"] for item in accepted["analyses"]] == [
-        "Duplicate invoice per customer name"
-    ]
-
-
-def test_a_base_table_may_of_course_use_its_own_columns(workspace_with_data):
-    """The cross-side rule applies to joined frames only."""
-    request = _definition_request(workspace_with_data, "transactions")
-    accepted = analysis_worker.validate_analysis_proposal(
-        {
-            "analyses": [
-                {
-                    "title": "Duplicate invoice numbers",
-                    "kind": "analytics",
-                    "spec": {"test": "duplicates", "params": {"columns": ["invoice_no"]}},
-                    "note": "Expected to hold across these columns.",
-                }
-            ]
-        },
-        request,
-    )
-    assert len(accepted["analyses"]) == 1
-
-
-def test_a_joined_frame_with_only_one_sided_proposals_settles(workspace_with_data):
-    ws = _joined(workspace_with_data)
-    with pytest.raises(WorkerResponseValidationError) as raised:
-        analysis_worker.validate_analysis_proposal(
-            {
-                "analyses": [
-                    {
-                        "title": "Duplicate invoice numbers",
-                        "kind": "analytics",
-                        "spec": {
-                            "test": "duplicates",
-                            "params": {"columns": ["invoice_no"]},
-                        },
-                        "note": "Expected to hold across these columns.",
-                    }
-                ]
-            },
-            _definition_request(ws, "tx_customers"),
-        )
-    assert analysis_worker.NOTHING_NEW_TO_ANALYSE in str(raised.value)
-    assert "reads only columns of transactions" in str(raised.value)
-
-
-def test_a_joined_side_s_column_asked_per_root_row_is_new_work(workspace_with_data):
-    """A check that reads only a joined-in side still runs over the root's rows.
-
-    Asked on the customer master it says which customers lack a name; asked on
-    the transaction frame it says which transactions were raised against a
-    customer with none. Procurement lost exactly this shape — a vendor status
-    read per invoice — to a rule that judged by where the columns came from.
-    """
-    ws = _joined(workspace_with_data)
-    request = _definition_request(ws, "tx_customers")
-    accepted = analysis_worker.validate_analysis_proposal(
-        {
-            "analyses": [
-                {
-                    "title": "Transactions whose customer has no name",
-                    "kind": "analytics",
-                    "spec": {"test": "completeness", "params": {"columns": ["customer"]}},
-                    "note": "Every transaction should be raised for a named customer.",
-                },
-                {
-                    "title": "Transactions whose customer has no name, in code",
-                    "kind": "python",
-                    "spec": {
-                        "code": 'result = tables["tx_customers"].filter(pl.col("customer").is_null())'
-                    },
-                    "outcome_policy": {"mode": "exception_rows"},
-                    "note": "Every transaction should be raised for a named customer.",
-                },
-            ]
-        },
-        request,
-    )
-    assert [item["kind"] for item in accepted["analyses"]] == ["analytics", "python"]
-    assert "declined" not in accepted
 
 
 # --------------------------------------------------------------------------- #

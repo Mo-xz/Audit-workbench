@@ -243,14 +243,18 @@ def test_routes_that_flag_different_rows_stay_apart():
 
 
 def test_the_row_fingerprint_never_reaches_model_context(swept_workspace):
-    """The merge key is a hash of row values, so no prompt carries it."""
-    from app.agent.context import adapters
+    """The merge key is a hash of row values, so no prompt carries it.
+
+    The reading is shown register entries, never raw probe findings, and an
+    entry has nowhere to carry the fingerprint it was merged by."""
+    import dataclasses
 
     found = probes.probe_frame(swept_workspace, "invoices")
     assert any(item.get("flagged_digest") for item in found)
     assert not any("_flagged_rows" in item for item in found)
-    stripped = adapters._without_digest(found[0])
-    assert "flagged_digest" not in stripped
+    floor = register.build_floor(swept_workspace, _swept(swept_workspace))
+    assert floor
+    assert all("digest" not in str(dataclasses.asdict(item)) for item in floor)
 
 
 def test_a_reference_that_resolves_nowhere_is_one_finding_not_four():

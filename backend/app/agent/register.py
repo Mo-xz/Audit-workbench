@@ -191,6 +191,24 @@ class Assertion:
     columns: tuple[str, ...]
     assertion: str
     why: str
+    #: ``assert`` — something that should hold, written as a test whose rows are
+    #: exceptions; ``explore`` — a question about the population, answered as a
+    #: summary that describes it. Both are written as code in the same turn.
+    kind: str = "assert"
+
+
+@dataclass(frozen=True)
+class Characterized:
+    """A fact about the data that changes how it should be tested.
+
+    Read off the profile, not measured by a test: every PO equalling its
+    estimate, prices that never vary between suppliers, dates spread across
+    weekends like random ones. Not an exception and so never a result, which
+    is why it travels with the register to the memo.
+    """
+
+    fact: str
+    implication: str
 
 
 @dataclass(frozen=True)
@@ -223,6 +241,7 @@ class Register:
     authored: tuple[Assertion, ...] = ()
     declined: tuple[Declined, ...] = ()
     unanswerable: tuple[Unanswerable, ...] = ()
+    characterized: tuple[Characterized, ...] = ()
     #: True where a reading turn actually contributed. A register standing on
     #: its floor alone is a valid register and a different thing to report.
     read: bool = False
@@ -270,8 +289,13 @@ class Register:
                     "columns": list(item.columns),
                     "assertion": item.assertion,
                     "why": item.why,
+                    "kind": item.kind,
                 }
                 for item in self.authored
+            ],
+            "characterized": [
+                {"fact": item.fact, "implication": item.implication}
+                for item in self.characterized
             ],
             "declined": [
                 {"ref": item.ref, "title": item.title, "reason": item.reason}
@@ -613,20 +637,30 @@ def merge(floor: Sequence[Nomination], decisions: Mapping[str, object]) -> Regis
     ]
 
     authored = []
-    for index, entry in enumerate(decisions.get("add") or (), 1):
-        if not isinstance(entry, Mapping):
-            continue
-        authored.append(
-            Assertion(
-                ref=f"R{index:02d}",
-                frame=str(entry.get("frame") or ""),
-                columns=tuple(
-                    str(value) for value in entry.get("columns") or () if str(value)
-                ),
-                assertion=str(entry.get("assertion") or ""),
-                why=str(entry.get("why") or ""),
+    for section, prefix, kind, statement in (
+        ("add", "R", "assert", "assertion"),
+        ("explore", "E", "explore", "question"),
+    ):
+        for index, entry in enumerate(decisions.get(section) or (), 1):
+            if not isinstance(entry, Mapping):
+                continue
+            authored.append(
+                Assertion(
+                    ref=f"{prefix}{index:02d}",
+                    frame=str(entry.get("frame") or ""),
+                    columns=tuple(
+                        str(value) for value in entry.get("columns") or () if str(value)
+                    ),
+                    assertion=str(entry.get(statement) or ""),
+                    why=str(entry.get("why") or ""),
+                    kind=kind,
+                )
             )
-        )
+    characterized = [
+        Characterized(str(entry.get("fact") or ""), str(entry.get("implication") or ""))
+        for entry in decisions.get("characterize") or ()
+        if isinstance(entry, Mapping) and str(entry.get("fact") or "").strip()
+    ]
 
     unanswerable = [
         Unanswerable(str(entry.get("question") or ""), str(entry.get("why") or ""))
@@ -638,6 +672,7 @@ def merge(floor: Sequence[Nomination], decisions: Mapping[str, object]) -> Regis
         authored=tuple(authored),
         declined=tuple(declined),
         unanswerable=tuple(unanswerable),
+        characterized=tuple(characterized),
         read=True,
     )
 
@@ -685,8 +720,14 @@ def from_payload(payload: Mapping[str, object] | None) -> Register:
             columns=tuple(str(value) for value in entry.get("columns") or ()),
             assertion=str(entry.get("assertion") or ""),
             why=str(entry.get("why") or ""),
+            kind=str(entry.get("kind") or "assert"),
         )
         for entry in payload.get("authored") or ()
+        if isinstance(entry, Mapping)
+    )
+    characterized = tuple(
+        Characterized(str(entry.get("fact") or ""), str(entry.get("implication") or ""))
+        for entry in payload.get("characterized") or ()
         if isinstance(entry, Mapping)
     )
     declined = tuple(
@@ -708,6 +749,7 @@ def from_payload(payload: Mapping[str, object] | None) -> Register:
         authored=authored,
         declined=declined,
         unanswerable=unanswerable,
+        characterized=characterized,
         read=bool(payload.get("read")),
     )
 
@@ -799,6 +841,59 @@ def settle_frame(workspace: Workspace, frame: str, reason: str) -> None:
         pass  # best-effort, like the profile cache it sits beside
 
 
+_READING_FILENAME = "analysis_reading.json"
+
+
+def save_reading(workspace: Workspace, settled: Register) -> None:
+    """Keep what the reading said about the data where a later memo can read it.
+
+    The register itself is run-durable, and a memo is regenerated by whichever
+    run asks for one — often not the run that read the map. What the memo needs
+    from the reading and cannot recompute is its judgement: the facts that
+    change how the data should be tested, and the questions no field answers.
+    Stamped with every table's content signature, so it is read only while the
+    data it describes is the data in front of the memo.
+    """
+    path = workspace.data_dir / loader.CACHE_DIRNAME / _READING_FILENAME
+    try:
+        signatures = {name: _frame_signature(workspace, name) for name in sorted(workspace.table_names())}
+    except (WorkspaceError, OSError):
+        return
+    payload = {
+        "signatures": signatures,
+        "characterized": [{"fact": c.fact, "implication": c.implication} for c in settled.characterized],
+        "unanswerable": [{"question": u.question, "why": u.why} for u in settled.unanswerable],
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(path, payload)
+    except OSError:
+        pass
+
+
+def load_reading(workspace: Workspace) -> dict | None:
+    """The last reading's judgement about this data, if the data is unchanged."""
+    path = workspace.data_dir / loader.CACHE_DIRNAME / _READING_FILENAME
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        current = {name: _frame_signature(workspace, name) for name in sorted(workspace.table_names())}
+    except (WorkspaceError, OSError):
+        return None
+    stamped = payload.get("signatures") or {}
+    if any(stamped.get(name) != signature for name, signature in current.items() if name in stamped):
+        return None
+    if not (payload.get("characterized") or payload.get("unanswerable")):
+        return None
+    return {"characterized": list(payload.get("characterized") or []),
+            "unanswerable": list(payload.get("unanswerable") or [])}
+
+
 def settled_reasons(workspace: Workspace) -> dict[str, str]:
     """Why each currently-settled frame carries nothing, for the run record."""
     current = settled_frames(workspace)
@@ -811,6 +906,7 @@ def settled_reasons(workspace: Workspace) -> dict[str, str]:
 
 __all__ = [
     "Assertion",
+    "Characterized",
     "Declined",
     "Kept",
     "Nomination",
@@ -819,7 +915,9 @@ __all__ = [
     "build_floor",
     "default_register",
     "from_payload",
+    "load_reading",
     "merge",
+    "save_reading",
     "settle_frame",
     "settled_frames",
     "settled_reasons",

@@ -1862,6 +1862,19 @@ PRESETS.register(
                 # What the auditor asked for, when a person asked for something.
                 # Optional: absent on every run the workflow schedules itself.
                 ContextSource(
+                    id="population_profile",
+                    source_type="analyses",
+                    required=False,
+                    selector=ContextSelector(selector_id="analyses.all"),
+                    # The data map's profile, computed for this turn and bounded
+                    # exactly as the memo receives it: concentration, step
+                    # durations, roles, value carried along the chain. What a
+                    # nomination is read against, so that a decline has to
+                    # contradict a number.
+                    representations=(ContextRepresentation("analysis_aggregate"),),
+                    budget=ContextBudget(max_items=40, max_characters=40_000),
+                ),
+                ContextSource(
                     id="instruction",
                     source_type="instructions",
                     required=False,
@@ -1870,7 +1883,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=578, max_characters=182_000),
+            budget=ContextBudget(max_items=618, max_characters=222_000),
             # The same class as ``analysis.definitions`` and no wider. Breadth
             # here is across frames, not down into rows: twenty column
             # inventories disclose what one column inventory discloses, twenty
@@ -1883,6 +1896,10 @@ PRESETS.register(
                 allow_table_profiles=True,
                 allow_table_aggregates=True,
                 allow_value_domains=True,
+                # The profile's summaries. Granted to the one turn that decides
+                # what the engagement tests, and to the memo; never to a turn
+                # that writes code.
+                allow_analysis_aggregates=True,
             ),
         ),
     )
@@ -1893,112 +1910,34 @@ PRESETS.register(
         spec=ContextSpec(
             sources=(
                 ContextSource(
-                    id="target_schema",
-                    source_type="tables",
-                    required=True,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    representations=(ContextRepresentation("table_metadata"),),
-                    budget=ContextBudget(max_items=1, max_characters=8_000),
-                ),
-                ContextSource(
-                    id="target_profile",
-                    source_type="tables",
-                    required=False,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    representations=(ContextRepresentation("table_profile"),),
-                    budget=ContextBudget(max_items=1, max_characters=16_000),
-                ),
-                ContextSource(
-                    id="target_aggregates",
-                    source_type="tables",
-                    required=False,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    # Bounded local aggregates — group counts and numeric totals
-                    # over low-cardinality columns. Aggregates are the only
-                    # value-derived class this preset permits, and never a row.
-                    representations=(ContextRepresentation("table_aggregate"),),
-                    budget=ContextBudget(max_items=8, max_characters=12_000),
-                ),
-                ContextSource(
-                    id="related_frames",
-                    source_type="tables",
-                    required=False,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    representations=(ContextRepresentation("table_metadata"),),
-                    budget=ContextBudget(max_items=8, max_characters=8_000),
-                ),
-                ContextSource(
-                    id="join_hypotheses",
-                    source_type="artifacts",
-                    required=False,
-                    selector=ContextSelector(selector_id="artifacts.current"),
-                    # The utility gate's retained decisions whose test this
-                    # frame can carry: a stated hypothesis and the columns
-                    # naming it. Text the model wrote about local metadata —
-                    # no value, no row.
-                    representations=(ContextRepresentation("current_artifact"),),
-                    budget=ContextBudget(max_items=8, max_characters=8_000),
-                ),
-                ContextSource(
-                    id="relationship_evidence",
-                    source_type="tables",
-                    required=False,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    # The deterministic join diagnostics for frames related to
-                    # the target: match rates, key uniqueness, and row-count
-                    # effects. Aggregate metrics only — this is the same evidence
-                    # the relationship capability recorded, not a re-derivation
-                    # the model is asked to make.
-                    representations=(ContextRepresentation("table_aggregate"),),
-                    budget=ContextBudget(max_items=8, max_characters=8_000),
-                ),
-                ContextSource(
-                    id="analytics_registry",
+                    id="work_items",
                     source_type="artifacts",
                     required=True,
                     selector=ContextSelector(selector_id="artifacts.current"),
+                    # The register's authored assertions and explore questions:
+                    # a statement, a frame and its columns. Text a model wrote
+                    # about metadata — no value, no row.
                     representations=(ContextRepresentation("current_artifact"),),
-                    budget=ContextBudget(max_items=1, max_characters=20_000),
+                    budget=ContextBudget(max_items=24, max_characters=16_000),
                 ),
                 ContextSource(
-                    id="lookup_candidates",
+                    id="frame_schemas",
                     source_type="tables",
-                    required=False,
+                    required=True,
                     selector=ContextSelector(selector_id="tables.all"),
-                    # The frames a reconciliation may read, and the columns in
-                    # each that are actually keys. Metadata and cardinality
-                    # counts, drawn from the cached profile — a lookup candidate
-                    # is described by the shape of its key column, never by the
-                    # values in it. Supplied so the submission schema can make
-                    # naming a non-existent lookup unrepresentable rather than
-                    # merely wrong.
+                    # Each frame a work item names: columns, types, the table
+                    # each column comes from, and whose rows the frame's rows are.
                     representations=(ContextRepresentation("table_metadata"),),
-                    budget=ContextBudget(max_items=12, max_characters=12_000),
-                ),
-                ContextSource(
-                    id="probe_findings",
-                    source_type="tables",
-                    required=False,
-                    selector=ContextSelector(selector_id="tables.all"),
-                    # Measured nominations: a runnable spec plus what it produced
-                    # when the sweep ran it. Aggregate counts and column names,
-                    # which is why this rides the same value-free representation
-                    # as every other aggregate here — the flagged rows behind a
-                    # nomination are never part of it.
-                    representations=(ContextRepresentation("table_aggregate"),),
-                    budget=ContextBudget(max_items=12, max_characters=12_000),
+                    budget=ContextBudget(max_items=24, max_characters=40_000),
                 ),
                 ContextSource(
                     id="value_domains",
                     source_type="tables",
                     required=False,
                     selector=ContextSelector(selector_id="tables.all"),
-                    # The complete value vocabulary of the columns that have a
-                    # small one. Category literals, never a record: a domain
-                    # says a status column holds Approved, Pending and Rejected
-                    # and cannot say which requisition holds which.
+                    # Category literals, never a record.
                     representations=(ContextRepresentation("value_domain"),),
-                    budget=ContextBudget(max_items=20, max_characters=8_000),
+                    budget=ContextBudget(max_items=40, max_characters=12_000),
                 ),
                 ContextSource(
                     id="current_analyses",
@@ -2006,18 +1945,8 @@ PRESETS.register(
                     required=False,
                     selector=ContextSelector(selector_id="artifacts.current"),
                     representations=(ContextRepresentation("current_artifact"),),
-                    # Sized for a frame's whole join family, not just the frame
-                    # itself: a proposal can only avoid repeating an analysis it
-                    # was actually shown, and the same computation is reachable
-                    # from every frame sharing a base table with this one.
-                    budget=ContextBudget(max_items=40, max_characters=16_000),
+                    budget=ContextBudget(max_items=80, max_characters=24_000),
                 ),
-                # What the auditor asked for, when they asked for something.
-                # Optional and absent on every run the workflow schedules for
-                # itself; present when a person said what they wanted changed.
-                # Declared rather than patched into the prompt so that it is
-                # budgeted, truncated on a rule, and recorded in the manifest by
-                # hash and size like every other thing a worker was shown.
                 ContextSource(
                     id="instruction",
                     source_type="instructions",
@@ -2027,7 +1956,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=96, max_characters=88_000),
+            budget=ContextBudget(max_items=169, max_characters=94_000),
             # This preset admits exactly one class of engagement value, and no
             # row. ``allow_value_domains`` admits the categories a column ranges
             # over — the disclosure that lets a procedure be written against
@@ -2044,10 +1973,10 @@ PRESETS.register(
             # structurally rejected at the resolver boundary.
             privacy=ContextPrivacy(
                 allow_auditor_instruction=True,
+                # ``current_artifact`` — the work items and the analyses already
+                # saved — travels under the document-text permission.
                 allow_document_text=True,
                 allow_table_metadata=True,
-                allow_table_profiles=True,
-                allow_table_aggregates=True,
                 allow_value_domains=True,
             ),
         ),
@@ -2105,6 +2034,18 @@ PRESETS.register(
                     # population profile is most of it.
                     representations=(ContextRepresentation("analysis_aggregate"),),
                     budget=ContextBudget(max_items=60, max_characters=60_000),
+                ),
+                ContextSource(
+                    id="analysis_reading",
+                    source_type="analyses",
+                    required=False,
+                    selector=ContextSelector(selector_id="analyses.all"),
+                    # The reading turn's judgement about the data: what kind of
+                    # data it is and what that does to testing, and what no
+                    # column can answer. Kept beside the data it read and
+                    # absent once that data changes.
+                    representations=(ContextRepresentation("analysis_result"),),
+                    budget=ContextBudget(max_items=1, max_characters=12_000),
                 ),
                 ContextSource(
                     id="coverage_gaps",
@@ -2174,7 +2115,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=311, max_characters=232_000),
+            budget=ContextBudget(max_items=312, max_characters=244_000),
             privacy=ContextPrivacy(
                 allow_auditor_instruction=True,
                 allow_planning_context=True,

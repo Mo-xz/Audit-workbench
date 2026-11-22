@@ -3670,6 +3670,14 @@ def _summary_result_projection(
         "uninformative_reason": result.get("uninformative_reason"),
         "statistics": result.get("stats") or [],
         "error": result.get("error"),
+        # Whether the memo draws this result or places its table: a library
+        # test's form is the test's, so only authored code says it here.
+        **(
+            {"exhibit": "chart"}
+            if analysis.get("kind") == "python"
+            and str((analysis.get("viz") or {}).get("type") or "table") != "table"
+            else {}
+        ),
     }
 
 

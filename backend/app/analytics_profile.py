@@ -121,7 +121,7 @@ def breakdown(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         stats=stats,
         summary=grouped,
         tested=total_rows,
-        viz={"type": "bar", "x": dimension, "y": [order]},
+        viz={"type": "hbar", "x": dimension, "y": [order], "label": ["share_pct"]},
     )
 
 
@@ -173,7 +173,7 @@ def crosstab(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         ],
         summary=table,
         tested=n,
-        viz={"type": "table"},
+        viz={"type": "heatmap", "x": rows, "exclude": ["total"]},
     )
 
 
@@ -245,7 +245,7 @@ def value_bands(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         ],
         summary=summary,
         tested=total_rows,
-        viz={"type": "bar", "x": "band", "y": ["rows_pct", "value_pct"]},
+        viz={"type": "share", "x": "band", "y": ["rows_pct", "value_pct"]},
     )
 
 
@@ -295,7 +295,8 @@ def step_durations(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=summary,
         detail=flagged if flagged.height else None,
         tested=tested,
-        viz={"type": "table"},
+        viz={"type": "range", "x": "step", "y": ["min", "p25", "median", "p75", "max"],
+             "flag": "before_previous"},
     )
 
 
@@ -327,7 +328,7 @@ def skipped_steps(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=pl.DataFrame(by_column),
         detail=flagged if flagged.height else None,
         tested=df.height,
-        viz={"type": "bar", "x": "column", "y": ["blank_with_later_steps"]},
+        viz={"type": "hbar", "x": "column", "y": ["blank_with_later_steps"], "omit_zero": True},
     )
 
 
@@ -370,7 +371,9 @@ def calendar_profile(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         ],
         summary=pl.DataFrame(rows),
         tested=total,
-        viz={"type": "bar", "x": "column", "y": ["weekend_pct"]},
+        viz={"type": "hbar", "x": "column", "y": ["weekend_pct"], "unit": "%",
+             "reference": {"value": round(100 * RANDOM_WEEKEND_SHARE, 1),
+                           "label": f"{round(100 * RANDOM_WEEKEND_SHARE, 1)}%: dates at random"}},
     )
 
 
@@ -404,7 +407,7 @@ def role_matrix(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         stats=[_stat("People", matrix.height), _stat("Roles", len(columns)), _stat("In two or more roles", holding_two)],
         summary=matrix,
         tested=df.height,
-        viz={"type": "table"},
+        viz={"type": "heatmap", "x": "person", "exclude": ["total"]},
     )
 
 
@@ -445,7 +448,7 @@ def role_overlap(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=summary,
         detail=flagged if flagged.height else None,
         tested=df.height,
-        viz={"type": "table"},
+        viz={"type": "heatmap", "row": "role", "x": "other_role", "y": ["rate_pct"], "unit": "%"},
     )
 
 
@@ -493,7 +496,7 @@ def chain_reconciliation(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=summary,
         detail=flagged if flagged.height else None,
         tested=df.height,
-        viz={"type": "table"},
+        viz={"type": "bridge", "x": "column", "y": ["total"]},
     )
 
 
@@ -540,7 +543,7 @@ def ratio_consistency(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=summary,
         detail=flagged if flagged.height else None,
         tested=int(framed.select(pl.col("ratio").is_not_null().sum()).item()),
-        viz={"type": "table"},
+        viz={"type": "strip", "x": group, "y": ["min_ratio", "median_ratio", "max_ratio"], "log": True},
     )
 
 
@@ -644,7 +647,7 @@ def authority_grid(df: pl.DataFrame, params: dict) -> AnalyticsResult:
         summary=grid,
         detail=flagged if flagged.height else None,
         tested=framed.filter(pl.col("__limit").is_not_null()).height,
-        viz={"type": "table"},
+        viz={"type": "heatmap", "row": "band", "x": signer, "y": ["approvals"], "flag": "over_limit"},
     )
 
 

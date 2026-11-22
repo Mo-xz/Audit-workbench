@@ -1161,6 +1161,22 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   on-screen remarks out as print does, and caps an exhibit at eight columns
   (tested first) with the rest counted in its caption. `docx` loads only on
   export, in its own chunk.
+- **The memo's exhibits are SVG drawn from a result's own chart spec.** A
+  profile test declares its form in its `viz` — `hbar` (bars with value
+  labels, an optional reference line and breach flag), `line`, `share`
+  (segmented bars), `heatmap` (wide, or long with `row`), `range`, `strip`
+  (log scale) and `bridge` — and `analysis/exhibitCharts.ts` lays each out as
+  marks that `analysis/ExhibitChart.vue` draws with the `--aw-chart-*` tokens
+  (their own steps on the dark sheet). Layout is pure and tested as numbers; a
+  spec whose columns the frame lacks lays out as `null` and the frame is shown
+  as a table. `ChartView` hands the new forms to it and keeps Chart.js for
+  `bar`, `line` and `pie` on the analysis pages; the memo draws every chart
+  embed through it. The Word export rasterises each exhibit
+  (`analysis/exhibitImage.ts`) with its paint inlined under the light theme.
+  The assembler decides chart or table from the test (`_CHART_TESTS`) or an
+  authored analysis's own chart (`exhibit` in its projection), and places at
+  most three exhibits per profile section and one table of flagged rows per
+  finding — the rest stay cited in the prose.
 - Existing uncommitted workspace or code changes may be user-owned. Do not
   revert them unless explicitly asked.
 

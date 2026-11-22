@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import type { AnalysisDetail, AnalysisExceptions, SavedAnalysis } from '../../types'
-import ChartView from '../ChartView.vue'
+import ExhibitChart from './ExhibitChart.vue'
 import FrameTable from '../FrameTable.vue'
 import ExhibitTable from './ExhibitTable.vue'
 import type { Embed } from './memoExhibits'
@@ -47,11 +47,10 @@ const stats = computed(() => props.analysis?.last_result?.stats ?? [])
     </template>
 
     <template v-else>
-      <ChartView
-        v-if="embed.as === 'chart' && detail?.frame"
+      <ExhibitChart
+        v-if="embed.as === 'chart' && detail?.frame && detail.viz"
         :frame="detail.frame"
         :viz="detail.viz"
-        height="240px"
       />
       <FrameTable v-else-if="detail?.frame" :frame="detail.frame" scrollHeight="260px" />
       <div v-else class="exhibit-state"><i class="aw-icon aw-icon-spin aw-icon-loader-circle" aria-hidden="true" /></div>

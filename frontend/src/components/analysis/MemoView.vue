@@ -16,6 +16,7 @@ import { headingCount, markdownBlocks } from '../ui/markdownBlocks'
 import type { OutlineEntry } from '../ui/markdownOutline'
 import { classificationTone, foundSummary } from './analysisStatus'
 import MemoExhibitBody from './MemoExhibitBody.vue'
+import { svgImage } from './exhibitImage'
 import type { ExhibitWord } from './memoDocx'
 import { memoCitations, memoSegments, memoUnits, testedColumns } from './memoExhibits'
 import type { Embed, Exhibit, MemoUnit } from './memoExhibits'
@@ -189,13 +190,16 @@ function setTitle(unit: Extract<MemoUnit, { kind: 'exhibits' }>): string {
 const root = ref<InstanceType<typeof UiDocumentSheet> | null>(null)
 
 /** A chart the page has drawn, as a PNG; an exhibit closed in its set has none. */
-function chartImage(number: number): ExhibitWord['image'] {
-  const canvas = root.value?.sheet?.querySelector<HTMLCanvasElement>(
-    `[id="exhibit-${number}"] canvas, [id="exhibit-${number}"] + .exhibit-row-body canvas`,
-  )
+async function chartImage(number: number): Promise<ExhibitWord['image']> {
+  const scope = `[id="exhibit-${number}"], [id="exhibit-${number}"] + .exhibit-row-body`
+  const sheet = root.value?.sheet
+  const svg = sheet?.querySelector<SVGSVGElement>(scope.split(', ').map(s => `${s} svg[data-exhibit-chart]`).join(', '))
+  if (svg) return svgImage(svg)
+  const canvas = sheet?.querySelector<HTMLCanvasElement>(scope.split(', ').map(s => `${s} canvas`).join(', '))
   if (!canvas || !canvas.width || !canvas.height) return null
   return { data: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height }
 }
+const images = new Map<number, ExhibitWord['image']>()
 
 /** What this page holds about one exhibit, handed to the Word builder as-is. */
 function exhibitWord(exhibit: Exhibit): ExhibitWord {
@@ -212,7 +216,7 @@ function exhibitWord(exhibit: Exhibit): ExhibitWord {
     failed: failed.value.has(id),
     frame: rows,
     tested: rows && exhibit.embed.as === 'exception_table' ? testedColumns(analysis, rows.columns) : [],
-    image: exhibit.embed.as === 'chart' ? chartImage(exhibit.number) : null,
+    image: exhibit.embed.as === 'chart' ? images.get(exhibit.number) ?? null : null,
     stats: (analysis?.last_result?.stats ?? []).map(stat => ({ label: String(stat.label), value: String(stat.value) })),
   }
 }
@@ -227,6 +231,15 @@ async function exportWord(filename: string): Promise<void> {
     import('./memoDocx'),
     import('../ui/documentDocx'),
   ])
+  // Drawn before the builder asks, because drawing an SVG onto a canvas waits
+  // for an image to decode and the builder reads each exhibit synchronously.
+  images.clear()
+  for (const unit of units.value) {
+    if (unit.kind !== 'exhibits') continue
+    for (const exhibit of unit.exhibits) {
+      if (exhibit.embed.as === 'chart') images.set(exhibit.number, await chartImage(exhibit.number))
+    }
+  }
   const blob = await memoWord({
     sheet: { cover: props.cover, runningHead: props.runningHead, footer: props.footer, endMark: props.endMark },
     markdown: props.markdown,

@@ -163,6 +163,27 @@ def test_every_planned_profile_analysis_executes(procurement, expenses):
             assert _run(ws, definition)["error"] is None, definition["title"]
 
 
+#: The memo's exhibit forms (``frontend/src/components/analysis/exhibitCharts``).
+EXHIBIT_FORMS = {"hbar", "line", "share", "heatmap", "range", "strip", "bridge", "table"}
+
+
+def test_every_profile_exhibit_names_columns_its_own_result_has(procurement, expenses):
+    """A form that names a column the result lacks is drawn as a table instead —
+    silently, which is the one way a chart spec can be wrong without failing."""
+    seen = set()
+    for ws in (procurement, expenses):
+        for definition in data_map.profile_definitions(ws, data_map.build_data_map(ws)):
+            payload = _run(ws, definition)
+            viz, columns = payload["viz"], set(payload["frame"]["columns"])
+            seen.add(viz["type"])
+            assert viz["type"] in EXHIBIT_FORMS, definition["title"]
+            named = [viz.get("x"), viz.get("row"), viz.get("flag"), *(viz.get("y") or []), *(viz.get("label") or [])]
+            missing = [name for name in named if name and name not in columns]
+            assert not missing, (definition["title"], viz, missing)
+    # The profile reaches most of the forms on these two packs.
+    assert {"hbar", "share", "heatmap", "range", "strip", "bridge"} <= seen
+
+
 # -------------------------------------------------------------- the cycle side
 def test_data_steps_bind_cycle_populations_and_find_steps_with_no_record():
     steps = [

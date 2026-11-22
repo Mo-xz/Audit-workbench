@@ -130,6 +130,26 @@ body {
   --aw-sheet: #ffffff;
   --aw-sheet-shadow: 0 1px 2px rgb(13 35 64 / 8%), 0 14px 36px rgb(13 35 64 / 9%);
   --aw-sheet-width: 49.625rem;
+  /* Exhibits: the memo's charts. One series hue, a second for a comparison,
+     a recessive grid, a quiet mark for context, the danger red for a breach,
+     a one-hue sequential ramp for heat cells (with the ink that reads on each
+     step) and an ordinal ramp for segments. The pair is validated for
+     colour-vision deficiency against both sheets. */
+  --aw-chart-s1: #2a78d6;
+  --aw-chart-s1-wash: rgb(42 120 214 / 16%);
+  --aw-chart-s2: #eb6834;
+  --aw-chart-grid: #e8ebef;
+  --aw-chart-axis: #c3c9d1;
+  --aw-chart-quiet: #b4bbc4;
+  --aw-chart-critical: #d03b3b;
+  --aw-chart-seq-1: #cde2fb; --aw-chart-seq-2: #9ec5f4; --aw-chart-seq-3: #6da7ec;
+  --aw-chart-seq-4: #3987e5; --aw-chart-seq-5: #256abf; --aw-chart-seq-6: #184f95;
+  --aw-chart-seq-ink-1: #14181d; --aw-chart-seq-ink-2: #14181d; --aw-chart-seq-ink-3: #14181d;
+  --aw-chart-seq-ink-4: #ffffff; --aw-chart-seq-ink-5: #ffffff; --aw-chart-seq-ink-6: #ffffff;
+  --aw-chart-ord-1: #86b6ef; --aw-chart-ord-2: #5598e7; --aw-chart-ord-3: #2a78d6;
+  --aw-chart-ord-4: #1c5cab; --aw-chart-ord-5: #104281;
+  --aw-chart-ord-ink-1: #14181d; --aw-chart-ord-ink-2: #14181d; --aw-chart-ord-ink-3: #ffffff;
+  --aw-chart-ord-ink-4: #ffffff; --aw-chart-ord-ink-5: #ffffff;
 
   /* --- Borders --------------------------------------------------------- */
   --aw-border: #dce5ee;
@@ -273,6 +293,21 @@ body {
     --aw-desk: #0b1017;
     --aw-sheet: #161c26;
     --aw-sheet-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 36px rgb(0 0 0 / 34%);
+    --aw-chart-s1: #3987e5;
+    --aw-chart-s1-wash: rgb(57 135 229 / 22%);
+    --aw-chart-s2: #d95926;
+    --aw-chart-grid: #232a35;
+    --aw-chart-axis: #3a4350;
+    --aw-chart-quiet: #59616b;
+    --aw-chart-critical: #e05c5c;
+    --aw-chart-seq-1: #173a66; --aw-chart-seq-2: #184f95; --aw-chart-seq-3: #256abf;
+    --aw-chart-seq-4: #3987e5; --aw-chart-seq-5: #6da7ec; --aw-chart-seq-6: #9ec5f4;
+    --aw-chart-seq-ink-1: #eaedf1; --aw-chart-seq-ink-2: #ffffff; --aw-chart-seq-ink-3: #ffffff;
+    --aw-chart-seq-ink-4: #ffffff; --aw-chart-seq-ink-5: #0b0d10; --aw-chart-seq-ink-6: #0b0d10;
+    --aw-chart-ord-1: #184f95; --aw-chart-ord-2: #256abf; --aw-chart-ord-3: #3987e5;
+    --aw-chart-ord-4: #6da7ec; --aw-chart-ord-5: #9ec5f4;
+    --aw-chart-ord-ink-1: #ffffff; --aw-chart-ord-ink-2: #ffffff; --aw-chart-ord-ink-3: #ffffff;
+    --aw-chart-ord-ink-4: #0b0d10; --aw-chart-ord-ink-5: #0b0d10;
 
     --aw-border: #262f3d;
     --aw-border-strong: #35404f;
@@ -342,6 +377,21 @@ body {
   --aw-desk: #0b1017;
   --aw-sheet: #161c26;
   --aw-sheet-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 36px rgb(0 0 0 / 34%);
+  --aw-chart-s1: #3987e5;
+  --aw-chart-s1-wash: rgb(57 135 229 / 22%);
+  --aw-chart-s2: #d95926;
+  --aw-chart-grid: #232a35;
+  --aw-chart-axis: #3a4350;
+  --aw-chart-quiet: #59616b;
+  --aw-chart-critical: #e05c5c;
+  --aw-chart-seq-1: #173a66; --aw-chart-seq-2: #184f95; --aw-chart-seq-3: #256abf;
+  --aw-chart-seq-4: #3987e5; --aw-chart-seq-5: #6da7ec; --aw-chart-seq-6: #9ec5f4;
+  --aw-chart-seq-ink-1: #eaedf1; --aw-chart-seq-ink-2: #ffffff; --aw-chart-seq-ink-3: #ffffff;
+  --aw-chart-seq-ink-4: #ffffff; --aw-chart-seq-ink-5: #0b0d10; --aw-chart-seq-ink-6: #0b0d10;
+  --aw-chart-ord-1: #184f95; --aw-chart-ord-2: #256abf; --aw-chart-ord-3: #3987e5;
+  --aw-chart-ord-4: #6da7ec; --aw-chart-ord-5: #9ec5f4;
+  --aw-chart-ord-ink-1: #ffffff; --aw-chart-ord-ink-2: #ffffff; --aw-chart-ord-ink-3: #ffffff;
+  --aw-chart-ord-ink-4: #0b0d10; --aw-chart-ord-ink-5: #0b0d10;
 
   --aw-border: #262f3d;
   --aw-border-strong: #35404f;

@@ -17,6 +17,7 @@ import {
 
 import type { FramePayload, VizSpec } from '../types'
 import FrameTable from './FrameTable.vue'
+import ExhibitChart from './analysis/ExhibitChart.vue'
 
 Chart.register(
   BarController, BarElement, LineController, LineElement, PointElement,
@@ -37,8 +38,13 @@ const props = defineProps<{
 const canvas = ref<HTMLCanvasElement>()
 let chart: Chart | null = null
 
+// The exhibit forms are drawn as SVG wherever a result carries one; Chart.js
+// keeps the three it always drew.
+const exhibit = computed(() => !['table', 'bar', 'line', 'pie'].includes(props.viz.type))
+
 const chartable = computed(
   () =>
+    !exhibit.value &&
     props.viz.type !== 'table' &&
     !!props.viz.x &&
     (props.viz.y?.length ?? 0) > 0 &&
@@ -108,7 +114,8 @@ onBeforeUnmount(() => chart?.destroy())
 </script>
 
 <template>
-  <div v-if="chartable" class="chart-holder" :style="{ height: height ?? '280px' }">
+  <ExhibitChart v-if="exhibit" :frame="frame" :viz="viz" :tableHeight="height ?? '280px'" />
+  <div v-else-if="chartable" class="chart-holder" :style="{ height: height ?? '280px' }">
     <canvas ref="canvas" />
   </div>
   <FrameTable v-else :frame="frame" :scrollHeight="height ?? '280px'" />

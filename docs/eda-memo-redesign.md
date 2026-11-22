@@ -513,7 +513,21 @@ Each phase is independently useful and measurable against the key.
    embeds, which phase 5 is for. Building it surfaced a latent bug: a
    definition with no `viz` could not be screened (`_cap_for(None)`), so an
    uninformative python result was kept rather than dropped.
-5. **Exhibits.** The new chart types in `ChartView`, `MemoView` and `memoDocx`.
+5. **Exhibits.** *Done.* Each profile test declares its exhibit form in its
+   `viz` — `hbar` (value labels, a chance line, a breach flag), `share`,
+   `heatmap` (wide or long), `range`, `strip` (log scale) and `bridge`;
+   `period_compare` keeps `line`. `exhibitCharts.ts` lays each out as marks
+   (pure, tested as numbers) and `ExhibitChart.vue` draws them as SVG in the
+   benchmark's palette, re-stepped for the dark sheet; `ChartView` hands it the
+   new forms and keeps Chart.js for its own three. The Word export rasterises
+   each exhibit with its paint inlined under the light theme, so the file keeps
+   the chart rather than falling back to the table. The other half was volume:
+   the assembler now places one table of flagged rows per finding and three
+   exhibits per profile section, and the prompt asks for the proving procedure
+   first. Live on procurement, one memo call (67k prompt tokens; one earlier
+   attempt failed at the provider): 18 exhibits instead of 37 — nine charts,
+   nine tables — and the role matrix, step durations, authority grid and value
+   bridge are drawn rather than tabulated.
 6. **The cycle's shape moves ahead.** It reads the process documents instead of
    the memorandum, theme placement splits off after the APM, and analysis takes
    a partial edge on the shape. Last because phase 2 already feeds the map to

@@ -1631,9 +1631,23 @@ IMPLICATIONS_SECTION = "Implications for the plan"
 # assembler writes this one from the reading itself: it is a judgement already
 # made, and a writer asked to restate it rewords a gap into further work.
 UNANSWERABLE_SECTION = "What the data cannot answer"
-# Profile results whose summary reads best as a chart; every other profile
-# result is placed as its summary table.
-_CHART_TESTS = frozenset({"breakdown", "value_bands", "calendar_profile", "period_compare", "skipped_steps"})
+# Results whose summary is drawn as an exhibit — bars, shares, a heat table, a
+# range, a strip, a bridge — rather than placed as its table. Every profile test
+# but the identifier series declares one; an authored analysis says so itself
+# (``exhibit`` in its projection) by carrying a chart.
+_CHART_TESTS = frozenset({
+    "breakdown", "value_bands", "calendar_profile", "period_compare", "skipped_steps",
+    "crosstab", "step_durations", "role_matrix", "role_overlap", "chain_reconciliation",
+    "ratio_consistency", "authority_grid",
+})
+# How many exhibits the memo places, measured on procurement: one table of
+# flagged rows under every procedure a finding listed, and every summary a
+# profile section cited, came to 37 exhibits — 24 of them under ten findings.
+# The benchmark carries twelve. A finding shows the rows of the first procedure
+# it lists that flagged any; a profile section, its first three summaries. The
+# rest stay cited in the prose and open from there.
+MAX_FINDING_EXHIBITS = 1
+MAX_PROFILE_EXHIBITS = 3
 
 _SECTION_LIST = "\n".join(
     f"## {section}"
@@ -1685,8 +1699,9 @@ an analyst would, for what they say about how this business runs:
   "How the process runs" (how long each step takes, what runs out of order or
   is skipped, what is paid early or late), "People and authority" (who acts in
   which role, how authority is used, who holds two roles that are usually kept
-  apart). Give each the procedures it rests on; their summaries are placed under
-  your prose. Leave out a section the supplied results do not support.
+  apart). Give each the procedures it rests on, the one that shows it best
+  first: the first three are drawn under your prose as exhibits. Leave out a
+  section the supplied results do not support.
 - An exception reads better against the profile: three requisitions never
   ordered mean something when every other one was ordered within thirteen days.
 
@@ -1868,9 +1883,10 @@ outside the data — a document, a person, a system behaviour — say what evide
 is wanted and from whom.
 
 A finding resting on flagged rows gets those rows placed under it as a table
-the reader can open — you do not write that table or ask for it. Listing the
-procedure in a finding's `procedures` is what places it, so list every procedure
-the entry rests on, and list none you only mention in passing.
+the reader can open — you do not write that table or ask for it. The rows of the
+first procedure the finding lists that flagged any are placed, so list the one
+whose rows prove the finding first, then every other procedure the entry rests
+on, and none you only mention in passing.
 
 Call {SUMMARY_SUBMISSION_TOOL} exactly once, with every part filled in.
 
@@ -2096,7 +2112,8 @@ def _exception_table_embed(analysis_id: str, result: Mapping[str, Any]) -> list[
 
 def _summary_embed(analysis_id: str, result: Mapping[str, Any]) -> list[str]:
     """The embed a profile part places under its prose: a chart or the summary."""
-    kind = "chart" if str(result.get("test") or "") in _CHART_TESTS else "summary_table"
+    charted = str(result.get("test") or "") in _CHART_TESTS or result.get("exhibit") == "chart"
+    kind = "chart" if charted else "summary_table"
     caption = str(result.get("verdict_text") or result.get("title") or "").strip()
     block = [f"```{EMBED_FENCE}", f"analysis: {analysis_id}", f"as: {kind}"]
     if caption:
@@ -2439,10 +2456,12 @@ def _render_summary_markdown(
     for section, part in _profile_parts(payload.get("profile")):
         out += [f"## {section}", ""]
         out += [_rendered_prose(str(part.get("prose") or ""), index), ""]
+        shown = 0
         for number in _cited_numbers(part):
             analysis_id = index.get(int(number))
-            if analysis_id is None or analysis_id in placed:
+            if analysis_id is None or analysis_id in placed or shown >= MAX_PROFILE_EXHIBITS:
                 continue
+            shown += 1
             result = results_by_id.get(analysis_id) or {}
             placed.append(analysis_id)
             out += [*_summary_embed(analysis_id, result), ""]
@@ -2456,9 +2475,10 @@ def _render_summary_markdown(
         title = _rendered_prose(str(finding.get("title") or ""), index)
         out += [f"### {position}. {title}".rstrip(" ."), ""]
         out += [_rendered_prose(str(finding.get("prose") or ""), index), ""]
+        shown = 0
         for number in _cited_numbers(finding):
             analysis_id = index.get(int(number))
-            if analysis_id is None or analysis_id in embedded:
+            if analysis_id is None or analysis_id in embedded or shown >= MAX_FINDING_EXHIBITS:
                 continue
             result = results_by_id.get(analysis_id) or {}
             try:
@@ -2469,6 +2489,7 @@ def _render_summary_markdown(
             # simply true: a finding resting on flagged rows shows them.
             if not flagged:
                 continue
+            shown += 1
             embedded.append(analysis_id)
             out += [*_exception_table_embed(analysis_id, result), ""]
 

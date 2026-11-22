@@ -2130,9 +2130,26 @@ export interface AnalyticsResult {
 }
 
 export interface VizSpec {
-  type: 'table' | 'bar' | 'line' | 'pie'
+  /**
+   * `bar`, `line` and `pie` are drawn by Chart.js on the analysis pages; the
+   * rest are the memo's exhibit forms (`components/analysis/exhibitCharts`),
+   * which the memo also uses for `bar` and `line`.
+   */
+  type: 'table' | 'bar' | 'line' | 'pie' | 'hbar' | 'lines' | 'share' | 'heatmap' | 'range' | 'strip' | 'bridge'
   x?: string
   y?: string[]
+  /** heatmap, long form: the column naming each row; `x` names the columns. */
+  row?: string
+  /** heatmap, wide form: numeric columns that are not cells (a total). */
+  exclude?: string[]
+  /** hbar: columns shown after the value, as "45.2%". */
+  label?: string[]
+  /** A column whose non-zero value marks a row or cell as a breach. */
+  flag?: string
+  unit?: '%' | ''
+  reference?: { value: number; label: string }
+  omit_zero?: boolean
+  log?: boolean
 }
 
 export interface NavigationTarget {

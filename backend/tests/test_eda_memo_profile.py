@@ -184,3 +184,45 @@ def test_a_repair_keeps_the_profile_and_implications_it_was_not_asked_to_change(
     assert merged["implications"] == ["Test North."]
     kept = json.dumps({"lead": "a", "implications": ["Changed."]})
     assert json.loads(analysis_worker._carry_unrepaired_parts(kept, earlier))["implications"] == ["Changed."]
+
+
+def _flagging(ws, title: str, code: str) -> dict:
+    analysis = ws.add_analysis({"kind": "python", "table": "sales", "title": title,
+                                "spec": {"code": code}, "outcome_policy": {"mode": "exception_rows"}})
+    analysis_results.execute_and_record(ws, analysis["id"])
+    return analysis
+
+
+def test_a_finding_shows_one_table_and_a_profile_section_three_exhibits(regional):
+    """Measured on procurement: 37 exhibits, 24 of them under ten findings."""
+    first = _flagging(regional, "Large sales", "result = tables['sales'].filter(pl.col('amount') > 500)")
+    second = _flagging(regional, "Tiny sales", "result = tables['sales'].filter(pl.col('amount') < 5)")
+    profiles = [_save(regional, f"Breakdown {n}", BREAKDOWN) for n in range(4)]
+    request = _summary_request(workspaces.load_workspace(regional.id))
+    refs = [_ref_of(request, item["id"]) for item in (first, second, *profiles)]
+    markdown = analysis_worker.validate_analysis_summary(
+        _payload(
+            findings=[{"title": "Outliers", "prose": "Two outlying sales.", "procedures": refs[:2]}],
+            profile=[{"section": "Where the value is", "prose": "North holds most.", "procedures": refs[2:]}],
+        ),
+        request,
+    )["markdown"]
+    embeds = analysis_worker.parse_embeds(markdown)
+    assert [(e["analysis"], e["as"]) for e in embeds if e["as"] == "exception_table"] == [(first["id"], "exception_table")]
+    assert [e["analysis"] for e in embeds if e["as"] == "chart"] == [item["id"] for item in profiles[:3]]
+
+
+def test_an_authored_analysis_with_a_chart_is_drawn(regional):
+    analysis = regional.add_analysis({
+        "kind": "python", "table": "sales", "title": "Value by region",
+        "spec": {"code": "result = tables['sales'].group_by('region').agg(pl.col('amount').sum())"},
+        "outcome_policy": {"mode": "informational"}, "viz": {"type": "bar", "x": "region", "y": ["amount"]},
+    })
+    analysis_results.execute_and_record(regional, analysis["id"])
+    request = _summary_request(workspaces.load_workspace(regional.id))
+    ref = _ref_of(request, analysis["id"])
+    markdown = analysis_worker.validate_analysis_summary(
+        _payload(profile=[{"section": "Where the value is", "prose": "By region.", "procedures": [ref]}]),
+        request,
+    )["markdown"]
+    assert [(e["analysis"], e["as"]) for e in analysis_worker.parse_embeds(markdown)] == [(analysis["id"], "chart")]

@@ -16,6 +16,10 @@ import type {
 } from '../types'
 import UiEmptyState from './ui/UiEmptyState.vue'
 import UiStateIcon, { type UiState } from './ui/UiStateIcon.vue'
+import RecordBoardView from './record/RecordBoardView.vue'
+import RecordPhasesView from './record/RecordPhasesView.vue'
+import RecordOverviewView from './record/RecordOverviewView.vue'
+import type { RecordLayout, RecordPhaseGroup } from './record/recordViewModel'
 
 /**
  * The engagement record: what this engagement holds, and what it still owes.
@@ -729,6 +733,81 @@ function jumpToPhase(phaseId: string) {
   const el = document.querySelector(`[data-phase-section="${phaseId}"]`)
   el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
+
+/* --- switchable record layouts -------------------------------------------- */
+
+const LAYOUT_KEY = 'aw.record.layout'
+const LAYOUTS: ReadonlyArray<{ id: RecordLayout; label: string }> = [
+  { id: 'list', label: 'List' },
+  { id: 'board', label: 'Board' },
+  { id: 'phases', label: 'Phases' },
+  { id: 'overview', label: 'Overview' },
+]
+
+function storedLayout(): RecordLayout {
+  try {
+    const saved = window.localStorage?.getItem(LAYOUT_KEY)
+    if (saved === 'board' || saved === 'phases' || saved === 'overview' || saved === 'list') {
+      return saved
+    }
+  } catch { /* private mode */ }
+  return 'list'
+}
+
+const layout = ref<RecordLayout>(storedLayout())
+function setLayout(value: RecordLayout) {
+  layout.value = value
+  try {
+    window.localStorage?.setItem(LAYOUT_KEY, value)
+  } catch { /* private mode */ }
+}
+
+const openPoints = computed(() => data.value?.open_points ?? [])
+
+function primaryStatFor(stage: EngagementStage): string {
+  if (!stage.held) return dependency(stage) || 'Not started'
+  if (size(stage)) return size(stage)
+  const doorSummary = stage.links
+    .filter(link => link.kind !== 'tool' && link.count != null)
+    .map(link => {
+      const noun = doorNoun(link.label, link.count)
+      return link.total ? `${link.count}/${link.total} ${noun}` : `${link.count} ${noun}`
+    })
+  if (doorSummary.length) return doorSummary.join(' · ')
+  return firstSentence(saying(stage)) || 'Complete'
+}
+
+const viewGroups = computed<RecordPhaseGroup[]>(() =>
+  groups.value.map((group, index) => {
+    const done = group.total > 0 && group.held === group.total
+    return {
+      id: group.id,
+      index,
+      title: group.title,
+      state: group.state,
+      statusLabel: group.live ? 'Running' : done ? 'Done' : phaseTally(group),
+      held: group.held,
+      total: group.total,
+      fill: group.total ? group.held / group.total : 0,
+      live: group.live,
+      openPoints: group.openPoints,
+      headline: phaseHeadline(group.id),
+      items: group.stages.map((stage, step) => ({
+        stage,
+        stepLabel: `${index + 1}.${step + 1}`,
+        state: rowState(stage),
+        live: liveState(stage.capability),
+        liveElapsed: liveSince(stage.capability),
+        liveActivity: soleRunning.value === stage.capability ? activityLine.value : '',
+        isLead: stage.capability === leadStage.value,
+        destination: destinationOf(stage),
+        facts: facts(stage),
+        primaryStat: primaryStatFor(stage),
+        attentionReason: attentionReason(stage),
+      })),
+    }
+  }),
+)
 </script>
 
 <template>
@@ -742,6 +821,15 @@ function jumpToPhase(phaseId: string) {
         <i class="aw-icon aw-icon-spin aw-icon-loader-circle" aria-hidden="true" />Updating status…
       </span>
       <span class="grow"></span>
+      <div class="layout-switch" role="group" aria-label="Record layout">
+        <button
+          v-for="option in LAYOUTS"
+          :key="option.id"
+          type="button"
+          :aria-pressed="layout === option.id"
+          @click="setLayout(option.id)"
+        >{{ option.label }}</button>
+      </div>
       <Button
         class="refresh"
         icon="aw-icon aw-icon-refresh-cw"
@@ -776,9 +864,9 @@ function jumpToPhase(phaseId: string) {
     />
 
     <template v-else>
-      <!-- Unified 4-phase deck: progress, key headline metric, and any open
-           human review gate per phase — clickable to jump straight to it. -->
-      <section class="progress" aria-label="Progress through the engagement">
+      <!-- Unified 4-phase deck (only for the List layout; Board, Phases and
+           Overview each show phase structure natively). -->
+      <section v-if="layout === 'list'" class="progress" aria-label="Progress through the engagement">
         <div
           v-for="(phase, idx) in progress"
           :key="phase.id"
@@ -842,9 +930,33 @@ function jumpToPhase(phaseId: string) {
         />
       </section>
 
-      <!-- The spine: every phase in plan order. Completed phases without open
-           review gates fold to a single summary line, keeping active work in view. -->
-      <section class="spine" aria-label="The engagement file">
+      <RecordBoardView
+        v-if="layout === 'board'"
+        :groups="viewGroups"
+        :starting="starting"
+        @start="start"
+        @open-point="openPoint"
+      />
+
+      <RecordPhasesView
+        v-else-if="layout === 'phases'"
+        :groups="viewGroups"
+        :starting="starting"
+        @start="start"
+        @open-point="openPoint"
+      />
+
+      <RecordOverviewView
+        v-else-if="layout === 'overview'"
+        :groups="viewGroups"
+        :openPoints="openPoints"
+        :starting="starting"
+        @start="start"
+        @open-point="openPoint"
+      />
+
+      <!-- The spine: every phase in plan order (List layout). -->
+      <section v-else class="spine" aria-label="The engagement file">
         <section
           v-for="(group, index) in groups"
           :key="group.id"
@@ -1005,7 +1117,7 @@ function jumpToPhase(phaseId: string) {
 </template>
 
 <style scoped>
-.record { display: flex; flex-direction: column; gap: .875rem; min-height: 0; }
+.record { display: flex; flex-direction: column; gap: .875rem; min-height: 0; container-type: inline-size; }
 .updating { display: inline-flex; align-items: center; gap: .35rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 .loading { display: grid; place-content: center; gap: .4rem; padding: 3rem; color: var(--aw-muted); font-size: var(--aw-text-sm); }
 
@@ -1018,6 +1130,22 @@ function jumpToPhase(phaseId: string) {
 }
 .subtitle { color: var(--aw-muted); font-size: var(--aw-text-xs); }
 .grow { flex: 1; }
+
+.layout-switch {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control);
+  background: var(--aw-raised);
+}
+.layout-switch button {
+  padding: .25rem .6rem; border: 0; border-radius: 6px; background: transparent;
+  color: var(--aw-muted); font: inherit; font-size: var(--aw-text-xs); font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.layout-switch button:hover { color: var(--aw-ink); }
+.layout-switch button[aria-pressed='true'] {
+  background: var(--aw-panel); color: var(--aw-teal-strong); box-shadow: var(--aw-shadow-sm);
+}
+.layout-switch button:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; }
 
 .bar :deep(.refresh) { width: 30px; height: 30px; padding: 0; }
 

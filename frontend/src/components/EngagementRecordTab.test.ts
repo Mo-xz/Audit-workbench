@@ -1244,4 +1244,31 @@ describe('EngagementRecordTab', () => {
 
     expect(wrapper.findAll('.phead')[2].attributes('aria-expanded')).toBe('true')
   })
+
+  it('switches cleanly between List, Board, Phases, and Overview layouts', async () => {
+    const wrapper = await render(spine(HELD), { open_points: [point()] }, { phases: 'as drawn' })
+    const buttons = wrapper.findAll('.layout-switch button')
+    expect(buttons.map(btn => btn.text())).toEqual(['List', 'Board', 'Phases', 'Overview'])
+
+    // Board (4 columns side-by-side)
+    await buttons[1].trigger('click')
+    expect(wrapper.find('[data-testid="record-board"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="record-board"] .col')).toHaveLength(4)
+
+    // Phases (horizontal phase tabs, one phase at a time)
+    await buttons[2].trigger('click')
+    expect(wrapper.find('[data-testid="record-phases"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="record-phases"] .tab')).toHaveLength(4)
+    expect(wrapper.findAll('[data-testid="record-phases"] .scard')).toHaveLength(3)
+
+    // Overview (focus card + quiet file grid)
+    await buttons[3].trigger('click')
+    expect(wrapper.find('[data-testid="record-overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="record-overview"]').text()).toContain('3 of 12 deliverables ready')
+    expect(wrapper.find('[data-testid="record-overview"]').text()).toContain('1 open gate')
+
+    // Back to List
+    await buttons[0].trigger('click')
+    expect(wrapper.find('.spine').exists()).toBe(true)
+  })
 })

@@ -88,6 +88,12 @@ const groups = computed(() => SEVERITY_ORDER
               </template>
             </span>
           </span>
+          <i
+            v-if="item.auditor_confirmed && item.consolidation?.role !== 'absorbed' && !openItems(item).length"
+            class="aw-icon aw-icon-circle-check ready-mark"
+            title="Confirmed for reporting"
+            aria-hidden="true"
+          />
         </button>
       </template>
     </section>
@@ -135,7 +141,7 @@ const groups = computed(() => SEVERITY_ORDER
 .dot[data-tone='medium'] { background: var(--aw-warn); }
 .dot[data-tone='low'] { background: var(--aw-low); }
 
-.copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.copy { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .title { overflow: hidden; color: var(--aw-ink); font-size: var(--aw-text-base); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .row.active .title { color: var(--aw-ink-strong); font-weight: 600; }
 .meta { overflow: hidden; color: var(--aw-muted); font-size: var(--aw-text-xs); text-overflow: ellipsis; white-space: nowrap; }
@@ -144,6 +150,7 @@ const groups = computed(() => SEVERITY_ORDER
 .meta [data-tone='warn'] { color: var(--aw-warn-ink); }
 .meta .draft { color: var(--aw-muted); }
 .meta .lead { color: var(--aw-teal); }
+.ready-mark { flex: none; color: var(--aw-ok); font-size: var(--aw-text-sm); opacity: .85; }
 
 .empty { padding: 1rem .75rem; color: var(--aw-muted); font-size: var(--aw-text-sm); text-align: center; }
 </style>

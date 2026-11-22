@@ -285,4 +285,95 @@ describe('FindingsTab', () => {
 
     expect(post).toHaveBeenCalledWith('/api/workspaces/WS-1/findings/consolidation/observations/OBS-2/ungroup')
   })
+
+  it('opens in read-first mode with severity & AI badges and reveals title/severity editors on Edit', async () => {
+    const patch = vi.spyOn(api, 'patch').mockResolvedValue(finding('F-1', { severity: 'critical' }))
+    const wrapper = await mountTab([finding('F-1')])
+
+    expect(wrapper.find('.detail-title').text()).toBe('Finding F-1')
+    expect(wrapper.find('.sev-pill').text()).toBe('High')
+    expect(wrapper.find('.source-pill').text()).toContain('AI drafted')
+    expect(wrapper.find('.head-edit').exists()).toBe(false)
+    expect(wrapper.find('.rail').text()).toContain('Local Polars test · DAT-1')
+
+    await wrapper.find('.detail-head button').trigger('click')
+    expect(wrapper.find('.head-edit').exists()).toBe(true)
+
+    await wrapper.find('.head-edit .select-stub').trigger('click')
+    const saveBtn = wrapper.findAll('.head-edit button').find(btn => btn.text().includes('Save'))
+    await saveBtn?.trigger('click')
+    await flushPromises()
+
+    expect(patch).toHaveBeenCalledWith(
+      '/api/workspaces/WS-1/findings/F-1',
+      expect.objectContaining({ severity: 'critical' }),
+    )
+    expect(wrapper.find('.head-edit').exists()).toBe(false)
+  })
+
+  it('collapses pending consolidation suggestions into a 1-line banner that opens a slide-over drawer', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/findings/consolidation')) {
+        return {
+          basis_sha1: 'abc',
+          current: true,
+          candidates: 3,
+          groupable: 3,
+          drafts: 2,
+          stale_suggestion: null,
+          undecided: 1,
+          suggestion: {
+            basis_sha1: 'abc',
+            singletons: ['OBS-3'],
+            groups: [{
+              group_id: 'CG-1',
+              observation_ids: ['OBS-1', 'OBS-2'],
+              lead_observation_id: 'OBS-1',
+              relation: 'shared_cause',
+              basis: 'entity',
+              proposed_title: 'Payments without GRN',
+              root_cause_hypothesis: 'GRN not checked before release.',
+              rationale: 'Both share INV-1.',
+              shared_entities: { INVOICE_ID: ['INV-1'] },
+              decision: null,
+            }],
+          },
+        }
+      }
+      return payload([finding('F-1')])
+    })
+    const wrapper = mount(FindingsTab, {
+      props: { workspace },
+      global: {
+        plugins: [PrimeVue],
+        provide: {
+          [PrimeVueToastSymbol]: { add: vi.fn() },
+          [PrimeVueConfirmSymbol]: { require: vi.fn(), close: vi.fn() },
+        },
+        stubs: {
+          EvidenceAnchorDialog: true,
+          ProvenanceRail: true,
+          MarkdownEditor: true,
+          Drawer: {
+            props: ['visible', 'header'],
+            template: '<div v-if="visible" class="drawer-stub" :data-header="header"><slot /></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const banner = wrapper.find('[data-testid="consolidation-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('1 suggested consolidation awaiting review')
+    expect(banner.text()).toContain('2 related observations can be merged into 1 finding')
+    expect(wrapper.find('[data-testid="consolidation-group"]').exists()).toBe(false)
+
+    const reviewBtn = banner.findAll('button').find(btn => btn.text().includes('Review (1)'))
+    await reviewBtn?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.drawer-stub[data-header="Finding consolidations"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="consolidation-group"]').exists()).toBe(true)
+  })
 })

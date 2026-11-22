@@ -29,6 +29,17 @@ function sectionKey(heading: string) {
   return heading.split(/\s+/).filter(Boolean).join(' ').toLowerCase()
 }
 
+const SECTION_TONES: Record<string, string> = {
+  condition: 'bad',
+  criteria: 'info',
+  cause: 'warn',
+  'root cause': 'warn',
+  effect: 'warn',
+  impact: 'warn',
+  recommendation: 'ok',
+  recommendations: 'ok',
+}
+
 /**
  * Sections split at `##`, with the authoring comments the template carries
  * removed — `MarkdownView` escapes HTML, so a guidance comment left in would
@@ -36,28 +47,34 @@ function sectionKey(heading: string) {
  */
 const sections = computed(() => {
   const clean = (props.markdown || '').replace(/<!--[\s\S]*?-->/g, '')
-  const out: Array<{ heading: string; body: string; cause: boolean }> = []
-  let current: { heading: string; body: string[]; cause: boolean } | null = null
+  const out: Array<{ heading: string; body: string; cause: boolean; tone: string }> = []
+  let current: { heading: string; body: string[]; cause: boolean; tone: string } | null = null
   for (const line of clean.split('\n')) {
     const heading = /^##\s+(.+?)\s*$/.exec(line)
     if (heading) {
-      if (current) out.push({ heading: current.heading, body: current.body.join('\n').trim(), cause: current.cause })
-      current = { heading: heading[1], body: [], cause: CAUSE_KEYS.has(sectionKey(heading[1])) }
+      if (current) out.push({ heading: current.heading, body: current.body.join('\n').trim(), cause: current.cause, tone: current.tone })
+      const key = sectionKey(heading[1])
+      current = { heading: heading[1], body: [], cause: CAUSE_KEYS.has(key), tone: SECTION_TONES[key] ?? 'neutral' }
       continue
     }
     if (current) current.body.push(line)
     // Anything before the first heading is preamble the template does not
     // declare; it is still the auditor's text, so it is shown unheaded.
-    else if (line.trim()) out.push({ heading: '', body: line, cause: false })
+    else if (line.trim()) out.push({ heading: '', body: line, cause: false, tone: 'neutral' })
   }
-  if (current) out.push({ heading: current.heading, body: current.body.join('\n').trim(), cause: current.cause })
+  if (current) out.push({ heading: current.heading, body: current.body.join('\n').trim(), cause: current.cause, tone: current.tone })
   return out
 })
 </script>
 
 <template>
   <div class="narrative">
-    <section v-for="(section, index) in sections" :key="`${section.heading}:${index}`">
+    <section
+      v-for="(section, index) in sections"
+      :key="`${section.heading}:${index}`"
+      class="n-sec"
+      :data-tone="section.tone"
+    >
       <h3 v-if="section.heading">{{ section.heading }}</h3>
       <!-- The deferral replaces the section's body rather than sitting beside
            it: while the cause is pending there is nothing else true to say
@@ -77,14 +94,28 @@ const sections = computed(() => {
 </template>
 
 <style scoped>
-.narrative { display: flex; flex-direction: column; gap: .875rem; min-width: 0; }
+.narrative { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+.n-sec {
+  padding: .75rem .95rem;
+  border: 1px solid var(--aw-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-panel);
+}
+.n-sec[data-tone='ok'] { background: color-mix(in srgb, var(--aw-ok-soft) 25%, var(--aw-panel)); }
+
 .narrative h3 {
   margin: 0 0 .35rem;
-  color: var(--aw-ink-strong); font-size: var(--aw-text-md); font-weight: 600;
-  letter-spacing: -0.01em;
+  color: var(--aw-ink-strong); font-size: var(--aw-text-xs); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
 }
+.n-sec[data-tone='bad'] h3 { color: var(--aw-danger-ink); }
+.n-sec[data-tone='warn'] h3 { color: var(--aw-warn-ink); }
+.n-sec[data-tone='info'] h3 { color: var(--aw-teal-strong); }
+.n-sec[data-tone='ok'] h3 { color: var(--aw-ok); }
+
 .body { color: var(--aw-ink); font-size: var(--aw-text-base); line-height: 1.6; }
 .body :deep(p:first-child) { margin-top: 0; }
+.body :deep(p:last-child) { margin-bottom: 0; }
 .body :deep(table) { border-radius: var(--aw-radius-control); overflow: hidden; }
 
 .pending {

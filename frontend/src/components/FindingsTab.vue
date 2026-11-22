@@ -35,7 +35,7 @@ import {
   FINDING_CHIPS, SEVERITY_ORDER, filterFindings, findingsStatus, openItems,
 } from './findings/findingsStatus'
 import type { FindingsFilter } from './findings/findingsStatus'
-import { plural } from '../format'
+import { plural, sentenceCase } from '../format'
 
 const props = defineProps<{ workspace: WorkspaceSummary }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -60,6 +60,8 @@ const search = ref('')
 const statusFilter = ref<FindingsFilter[]>([])
 const template = ref<{ markdown: string; source: string } | null>(null)
 const templateOpen = ref(false)
+/** The finding header (title & severity) is read-first; editing opens on ask. */
+const editingHeader = ref(false)
 /** The narrative is a document until somebody says otherwise. */
 const editingNarrative = ref(false)
 /** Management's own words are recorded, not drafted, so the box opens on ask. */
@@ -71,9 +73,43 @@ const evidencePicker = ref<InstanceType<typeof Popover> | null>(null)
 /** The consolidation suggestions for the current exceptions, or null before load. */
 const consolidation = ref<ConsolidationPayload | null>(null)
 const consolidating = ref(false)
+const consolidationOpen = ref(false)
 const manualConsolidation = ref(false)
 /** Absorbed findings leave the register by default; the toggle brings them back. */
 const showAbsorbed = ref(false)
+
+const undecidedConsolidations = computed(() =>
+  (consolidation.value?.suggestion?.groups ?? []).filter(group => !group.decision),
+)
+const consolidationBanner = computed(() => {
+  const payload = consolidation.value
+  if (!payload || (payload.candidates ?? 0) < 2) return null
+  if (payload.current && undecidedConsolidations.value.length) {
+    const count = undecidedConsolidations.value.length
+    const members = undecidedConsolidations.value.reduce(
+      (sum, group) => sum + (group.members?.length ?? group.observation_ids.length), 0,
+    )
+    return {
+      tone: 'warn' as const,
+      title: `${plural(count, 'suggested consolidation')} awaiting review`,
+      detail: `${plural(members, 'related observation')} can be merged into ${plural(count, 'finding')}`,
+      action: `Review (${count})`,
+      openDrawer: true,
+    }
+  }
+  if (!payload.current && (payload.groupable ?? 0) >= 2) {
+    return {
+      tone: 'neutral' as const,
+      title: payload.stale_suggestion
+        ? 'Exceptions changed since the last consolidation review'
+        : 'Exceptions have not been reviewed for consolidation',
+      detail: 'Group overlapping exceptions before finalizing the register',
+      action: 'Refresh suggestions',
+      openDrawer: false,
+    }
+  }
+  return null
+})
 
 const selected = computed(() => data.value?.items.find(item => item.id === selectedId.value) ?? null)
 const allItems = computed(() => data.value?.items ?? [])
@@ -110,10 +146,27 @@ const unconfirmed = computed(() => items.value.filter(item => !item.auditor_conf
 const agentBusy = computed(() => isActive.value || !agent.state.status?.configured)
 
 /** The risks a finding names, resolved against the matrix this payload carries. */
-const riskLinks = computed(() => (selected.value?.rcm_refs ?? []).map(id => ({
-  id, risk: (data.value?.rcm ?? []).find(row => row.id === id)?.risk ?? '',
-})))
+const riskLinks = computed(() => (selected.value?.rcm_refs ?? []).map(id => {
+  const row = (data.value?.rcm ?? []).find(item => item.id === id)
+  return {
+    id,
+    risk: row?.risk ?? '',
+    process: row?.process ?? '',
+    rating: row?.risk_rating ?? '',
+  }
+}))
 const owed = computed(() => (selected.value ? openItems(selected.value) : []))
+const registerSubtitle = computed(() => {
+  if (!items.value.length) return ''
+  const parts: string[] = [plural(items.value.length, 'finding')]
+  const critical = items.value.filter(item => item.severity === 'critical').length
+  const high = items.value.filter(item => item.severity === 'high').length
+  if (critical) parts.push(`${critical} critical`)
+  if (high) parts.push(`${high} high`)
+  const confirmed = items.value.length - unconfirmed.value.length
+  parts.push(`${confirmed} of ${items.value.length} confirmed`)
+  return parts.join(' · ')
+})
 /** The absorbed findings a lead carries, resolved against this payload. */
 const memberLinks = computed(() => (selected.value?.consolidation?.members ?? []).map(id => ({
   id, title: allItems.value.find(item => item.id === id)?.title ?? id,
@@ -136,8 +189,8 @@ const absorbedInto = computed(() => {
 const authorship = computed(() => {
   const item = selected.value
   if (!item) return ''
-  if (item.source === 'agent') return 'drafted by the assistant'
-  return item.source === 'promoted' ? 'promoted from an observation' : 'added by an auditor'
+  if (item.source === 'agent') return 'AI drafted'
+  return item.source === 'promoted' ? 'Promoted from observation' : 'Auditor authored'
 })
 
 function when(value: string | null | undefined): string {
@@ -227,6 +280,9 @@ async function acceptConsolidation(group: ConsolidationGroup, choice: { lead_obs
       )
       await reload(lead?.id)
       emit('changed')
+      if (!manualConsolidation.value && !undecidedConsolidations.value.length) {
+        consolidationOpen.value = false
+      }
       if (lead) {
         // Its members were already drafted: the drafts are merged and the
         // lead's narrative is redrafted from every member.
@@ -255,6 +311,9 @@ async function dismissConsolidation(group: ConsolidationGroup) {
     consolidation.value = await api.post<ConsolidationPayload>(
       `/api/workspaces/${props.workspace.id}/findings/consolidation/${group.group_id}/dismiss`,
     )
+    if (!manualConsolidation.value && !undecidedConsolidations.value.length) {
+      consolidationOpen.value = false
+    }
     toast.add({ severity: 'info', summary: 'Suggestion dismissed', detail: 'It will not be raised again until the findings change.', life: 3000 })
   } catch (error) { fail('Could not dismiss the suggestion', error) }
   finally { consolidating.value = false }
@@ -265,6 +324,7 @@ async function consolidateSelected(choice: { finding_ids: string[]; lead_finding
   try {
     const lead = await api.post<AuditFinding>(`/api/workspaces/${props.workspace.id}/findings/consolidate`, choice)
     manualConsolidation.value = false
+    consolidationOpen.value = false
     await reload(lead.id)
     emit('changed')
     toast.add({ severity: 'success', summary: `Consolidated into ${lead.id}`, life: 3000 })
@@ -306,8 +366,9 @@ watch(() => route.query.finding, value => {
   if (id && data.value?.items.some(item => item.id === id)) selectedId.value = id
 })
 watch(selectedId, id => {
-  // A different finding is a different document; neither editor stays open
+  // A different finding is a different document; none of the editors stay open
   // across the change, or the next finding opens in a mode nobody chose.
+  editingHeader.value = false
   editingNarrative.value = false
   editingResponse.value = false
   if (id && route.query.finding !== id) void nav.replace('findings', { finding: id })
@@ -479,17 +540,24 @@ function copyMarkdown() {
 }
 
 const menuItems = computed(() => [
-  {
-    label: 'Generate all findings',
-    icon: 'aw-icon aw-icon-sparkles',
-    disabled: statusBusy.value || agentBusy.value,
-    command: () => void draftFromRcm(),
-  },
+  ...(unconfirmed.value.length
+    ? [{ label: 'Add finding', icon: 'aw-icon aw-icon-plus', command: () => void addManual() }]
+    : []),
+  ...((consolidation.value?.candidates ?? 0) >= 2
+    ? [{
+        label: undecidedConsolidations.value.length
+          ? `Review consolidations (${undecidedConsolidations.value.length})`
+          : 'Review consolidations',
+        icon: 'aw-icon aw-icon-sparkles',
+        disabled: statusBusy.value,
+        command: () => { manualConsolidation.value = false; consolidationOpen.value = true },
+      }]
+    : []),
   {
     label: 'Consolidate selected…',
     icon: 'aw-icon aw-icon-columns-3',
     disabled: statusBusy.value || items.value.length < 2,
-    command: () => { manualConsolidation.value = true },
+    command: () => { manualConsolidation.value = true; consolidationOpen.value = true },
   },
   {
     label: showAbsorbed.value ? 'Hide absorbed findings' : `Show absorbed (${absorbed.value.length})`,
@@ -515,6 +583,10 @@ const menuItems = computed(() => [
 /** The cause is recorded in the narrative, so recording it opens the editor. */
 function recordCause() { editingNarrative.value = true }
 
+async function doneEditingHeader() {
+  editingHeader.value = false
+  await save()
+}
 async function doneEditingNarrative() {
   editingNarrative.value = false
   await save()
@@ -544,18 +616,42 @@ function openPlanning(rcmId: string) {
  * prefixes (`DAT-` for data tests, `DT-` for document tests) are too close to
  * parse by hand, so membership decides which surface answers for the id.
  */
-type TestLink = { id: string; destination: 'data-tests' | 'doc-tests'; title: string; icon: string; exceptions: number }
+type TestLink = {
+  id: string
+  destination: 'data-tests' | 'doc-tests'
+  title: string
+  icon: string
+  engine: 'Local Polars' | 'Document test'
+  exceptions: number
+}
 function resolveTest(id: string): TestLink | null {
   const dataTest = (data.value?.data_tests ?? []).find(item => item.id === id)
   if (dataTest) {
     return {
-      id, destination: 'data-tests', title: dataTest.title, icon: 'aw-icon aw-icon-chart-column',
+      id, destination: 'data-tests', title: dataTest.title, icon: 'aw-icon aw-icon-shield',
+      engine: 'Local Polars',
       exceptions: dataTest.open_exception_count || dataTest.evaluation?.exception_count || 0,
     }
   }
   const docTest = (data.value?.document_tests ?? []).find(item => item.id === id)
-  if (docTest) return { id, destination: 'doc-tests', title: docTest.title, icon: 'aw-icon aw-icon-file-check', exceptions: 0 }
+  if (docTest) {
+    return {
+      id, destination: 'doc-tests', title: docTest.title, icon: 'aw-icon aw-icon-file-check',
+      engine: 'Document test', exceptions: 0,
+    }
+  }
   return null
+}
+
+const EVIDENCE_KIND_LABELS: Record<string, string> = {
+  datatest: 'Local Polars test',
+  doctest: 'Document test',
+  document: 'Source document',
+  analysis: 'Data analysis',
+  ruleset: 'Validation rule',
+}
+function evidenceKindLabel(kind: string): string {
+  return EVIDENCE_KIND_LABELS[kind] ?? sentenceCase(kind.replaceAll('_', ' '))
 }
 const testLinks = computed(() => (selected.value?.test_refs ?? [])
   .map(resolveTest)
@@ -599,7 +695,10 @@ const staleSentence = computed(() => {
     <!-- One title, one count sentence, at most one primary. What is
          outstanding takes the primary slot when anything is. -->
     <header class="page-head">
-      <h1>Findings</h1>
+      <div class="head-copy">
+        <h1>Findings</h1>
+        <span v-if="registerSubtitle" class="head-sub">{{ registerSubtitle }}</span>
+      </div>
       <span class="grow" />
       <Button
         label="Draft from the RCM"
@@ -609,15 +708,6 @@ const staleSentence = computed(() => {
         severity="secondary"
         :disabled="statusBusy || agentBusy"
         @click="draftFromRcm"
-      />
-      <Button
-        v-if="unconfirmed.length"
-        label="Add finding"
-        icon="aw-icon aw-icon-plus"
-        size="small"
-        outlined
-        severity="secondary"
-        @click="addManual"
       />
       <Button
         v-if="unconfirmed.length"
@@ -645,19 +735,37 @@ const staleSentence = computed(() => {
       @filter="statusFilter = ($event as FindingsFilter[])"
     />
 
-    <ConsolidationPanel
-      v-if="allItems.length || (consolidation?.candidates ?? 0) >= 2"
-      :payload="consolidation"
-      :candidates="consolidationCandidates"
-      :busy="consolidating"
-      :agentBusy="agentBusy"
-      :manual="manualConsolidation"
-      @refresh="refreshConsolidation"
-      @accept="acceptConsolidation"
-      @dismiss="dismissConsolidation"
-      @consolidate="consolidateSelected"
-      @closeManual="manualConsolidation = false"
-    />
+    <section
+      v-if="consolidationBanner"
+      class="consolidation-bar"
+      :data-tone="consolidationBanner.tone"
+      data-testid="consolidation-banner"
+    >
+      <i class="aw-icon aw-icon-sparkles bar-icon" aria-hidden="true" />
+      <span class="bar-copy">
+        <strong>{{ consolidationBanner.title }}</strong>
+        <span class="bar-detail">{{ consolidationBanner.detail }}</span>
+      </span>
+      <span class="grow" />
+      <Button
+        v-if="consolidationBanner.openDrawer"
+        label="Review again"
+        size="small"
+        text
+        severity="secondary"
+        :disabled="consolidating || agentBusy"
+        @click="refreshConsolidation"
+      />
+      <Button
+        :label="consolidationBanner.action"
+        :icon="consolidationBanner.openDrawer ? 'aw-icon aw-icon-columns-3' : 'aw-icon aw-icon-sparkles'"
+        size="small"
+        outlined
+        severity="secondary"
+        :disabled="consolidating || (!consolidationBanner.openDrawer && agentBusy)"
+        @click="consolidationBanner.openDrawer ? (manualConsolidation = false, consolidationOpen = true) : refreshConsolidation()"
+      />
+    </section>
 
     <div v-if="allItems.length" class="layout">
       <section class="list-panel">
@@ -683,33 +791,51 @@ const staleSentence = computed(() => {
       <section v-if="selected" class="detail">
         <header class="detail-head">
           <div class="detail-copy">
-            <p class="eyebrow aw-figure">
-              <span class="id">{{ selected.id }}</span>
-              · <span class="authorship" :data-agent="selected.source === 'agent'">{{ authorship }}</span>
-              <template v-if="when(selected.created)"> · {{ when(selected.created) }}</template>
-            </p>
-            <InputText v-model="selected.title" class="title-field" unstyled aria-label="Finding title" />
-            <p class="lede">
-              {{ selected.source === 'agent'
-                ? 'Drafted by the assistant. The narrative is copied into the report unchanged.'
-                : 'The narrative is copied into the report unchanged.' }}
-            </p>
+            <div class="detail-meta">
+              <span class="sev-pill" :data-tone="selected.severity">
+                <span class="sev-dot" aria-hidden="true" />{{ sentenceCase(selected.severity) }}
+              </span>
+              <span class="finding-id">{{ selected.id }}</span>
+              <span class="source-pill" :data-agent="selected.source === 'agent'">
+                <i
+                  class="aw-icon"
+                  :class="selected.source === 'agent' ? 'aw-icon-sparkles' : 'aw-icon-user-pen'"
+                  aria-hidden="true"
+                />
+                {{ authorship }}
+              </span>
+              <span v-if="when(selected.created)" class="created-at aw-figure">{{ when(selected.created) }}</span>
+            </div>
+
+            <div v-if="editingHeader" class="head-edit">
+              <InputText v-model="selected.title" class="title-field" aria-label="Finding title" />
+              <Select
+                v-model="selected.severity"
+                :options="SEVERITY_ORDER"
+                size="small"
+                class="severity-select"
+                :data-tone="selected.severity"
+                aria-label="Severity"
+              />
+              <Button label="Save" icon="aw-icon aw-icon-check" size="small" :loading="saving" @click="doneEditingHeader" />
+              <Button label="Cancel" size="small" text severity="secondary" @click="editingHeader = false" />
+            </div>
+            <h2 v-else class="detail-title">{{ selected.title }}</h2>
           </div>
-          <Select
-            v-model="selected.severity"
-            :options="SEVERITY_ORDER"
+          <Button
+            v-if="!editingHeader"
+            label="Edit"
+            icon="aw-icon aw-icon-pencil"
             size="small"
-            class="severity-select"
-            :data-tone="selected.severity"
-            aria-label="Severity"
+            text
+            severity="secondary"
+            @click="editingHeader = true"
           />
-          <Button label="Save" icon="aw-icon aw-icon-save" size="small" :loading="saving" @click="save()" />
         </header>
 
-        <!-- What is recorded, and what the report can do with it. The two
-             checkboxes under the old editor said neither. -->
+        <!-- Human-in-the-loop sign-off & report eligibility bar. -->
         <UiVerdictBar
-          :tone="absorbedInto ? 'neutral' : selected.auditor_confirmed ? 'ok' : 'neutral'"
+          :tone="absorbedInto ? 'neutral' : selected.auditor_confirmed && !owed.length ? 'ok' : 'warn'"
           :stale="staleSentence"
         >
           <template #found>
@@ -909,10 +1035,12 @@ const staleSentence = computed(() => {
             </section>
           </div>
 
-          <aside class="rail">
-            <section>
+          <aside class="rail" aria-label="Audit trail and evidence">
+            <p class="rail-heading">Audit trail</p>
+
+            <section class="trace-step">
               <div class="section-head">
-                <h3 class="aw-label">Risk</h3>
+                <h3 class="aw-label"><span class="step-num" aria-hidden="true">1</span>Control &amp; risk</h3>
                 <Button
                   v-if="riskLinks.length"
                   label="Change"
@@ -930,7 +1058,10 @@ const staleSentence = computed(() => {
                   class="card"
                   @click="openPlanning(link.id)"
                 >
-                  <span class="card-id">{{ link.id }}</span>
+                  <span class="card-top">
+                    <span class="card-id">{{ link.id }}</span>
+                    <span v-if="link.process" class="card-tag">{{ link.process }}</span>
+                  </span>
                   <span class="clamp">{{ link.risk }}</span>
                 </button>
               </template>
@@ -942,9 +1073,9 @@ const staleSentence = computed(() => {
               </div>
             </section>
 
-            <section>
+            <section class="trace-step">
               <div class="section-head">
-                <h3 class="aw-label">Tests</h3>
+                <h3 class="aw-label"><span class="step-num" aria-hidden="true">2</span>Tests executed</h3>
                 <Button label="Add" icon="aw-icon aw-icon-plus" size="small" text severity="secondary" @click="testPicker?.toggle($event)" />
               </div>
               <button
@@ -956,16 +1087,19 @@ const staleSentence = computed(() => {
               >
                 <span class="card-top">
                   <span class="card-id"><i :class="link.icon" aria-hidden="true" />{{ link.id }}</span>
-                  <span v-if="link.exceptions" class="pill warn aw-figure">{{ plural(link.exceptions, 'exception') }}</span>
+                  <span class="card-badges">
+                    <span class="engine-pill" :data-engine="link.destination">{{ link.engine }}</span>
+                    <span v-if="link.exceptions" class="pill warn aw-figure">{{ plural(link.exceptions, 'exception') }}</span>
+                  </span>
                 </span>
                 <span class="clamp">{{ link.title }}</span>
               </button>
               <p v-if="!testLinks.length" class="none">No test linked.</p>
             </section>
 
-            <section>
+            <section class="trace-step">
               <div class="section-head">
-                <h3 class="aw-label">Evidence</h3>
+                <h3 class="aw-label"><span class="step-num" aria-hidden="true">3</span>Evidence anchors</h3>
                 <Button
                   label="Add"
                   icon="aw-icon aw-icon-plus"
@@ -977,17 +1111,20 @@ const staleSentence = computed(() => {
                 />
               </div>
               <div v-for="value in selected.evidence_refs" :key="value.id" class="card-row">
-                <button type="button" class="card" @click="openEvidence(value)">
+                <button
+                  type="button"
+                  class="card"
+                  :title="value.source_sha1 ? `Pinned to source hash ${value.source_sha1.slice(0, 8)}` : undefined"
+                  @click="openEvidence(value)"
+                >
                   <span class="card-top">
                     <span class="card-id">{{ value.id }}</span>
                     <span v-if="anchorMoved(value)" class="pill warn">Changed</span>
                   </span>
-                  <span class="clamp">{{ value.source_kind }} · {{ value.source_id }}</span>
-                  <span v-if="value.source_sha1" class="drafted aw-figure">
-                    Drafted against {{ value.source_sha1.slice(0, 8) }}
-                  </span>
+                  <span class="clamp">{{ evidenceKindLabel(value.source_kind) }} · {{ value.source_id }}</span>
                 </button>
                 <Button
+                  class="remove-ev"
                   icon="aw-icon aw-icon-x"
                   text
                   rounded
@@ -1059,6 +1196,27 @@ const staleSentence = computed(() => {
 
     <EvidenceAnchorDialog v-model="anchorOpen" :anchor="anchor" />
     <Drawer
+      v-model:visible="consolidationOpen"
+      position="right"
+      header="Finding consolidations"
+      :style="{ width: 'min(48rem, 96vw)' }"
+      @hide="manualConsolidation = false"
+    >
+      <ConsolidationPanel
+        embedded
+        :payload="consolidation"
+        :candidates="consolidationCandidates"
+        :busy="consolidating"
+        :agentBusy="agentBusy"
+        :manual="manualConsolidation"
+        @refresh="refreshConsolidation"
+        @accept="acceptConsolidation"
+        @dismiss="dismissConsolidation"
+        @consolidate="consolidateSelected"
+        @closeManual="manualConsolidation = false; if (!undecidedConsolidations.length) consolidationOpen = false"
+      />
+    </Drawer>
+    <Drawer
       v-model:visible="templateOpen"
       position="right"
       header="Finding template"
@@ -1081,7 +1239,27 @@ const staleSentence = computed(() => {
 <style scoped>
 .findings { display: flex; flex-direction: column; gap: .75rem; min-width: 0; max-width: 100%; min-height: 0; height: 100%; }
 
+.head-copy { display: flex; align-items: baseline; flex-wrap: wrap; gap: .25rem .75rem; min-width: 0; }
+.head-sub { color: var(--aw-muted); font-size: var(--aw-text-xs); font-variant-numeric: tabular-nums; }
 .grow { flex: 1; }
+
+.consolidation-bar {
+  display: flex; align-items: center; gap: .625rem; flex-wrap: wrap;
+  padding: .45rem .75rem;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control);
+  background: var(--aw-panel);
+  font-size: var(--aw-text-sm);
+}
+.consolidation-bar[data-tone='warn'] {
+  border-color: var(--aw-warn-line);
+  background: color-mix(in srgb, var(--aw-warn-soft) 70%, var(--aw-panel));
+}
+.consolidation-bar .bar-icon { flex: none; color: var(--aw-accent); font-size: var(--aw-text-sm); }
+.consolidation-bar[data-tone='warn'] .bar-icon { color: var(--aw-warn-ink); }
+.bar-copy { display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .5rem; min-width: 0; }
+.bar-copy strong { color: var(--aw-ink-strong); font-weight: 600; }
+.consolidation-bar[data-tone='warn'] .bar-copy strong { color: var(--aw-warn-ink); }
+.bar-detail { color: var(--aw-ink-soft); font-size: var(--aw-text-xs); }
 
 .layout { display: grid; grid-template-columns: 18.75rem minmax(0, 1fr); gap: .875rem; flex: 1; min-height: 12rem; }
 
@@ -1112,21 +1290,46 @@ const staleSentence = computed(() => {
    a 2px line under a long narrative. */
 .detail > * { flex: none; }
 .detail-head { display: flex; align-items: flex-start; gap: .75rem; min-width: 0; }
-.detail-copy { display: flex; flex-direction: column; gap: .25rem; flex: 1; min-width: 0; }
-.eyebrow { margin: 0; color: var(--aw-muted); font-size: var(--aw-text-xs); }
-.eyebrow .id { font-family: var(--aw-font-mono); font-weight: 600; }
-.eyebrow .authorship[data-agent='true'] { color: var(--aw-accent); }
-/* The title edits where it is read: a `Title` field in a form above the
-   document restated the heading the document already has. */
-.title-field {
-  width: 100%; padding: .1rem .25rem; margin-left: -.25rem;
-  border: 1px solid transparent; border-radius: var(--aw-radius-control);
-  background: none; color: var(--aw-ink-strong);
-  font: inherit; font-size: var(--aw-text-lg); font-weight: 600; letter-spacing: -0.01em;
+.detail-copy { display: flex; flex-direction: column; gap: .4rem; flex: 1; min-width: 0; }
+.detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .55rem; }
+
+.sev-pill {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .1rem .5rem; border-radius: var(--aw-radius-pill);
+  border: 1px solid var(--aw-border); background: var(--aw-raised);
+  color: var(--aw-ink-soft); font-size: var(--aw-text-xs); font-weight: 700;
 }
-.title-field:hover { border-color: var(--aw-border); }
-.title-field:focus { outline: 0; border-color: var(--aw-teal); background: var(--aw-canvas); }
-.lede { margin: 0; color: var(--aw-ink-soft); font-size: var(--aw-text-sm); line-height: 1.45; }
+.sev-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.sev-pill[data-tone='critical'] { border-color: var(--aw-danger-line); background: var(--aw-danger-soft); color: var(--aw-danger-ink); }
+.sev-pill[data-tone='high'] { border-color: var(--aw-danger-line); background: var(--aw-danger-soft); color: var(--aw-danger); }
+.sev-pill[data-tone='medium'] { border-color: var(--aw-warn-line); background: var(--aw-warn-soft); color: var(--aw-warn-ink); }
+.sev-pill[data-tone='low'] { border-color: var(--aw-low); background: var(--aw-low-soft); color: var(--aw-low-ink); }
+
+.finding-id {
+  color: var(--aw-muted); font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 600;
+}
+.source-pill {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .1rem .45rem; border-radius: var(--aw-radius-pill);
+  border: 1px solid var(--aw-border); background: var(--aw-raised);
+  color: var(--aw-ink-soft); font-size: var(--aw-text-xs); font-weight: 600;
+}
+.source-pill .aw-icon { font-size: var(--aw-text-2xs); }
+.source-pill[data-agent='true'] {
+  border-color: var(--aw-accent-line); background: var(--aw-accent-soft); color: var(--aw-accent);
+}
+.created-at { color: var(--aw-muted); font-size: var(--aw-text-xs); }
+
+.detail-title {
+  margin: 0; color: var(--aw-ink-strong);
+  font-size: var(--aw-text-xl); font-weight: var(--aw-weight-title);
+  letter-spacing: -.015em; line-height: 1.25;
+}
+.head-edit { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.title-field {
+  flex: 1; min-width: 14rem;
+  color: var(--aw-ink-strong); font-size: var(--aw-text-md); font-weight: 600;
+}
 
 .severity-select :deep(.p-select-label) { font-weight: 600; text-transform: capitalize; }
 .severity-select[data-tone='critical'] { border-color: var(--aw-danger-line); color: var(--aw-danger-ink); }
@@ -1155,29 +1358,64 @@ const staleSentence = computed(() => {
 .response.none, .none { color: var(--aw-muted); }
 .none { margin: 0; font-size: var(--aw-text-sm); }
 
-.rail { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+.rail {
+  display: flex; flex-direction: column; gap: 1rem; min-width: 0;
+  padding: .875rem;
+  border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
+  background: color-mix(in srgb, var(--aw-raised) 45%, var(--aw-panel));
+  align-self: start;
+}
+.rail-heading {
+  margin: 0; padding-bottom: .45rem; border-bottom: 1px solid var(--aw-border);
+  color: var(--aw-ink-strong); font-size: var(--aw-text-xs); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
+}
 .rail section { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.trace-step .section-head h3 { display: inline-flex; align-items: center; gap: .4rem; }
+.step-num {
+  display: inline-grid; place-items: center; flex: none;
+  width: 1.1rem; height: 1.1rem; border-radius: 50%;
+  background: var(--aw-teal-soft); color: var(--aw-teal-strong);
+  font-family: var(--aw-font-mono); font-size: var(--aw-text-2xs); font-weight: 700;
+}
 .card {
-  display: flex; flex-direction: column; gap: .2rem;
+  display: flex; flex-direction: column; gap: .25rem;
   width: 100%; min-width: 0;
-  padding: .5rem .625rem;
+  padding: .55rem .65rem;
   border: 1px solid var(--aw-border); border-radius: var(--aw-radius-control);
   background: var(--aw-panel); color: var(--aw-ink);
   font: inherit; font-size: var(--aw-text-sm); text-align: left; cursor: pointer;
+  transition: border-color .12s ease, background-color .12s ease;
 }
 .card:hover { border-color: var(--aw-teal-line); background: var(--aw-teal-soft); }
 .card:focus-visible { outline: 2px solid var(--aw-teal); outline-offset: 1px; }
-.card-top { display: flex; align-items: center; justify-content: space-between; gap: .4rem; }
-.card-id { display: inline-flex; align-items: center; gap: .3rem; color: var(--aw-teal); font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 700; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: .4rem; flex-wrap: wrap; }
+.card-id { display: inline-flex; align-items: center; gap: .3rem; color: var(--aw-teal-strong); font-family: var(--aw-font-mono); font-size: var(--aw-text-xs); font-weight: 700; }
+.card-tag {
+  max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: .05rem .4rem; border-radius: var(--aw-radius-pill);
+  background: var(--aw-raised); color: var(--aw-ink-soft);
+  font-size: var(--aw-text-2xs); font-weight: 600;
+}
+.card-badges { display: inline-flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.engine-pill {
+  padding: .05rem .4rem; border-radius: var(--aw-radius-pill);
+  border: 1px solid var(--aw-border); background: var(--aw-raised); color: var(--aw-ink-soft);
+  font-size: var(--aw-text-2xs); font-weight: 600; white-space: nowrap;
+}
+.engine-pill[data-engine='data-tests'] {
+  border-color: var(--aw-teal-line); background: var(--aw-teal-soft); color: var(--aw-teal-strong);
+}
 .card-row { display: flex; align-items: flex-start; gap: .2rem; }
 .card-row .card { flex: 1; }
+.remove-ev { opacity: .45; transition: opacity .12s ease; }
+.card-row:hover .remove-ev, .remove-ev:focus-visible { opacity: 1; }
 /* A member with nothing to open: the same card, without the affordance. */
 .card.static { cursor: default; }
 .card.static:hover { border-color: var(--aw-border); background: var(--aw-panel); }
 .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; color: var(--aw-ink-soft); line-height: 1.4; }
-.drafted { color: var(--aw-muted); font-size: var(--aw-text-xs); }
 .pill {
-  flex: none; padding: 0 .375rem;
+  flex: none; padding: .05rem .4rem;
   border-radius: var(--aw-radius-pill);
   font-size: var(--aw-text-2xs); font-weight: 700;
 }

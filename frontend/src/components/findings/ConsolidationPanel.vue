@@ -35,6 +35,8 @@ const props = defineProps<{
   agentBusy: boolean
   /** Whether the manual card is open. */
   manual: boolean
+  /** Drop the outer card frame when rendered inside a slide-over drawer. */
+  embedded?: boolean
 }>()
 const emit = defineEmits<{
   refresh: []
@@ -132,10 +134,15 @@ const basisState = computed(() => {
 </script>
 
 <template>
-  <section v-if="basisState && (payload?.candidates ?? 0) >= 2" class="consolidation" data-testid="consolidation-panel">
-    <header class="head">
+  <section
+    v-if="manual || (basisState && (payload?.candidates ?? 0) >= 2)"
+    class="consolidation"
+    :class="{ embedded }"
+    data-testid="consolidation-panel"
+  >
+    <header v-if="basisState" class="head">
       <div class="copy">
-        <h2 class="aw-label">Suggested consolidations</h2>
+        <h2 v-if="!embedded" class="aw-label">Suggested consolidations</h2>
         <p class="state" :data-tone="basisState.tone">{{ basisState.text }}</p>
       </div>
       <Button
@@ -260,6 +267,7 @@ const basisState = computed(() => {
   border: 1px solid var(--aw-border); border-radius: var(--aw-radius-surface);
   background: var(--aw-panel);
 }
+.consolidation.embedded { padding: 0; border: 0; border-radius: 0; background: transparent; gap: .875rem; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .copy { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
 .state { margin: 0; color: var(--aw-ink-soft); font-size: var(--aw-text-sm); }
@@ -267,12 +275,12 @@ const basisState = computed(() => {
 .state[data-tone='ok'] { color: var(--aw-ok, var(--aw-ink-soft)); }
 
 .card {
-  display: flex; flex-direction: column; gap: .5rem;
-  padding: .625rem .75rem;
+  display: flex; flex-direction: column; gap: .6rem;
+  padding: .75rem .875rem;
   border: 1px solid var(--aw-warn-line); border-radius: var(--aw-radius-control);
-  background: var(--aw-warn-soft);
+  background: color-mix(in srgb, var(--aw-warn-soft) 55%, var(--aw-panel));
 }
-.card.manual { border-color: var(--aw-teal-line); background: var(--aw-teal-soft); }
+.card.manual { border-color: var(--aw-teal-line); background: color-mix(in srgb, var(--aw-teal-soft) 55%, var(--aw-panel)); }
 .card-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .chip {
   padding: 0 .45rem; border-radius: var(--aw-radius-pill);

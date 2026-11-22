@@ -2364,6 +2364,32 @@ def finding_exception_rows(workspace: Workspace, execution_ref: str) -> dict | N
     }
 
 
+_FINDING_ANCHOR_FIELDS = (
+    "source_kind", "source_id", "source_sha1", "page", "item_id", "field",
+)
+
+
+def _finding_cycle_assertion(key: str, result: Mapping[str, object]) -> dict:
+    """One assertion of a cycle item, as a finding drafter needs it."""
+
+    verdict = result.get("verdict")
+    if verdict == "match":
+        return {"key": key, "verdict": verdict}
+    return {
+        "key": key,
+        "verdict": verdict,
+        # "20 vs 17": what the documents printed, so the finding can name it.
+        "values": result.get("display"),
+        "reason": result.get("reason"),
+        "assertion_sha1": result.get("assertion_sha1"),
+        "result_sha1": result.get("result_sha1"),
+        "evidence": [
+            {field: anchor.get(field) for field in _FINDING_ANCHOR_FIELDS}
+            for anchor in result.get("evidence_refs") or []
+        ],
+    }
+
+
 def _finding_execution_projection(
     workspace: Workspace,
     execution_ref: str,
@@ -2408,24 +2434,19 @@ def _finding_execution_projection(
                     "documents": _document_titles(
                         workspace, _item_document_ids(selected)
                     ),
+                    # The assertions this test's requirement asks for, not
+                    # the whole cycle the ruleset contracts: the rest are
+                    # exceptions to other controls, and carrying them with
+                    # their anchors overflowed the source's budget, which
+                    # drops the projection whole and leaves the draft nothing.
+                    # What disagreed carries its values, the reader's reason
+                    # and its pages; what agreed is named and nothing more.
+                    "assertion_scope": cycle_vouching.assertion_scope_of(test),
                     "assertion_results": [
-                        {
-                            "key": key,
-                            "verdict": result.get("verdict"),
-                            "assertion_sha1": result.get("assertion_sha1"),
-                            "result_sha1": result.get("result_sha1"),
-                            "evidence": [
-                                {
-                                    field: anchor.get(field)
-                                    for field in (
-                                        "source_kind", "source_id", "source_sha1",
-                                        "page", "item_id", "field",
-                                    )
-                                }
-                                for anchor in result.get("evidence_refs") or []
-                            ],
-                        }
-                        for key, result in (selected.get("result_by_assertion") or {}).items()
+                        _finding_cycle_assertion(key, result)
+                        for key, result in cycle_vouching.scoped_results(
+                            selected, cycle_vouching.assertion_scope_of(test)
+                        ).items()
                     ],
                 },
             }

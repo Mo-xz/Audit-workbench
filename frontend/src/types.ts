@@ -1098,6 +1098,10 @@ export interface CycleVouchGridPayload {
   title: string
   objective?: string
   requirement_refs?: string[]
+  /** The assertions the test's own requirement asks for — the only ones that
+   *  decide an item's evaluation. `null` when the test cites no live
+   *  requirement and every assertion does. */
+  assertion_scope?: string[] | null
   /** Chronological roles from the approved cycle ruleset (optional for older payloads). */
   roles?: Array<{ name: string; document_type: string }>
   /** The two test-level records the grid stands in for. They travel with the
@@ -1121,6 +1125,8 @@ export interface CycleVouchGridPayload {
     label: string
     requirement: string
     applicable_roles: string[]
+    /** Whether this assertion decides an item's evaluation (see `assertion_scope`). */
+    in_scope?: boolean
     /** Excludes unattributable cells: sum(counts) + stale_cells === row count. */
     counts: Record<CycleAssertionVerdict, number>
     stale_cells: number

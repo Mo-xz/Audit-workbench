@@ -117,6 +117,22 @@ describe('planCycleColumns', () => {
     ])
   })
 
+  it("takes the backend's assertion scope over the title heuristic", () => {
+    // The vendor title alone would pick the vendor column; the requirement the
+    // test cites asks for the receipt quantity and signature instead.
+    const scoped = planCycleColumns({
+      ...makePayload('PO vendor agrees with approved requisition vendor'),
+      assertion_scope: ['assert_grn_signed', 'pair_order_receipt_qty'],
+    })
+    expect(scoped.relevantKeys).toEqual(['pair_order_receipt_qty', 'assert_grn_signed'])
+
+    const unscoped = planCycleColumns({
+      ...makePayload('PO vendor agrees with approved requisition vendor'),
+      assertion_scope: null,
+    })
+    expect(unscoped.relevantKeys).toEqual(['pair_req_po_vendor'])
+  })
+
   it('picks focused relevant columns matching each specific test', () => {
     const poVendor = planCycleColumns(makePayload('PO vendor agrees with approved requisition vendor'))
     expect(poVendor.relevantKeys).toEqual(['pair_req_po_vendor'])

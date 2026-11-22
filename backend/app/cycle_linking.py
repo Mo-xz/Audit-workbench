@@ -37,6 +37,7 @@ from . import (
 )
 from .cycle_vouching import (
     ASSERTIONS,
+    ASSERTION_SCOPE_KEY,
     ASSERTION_VERDICTS,
     CURRENT_EVALUATION_STATES,
     DISPOSITION_STATES,
@@ -983,7 +984,46 @@ def normalize_cycle_item(test: Mapping[str, object], value: object) -> dict:
 #: Bumped when `materialize_cycle_population` changes what it would produce
 #: from unchanged inputs, so a fingerprint written by the old projection stops
 #: vouching for items the new one would draw differently.
-MATERIALIZATION_VERSION = 1
+MATERIALIZATION_VERSION = 2
+
+
+def assertion_scope(
+    workspace, test: Mapping[str, object], ruleset: Mapping[str, object]
+) -> list[str] | None:
+    """The ruleset assertions this test's own requirement asks for.
+
+    A cycle test cites requirements of one matrix row; each names the
+    comparisons it demands, and ``assertion_covers`` is the same selector-exact
+    rule that refused to build the test if any were missing. Those assertions
+    — and only those — decide whether an item passed. The rest of the ruleset
+    still runs, so the grid can show the cycle around the control, but a
+    mismatch there is an exception to a different control.
+
+    ``None`` means unscoped: the test cites no requirement, or its row is gone
+    (retired, or never written against schemas). Every assertion then bears on
+    it, which is the only reading that cannot hide an exception. An empty list
+    is a real scope — every comparison is answered by a join key — and leaves
+    the linkage as the verdict.
+    """
+
+    rcm_id = str(test.get("rcm_id") or "")
+    refs = list(test.get("requirement_refs") or [])
+    if not rcm_id or not refs:
+        return None
+    rcm_row = next(
+        (row for row in workspace.rcm if str(row.get("id") or "") == rcm_id), None
+    )
+    if rcm_row is None:
+        return None
+    required = required_comparisons_for(rcm_row, refs)
+    if not required:
+        return None
+    roles = {str(role.get("name")): role for role in ruleset.get("roles") or []}
+    return sorted(
+        str(assertion["id"])
+        for assertion in ruleset.get("assertions") or []
+        if any(assertion_covers(assertion, comparison, roles) for comparison in required)
+    )
 
 
 def _inputs_sha1(
@@ -991,6 +1031,7 @@ def _inputs_sha1(
     source_sha1: str,
     records: Iterable[Mapping[str, object]],
     extraction_hashes: Mapping[str, str],
+    scope: list[str] | None = None,
 ) -> str:
     """The identity of everything materialization reads.
 
@@ -1007,6 +1048,9 @@ def _inputs_sha1(
     return sha1_hash({
         "version": MATERIALIZATION_VERSION,
         "definition_sha1": cycle_definition_sha1(validated),
+        # Derived from the matrix row the test cites, which can be revised
+        # under an unchanged definition; the item verdicts depend on it.
+        "assertion_scope": scope,
         "ruleset_hash": str(definition.get("ruleset_hash") or ""),
         "semantic_id": str(
             validated.get("semantic_id") or stable_test_semantic_id(validated)
@@ -1039,7 +1083,13 @@ def materialization_inputs_sha1(workspace, test: Mapping[str, object]) -> str:
     validated = validate_cycle_test(workspace, test)
     frame = workspace.get_frame(validated["definition"]["population"]["table"])
     records, extraction_hashes = structured_evidence(workspace)
-    return _inputs_sha1(validated, frame_signature(frame), records, extraction_hashes)
+    return _inputs_sha1(
+        validated,
+        frame_signature(frame),
+        records,
+        extraction_hashes,
+        assertion_scope(workspace, validated, validated["ruleset"]),
+    )
 
 
 def materialize_cycle_items(workspace, test: Mapping[str, object]) -> list[dict]:
@@ -1098,8 +1148,9 @@ def materialize_cycle_population(
         else ((index, frame.row(index, named=True)) for index in sample_row_indices(frame, selection))
     )
     prepared = prepare(workspace, ruleset)
+    scope = assertion_scope(workspace, validated, ruleset)
     inputs_sha1 = _inputs_sha1(
-        validated, source_sha1, prepared.records, prepared.extraction_hashes
+        validated, source_sha1, prepared.records, prepared.extraction_hashes, scope
     )
     definition_sha1 = cycle_definition_sha1(validated)
     existing_by_id = {str(item.get("id") or ""): item for item in test.get("items") or []}
@@ -1198,7 +1249,7 @@ def materialize_cycle_population(
                     "stale": bool(old_result) or prior_evaluation_current,
                     "result_sha1": None,
                 }
-        item["evaluation"]["state"] = aggregate_evaluation(item)
+        item["evaluation"]["state"] = aggregate_evaluation(item, scope)
         if item["evaluation"]["state"] in CURRENT_EVALUATION_STATES:
             item["evaluation"]["result_sha1"] = sha1_hash(item["result_by_assertion"])
         item["evidence_refs"] = dedupe_evidence(
@@ -1237,7 +1288,7 @@ def materialize_cycle_population(
     ]
     materialized = apply_cross_item_reuse(materialized, reuse_roles)
     for item in materialized:
-        projected = aggregate_evaluation(item)
+        projected = aggregate_evaluation(item, scope)
         if item["evaluation"].get("state") != projected:
             item["evaluation"]["state"] = projected
             if (item.get("disposition") or {}).get("state") != "pending":
@@ -1288,6 +1339,11 @@ def evaluate_cycle_item(
     validated = validate_cycle_test(workspace, test)
     ruleset = validated["ruleset"]
     ruleset_hash = str(validated["definition"].get("ruleset_hash") or "")
+    scope = (
+        test.get(ASSERTION_SCOPE_KEY)
+        if ASSERTION_SCOPE_KEY in test
+        else assertion_scope(workspace, validated, ruleset)
+    )
     if prepared is None:
         prepared = prepare(workspace, ruleset)
     catalog = evidence_catalog(
@@ -1371,7 +1427,7 @@ def evaluate_cycle_item(
         result["result_sha1"] = sha1_hash(result)
         results[key] = result
     item["evaluation"] = {
-        "state": aggregate_evaluation(item),
+        "state": aggregate_evaluation(item, scope),
         "definition_sha1": cycle_definition_sha1(validated),
         "result_sha1": sha1_hash(results),
     }
@@ -1411,6 +1467,9 @@ def evaluate_cycle_test(
         workspace, output
     )
     validated = validate_cycle_test(workspace, output)
+    output[ASSERTION_SCOPE_KEY] = assertion_scope(
+        workspace, validated, validated["ruleset"]
+    )
     prepared = prepare(workspace, validated["ruleset"])
     for item in output["items"]:
         if execution_pending(item, cycle=True):
@@ -1627,6 +1686,7 @@ def build_cycle_vouch_test(workspace, payload: Mapping[str, object]) -> dict:
         workflow_parent_sha1=payload.get("workflow_parent_sha1"),
         selection_confirmation=dict(payload.get("selection_confirmation") or {}) or None,
         coverage=coverage,
+        **{ASSERTION_SCOPE_KEY: assertion_scope(workspace, test, ruleset)},
         spec={
             "selection_basis": selection.get("mode"),
             "assurance_scope": assurance_scope,

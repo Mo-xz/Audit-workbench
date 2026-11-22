@@ -503,6 +503,54 @@ def build_cycle_vouch_test(workspace, payload: Mapping[str, object]) -> dict:
 #: inputs as they stand and materializes only on a mismatch.
 ITEMS_INPUTS_KEY = "items_inputs_sha1"
 
+#: Where a stored cycle test keeps the ids of the ruleset assertions its own
+#: requirement asks for — see `cycle_linking.assertion_scope`. ``None`` (or
+#: absent) means the test cites no live requirement, and every assertion bears
+#: on it, as before scoping existed.
+ASSERTION_SCOPE_KEY = "assertion_scope"
+
+
+def assertion_scope_of(test: Mapping[str, object]) -> list[str] | None:
+    """The stored scope of one cycle test, or ``None`` when it is unscoped."""
+
+    scope = test.get(ASSERTION_SCOPE_KEY)
+    if scope is None:
+        return None
+    return [str(key) for key in scope]
+
+
+def scoped_results(
+    item: Mapping[str, object], scope: Iterable[str] | None
+) -> dict[str, dict]:
+    """The assertion results that decide this test's verdict on one item.
+
+    One approved ruleset contracts the whole cycle, and every test over it
+    evaluates every assertion, because the grid shows the cycle around the
+    control being tested. Only the assertions the test's requirement asks for
+    decide whether the item passed: a goods-receipt quantity that disagrees
+    with the order is an exception to the receiving control, not to the
+    control that the order's vendor agrees with the requisition's. The rest
+    are context, shown and never counted.
+    """
+
+    results = item.get("result_by_assertion") or {}
+    if scope is None:
+        return dict(results)
+    wanted = set(scope)
+    return {key: value for key, value in results.items() if key in wanted}
+
+
+def assertion_scope(workspace, test: Mapping[str, object]) -> list[str] | None:
+    """The assertions this test's requirement asks for; see `cycle_linking`."""
+
+    from . import cycle_linking
+
+    validated = cycle_linking.validate_cycle_test(workspace, test)
+    ruleset = validated.get("ruleset")
+    if ruleset is None:
+        return None
+    return cycle_linking.assertion_scope(workspace, validated, ruleset)
+
 
 def materialize_cycle_items(workspace, test: Mapping[str, object]) -> list[dict]:
     """Select population rows and bind each one's linked record closure."""
@@ -652,8 +700,23 @@ def _sample_row_indices(frame: pl.DataFrame, selection: Mapping[str, object]) ->
     return sorted(chosen)
 
 
-def _aggregate_evaluation(item: Mapping[str, object]) -> str:
-    results = list((item.get("result_by_assertion") or {}).values())
+def _aggregate_evaluation(
+    item: Mapping[str, object], scope: Iterable[str] | None = None
+) -> str:
+    results = list(scoped_results(item, scope).values())
+    if scope is not None and not results:
+        # Every comparison the requirement asks for is answered by a join key:
+        # the documents agree on it because that is how they were linked. The
+        # linkage is the whole of the verdict.
+        if (
+            item.get("role_conflicts")
+            or item.get("collisions")
+            or item.get("linkage_state") == "needs_review"
+        ):
+            return "needs_review"
+        if item.get("missing_roles"):
+            return "incomplete"
+        return "passed"
     if not results or any(result.get("verdict") == "not_run" for result in results):
         return "stale" if any(result.get("stale") for result in results) else "not_run"
     verdicts = {str(result.get("verdict") or "not_run") for result in results}
@@ -856,10 +919,11 @@ def unresolved_items(test: Mapping[str, object]) -> list[dict]:
 def unusable_result_items(test: Mapping[str, object]) -> int:
     """Items carrying at least one assertion the runner could not settle."""
 
+    scope = assertion_scope_of(test)
     return sum(
         any(
             result.get("verdict") in _UNUSABLE_VERDICTS
-            for result in (item.get("result_by_assertion") or {}).values()
+            for result in scoped_results(item, scope).values()
         )
         for item in test.get("items") or []
     )
@@ -869,16 +933,19 @@ def result_rollup(test: Mapping[str, object]) -> dict:
     """Count cycle items and assertion cells as separate, non-additive units."""
 
     # The rules live in the ruleset, which this function has no workspace to
-    # load. It needs exactly two things from them, and both are already on the
-    # test: the selection, and which assertions have a cell per item — and an
-    # item's own result keys are that, by construction.
+    # load. It needs exactly three things from them, and all are already on
+    # the test: the selection, which assertions its requirement asks for, and
+    # which of those have a cell per item — an item's own result keys, by
+    # construction. Assertions outside the scope are the cycle around the
+    # control, not evidence about it, so they are not counted here.
     selection = ((test.get("definition") or {}).get("population") or {}).get(
         "selection"
     ) or {}
+    assertion_scope = assertion_scope_of(test)
     assertion_keys = sorted({
         key
         for item in test.get("items") or []
-        for key in (item.get("result_by_assertion") or {})
+        for key in scoped_results(item, assertion_scope)
     })
     items = list(test.get("items") or [])
     item_counts = {state: 0 for state in sorted(EVALUATION_STATES)}
@@ -915,7 +982,7 @@ def result_rollup(test: Mapping[str, object]) -> dict:
     failed_items = sum(
         any(
             result.get("verdict") == "mismatch"
-            for result in (item.get("result_by_assertion") or {}).values()
+            for result in scoped_results(item, assertion_scope).values()
         )
         for item in current_items
     )
@@ -923,7 +990,7 @@ def result_rollup(test: Mapping[str, object]) -> dict:
         any(
             result.get("verdict")
             in {"missing_evidence", "invalid_extraction", "cannot_determine"}
-            for result in (item.get("result_by_assertion") or {}).values()
+            for result in scoped_results(item, assertion_scope).values()
         )
         for item in current_items
     )
@@ -1173,6 +1240,7 @@ def grid_projection(
         key=lambda item: (str(item.get("label") or ""), str(item.get("id") or "")),
     )
     rollup = result_rollup({**dict(validated), **dict(test), "items": items})
+    assertion_scope = assertion_scope_of(test)
     columns = []
     for assertion in assertion_values:
         key = str(assertion["key"])
@@ -1204,6 +1272,9 @@ def grid_projection(
                     assertion.get("requirement") or assertion.get("rationale") or ""
                 ),
                 "applicable_roles": list(dict.fromkeys(applicable_roles)),
+                # Whether this assertion is one the test's requirement asks
+                # for, and so one that decides an item's evaluation.
+                "in_scope": assertion_scope is None or key in assertion_scope,
                 "counts": counts,
                 "stale_cells": stale_cells,
             }
@@ -1278,6 +1349,9 @@ def grid_projection(
         "title": str(test.get("title") or ""),
         "objective": str(test.get("objective") or ""),
         "requirement_refs": list(test.get("requirement_refs") or []),
+        # The assertions that decide each item's evaluation; ``None`` when the
+        # test cites no live requirement and every assertion does.
+        "assertion_scope": assertion_scope,
         "roles": [
             {
                 "name": str(role.get("name") or role.get("role") or ""),

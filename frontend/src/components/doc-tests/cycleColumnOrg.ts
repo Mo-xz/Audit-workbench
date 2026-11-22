@@ -9,7 +9,9 @@ export type CycleVouchGridColumn = CycleVouchGridPayload['columns'][number]
  *      roles when present or inferred cleanly from `applicable_roles`.
  *   2. A test-focused subset (`relevantKeys`) matching the specific RCM test
  *      the user opened, plus `flaggedKeys` for any assertions with mismatches
- *      or unresolved issues.
+ *      or unresolved issues. The subset is the backend's `assertion_scope` —
+ *      the assertions that decide each item's evaluation — whenever the test
+ *      has one; the title heuristic below serves only unscoped tests.
  *
  * Pure and stateless — every number and order comes directly from the payload.
  */
@@ -157,6 +159,10 @@ function pickRelevantKeys(
   orderedColumns: CycleVouchGridColumn[],
   roleMap: Map<string, RoleStageMeta>,
 ): string[] {
+  if (Array.isArray(payload.assertion_scope)) {
+    const scope = new Set(payload.assertion_scope)
+    return orderedColumns.filter(col => scope.has(col.key)).map(col => col.key)
+  }
   if (orderedColumns.length <= 1) return orderedColumns.map(c => c.key)
   const title = String(payload.title ?? '').trim()
   if (!title) return []

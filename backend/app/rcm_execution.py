@@ -533,7 +533,11 @@ def _sync_cycle_observations(
         item_id = str(cycle_item["id"])
         observation_key = f"doctest:{test['id']}:item:{item_id}"
         active_keys.add(observation_key)
-        results = cycle_item.get("result_by_assertion") or {}
+        # The assertions the test's requirement asks for, not the whole cycle:
+        # the observation is an exception to this control.
+        results = cycle_vouching.scoped_results(
+            cycle_item, cycle_vouching.assertion_scope_of(test)
+        )
         diagnostic_keys = [
             key for key, result in results.items() if result.get("verdict") != "match"
         ]

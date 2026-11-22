@@ -610,6 +610,7 @@ defineExpose({ filters, focusSelectedCell, loadGrid, offset, scrollContainer, se
             <th v-for="column in visibleColumns" :key="column.key" class="assertion-column" scope="col">
               <strong>{{ column.label }}</strong>
               <small>{{ column.requirement }}<template v-if="column.applicable_roles.length"> · {{ column.applicable_roles.map(label).join(', ') }}</template></small>
+              <small v-if="column.in_scope === false" class="column-context">Cycle context · does not decide this test</small>
               <div class="column-counts" :aria-label="`${column.label} full-test verdict summary`">
                 <button
                   v-for="option in verdictOptions.filter(option => option.value && column.counts[option.value])"
@@ -931,6 +932,7 @@ thead th > small { margin-top: .2rem; color: var(--aw-muted); font-size: var(--a
 thead .sticky { z-index: 7; background: var(--aw-raised); }
 tbody .sticky { background: var(--aw-panel); }
 .assertion-column, .assertion-cell { width: 15rem; min-width: 15rem; max-width: 15rem; }
+.column-context { display: block; margin-top: .2rem; color: var(--aw-muted); font-style: italic; }
 .column-counts { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .45rem; }
 .column-counts button { padding: .12rem .3rem; border: 0; border-radius: var(--aw-radius-pill); background: var(--aw-panel); color: var(--aw-muted); font-size: .65rem; cursor: pointer; }
 .column-counts button[data-verdict='mismatch'] { color: var(--aw-danger); background: var(--aw-danger-soft); }

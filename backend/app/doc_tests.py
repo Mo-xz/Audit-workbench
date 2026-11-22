@@ -825,6 +825,14 @@ def _project_cycle_items(workspace: Workspace, test: dict) -> dict:
     }
     if table not in known_tables:
         return test
+    # Which assertions decide this test's verdicts follows the matrix row it
+    # cites, so it is read afresh with the items rather than trusted from disk.
+    try:
+        test[cycle_vouching.ASSERTION_SCOPE_KEY] = cycle_vouching.assertion_scope(
+            workspace, test
+        )
+    except cycle_vouching.CycleSchemaError:
+        pass
     # The stored items vouch for themselves when the inputs they were drawn
     # from have not moved: the projection is idempotent, so drawing them again
     # would produce what is already on the file. Every write that materializes
@@ -869,7 +877,7 @@ def list_tests(workspace: Workspace) -> list[dict]:
                 "workflow_parent_sha1", "objective", "criteria", "steps",
                 "schema_version", "registry", "requirement_refs", "procedure_key",
                 "definition", "coverage", "context_manifest_sha256",
-                "selection_confirmation",
+                "selection_confirmation", "assertion_scope",
                 "conclusion", "conclusion_source", "control_conclusion", "control_conclusion_source", "result_summary", "next_action",
                 "exception_count", "open_exception_count", "scope_limitations",
             )},
@@ -1167,6 +1175,12 @@ def _apply_kind_spec(test: dict, payload: dict) -> None:
         confirmation = payload.get("selection_confirmation")
         test["selection_confirmation"] = (
             dict(confirmation) if isinstance(confirmation, Mapping) else None
+        )
+        # Derived from the cited matrix row, and refreshed on every read; see
+        # ``cycle_vouching.ASSERTION_SCOPE_KEY``.
+        scope = payload.get(cycle_vouching.ASSERTION_SCOPE_KEY)
+        test[cycle_vouching.ASSERTION_SCOPE_KEY] = (
+            [str(key) for key in scope] if isinstance(scope, list) else None
         )
         try:
             cycle_vouching.validate_cycle_test(test)
@@ -3248,11 +3262,12 @@ def _cycle_test_classification(test: dict, rollup: dict) -> str:
     if rollup["exception_items"]:
         return "exception"
     items = test.get("items") or []
+    scope = cycle_vouching.assertion_scope_of(test)
     missing_evidence = any(
-        item.get("missing_roles")
+        (item.get("missing_roles") if scope is None else False)
         or any(
             result.get("verdict") == "missing_evidence"
-            for result in (item.get("result_by_assertion") or {}).values()
+            for result in cycle_vouching.scoped_results(item, scope).values()
         )
         for item in items
     )

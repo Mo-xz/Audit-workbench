@@ -167,7 +167,10 @@ backend/app/
 |                                ask/act routing, chat-run projections
 |- assistant_settings.py       - provider/model settings validation
 |- llm.py                      - OpenAI-compatible stdlib transport for both
-|                                assistant and agent profiles
+|                                assistant and agent profiles; with
+|                                `LLM_TOOLS_API=responses` a request carrying
+|                                tools goes to /responses, rewritten at the
+|                                wire so every caller stays chat-shaped
 |- llm_replay.py               - `LLM_REPLAY=on`: answer every call from the
 |                                workspace's recorded calls (exact request,
 |                                else same step and refs), serving only the

@@ -20,6 +20,10 @@ provider and model are normal application settings saved through the UI:
                              in seconds (defaults to 60)
     AGENT_PROVIDER           optional provider override for agent runs
     AGENT_MODEL              optional model override for agent runs
+    LLM_TOOLS_API            ``responses`` sends requests that carry tools to
+                             ``/responses`` instead of ``/chat/completions``,
+                             for models that refuse tools there; default
+                             ``chat``. Requests without tools are unaffected
     LLM_REPLAY               ``on`` answers every call from the workspace's
                              recorded calls and never opens a connection;
                              see :mod:`.llm_replay`
@@ -662,6 +666,320 @@ def agent_status() -> dict:
     return result
 
 
+# --------------------------------------------------------------------------- #
+# Tool calls over the Responses API (``LLM_TOOLS_API=responses``)
+#
+# Some reasoning models refuse function tools on chat/completions altogether —
+# a model that always deliberates and accepts no ``reasoning_effort: none``
+# cannot call a tool there at any setting — and serve them only on
+# ``/responses``. Every caller builds a chat-shaped request and reads a
+# chat-shaped reply, so the switch is made here and nowhere else: the request
+# is rewritten just before it is sent and the reply rewritten as soon as it
+# arrives. Only requests carrying tools move. Tool requests never stream and
+# never carry ``response_format``, so neither needs a second form.
+#
+# The chat-shaped body stays the call's recorded ``request`` and the
+# chat-shaped reply its ``raw_response``, which is what replay matches and
+# answers from; the wire forms are kept beside them under ``wire``.
+
+#: Where a turn's Responses reasoning items travel until the next turn sends
+#: them back. The loop and the chat rebuild an assistant turn from ``content``
+#: and ``tool_calls`` alone and keep each tool call verbatim, so the first call
+#: is the one place an item survives the round trip. Never sent on
+#: chat/completions.
+RESPONSES_REASONING_KEY = "responses_reasoning"
+
+
+def _tools_api() -> str:
+    """Which API a request carrying tools is sent to, per ``LLM_TOOLS_API``."""
+    configured = _env("LLM_TOOLS_API").lower()
+    if configured in {"", "chat", "chat_completions", "completions"}:
+        return "chat"
+    if configured == "responses":
+        return "responses"
+    raise LLMError("LLM_TOOLS_API must be 'chat' or 'responses'.")
+
+
+def _without_reasoning_items(messages: list[dict]) -> list[dict]:
+    """``messages`` with any carried Responses reasoning removed.
+
+    Returns the list itself when nothing carries any — the overwhelmingly
+    common case — so a chat request is byte-for-byte what it always was and
+    its recorded hash still matches.
+    """
+
+    def carries(message: object) -> bool:
+        calls = message.get("tool_calls") if isinstance(message, dict) else None
+        return isinstance(calls, list) and any(
+            isinstance(call, dict) and RESPONSES_REASONING_KEY in call for call in calls
+        )
+
+    if not any(carries(message) for message in messages):
+        return messages
+    cleaned: list[dict] = []
+    for message in messages:
+        if carries(message):
+            message = {
+                **message,
+                "tool_calls": [
+                    {key: value for key, value in call.items() if key != RESPONSES_REASONING_KEY}
+                    if isinstance(call, dict) else call
+                    for call in message["tool_calls"]
+                ],
+            }
+        cleaned.append(message)
+    return cleaned
+
+
+def _message_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in {"text", "input_text", "output_text"}
+        )
+    return ""
+
+
+def _responses_user_content(content: object) -> list[dict]:
+    if not isinstance(content, list):
+        return [{"type": "input_text", "text": _message_text(content)}]
+    parts: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        kind = part.get("type")
+        if kind == "text":
+            parts.append({"type": "input_text", "text": str(part.get("text") or "")})
+        elif kind == "image_url":
+            image = part.get("image_url")
+            url = image.get("url") if isinstance(image, dict) else image
+            converted = {"type": "input_image", "image_url": str(url or "")}
+            if isinstance(image, dict) and image.get("detail"):
+                converted["detail"] = image["detail"]
+            parts.append(converted)
+        else:
+            parts.append(part)
+    return parts
+
+
+def _responses_input(messages: list[dict]) -> list[dict]:
+    """Chat ``messages`` as Responses ``input`` items, in the same order."""
+    items: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = message.get("content")
+        if role == "tool":
+            items.append({
+                "type": "function_call_output",
+                "call_id": str(message.get("tool_call_id") or ""),
+                "output": content if isinstance(content, str) else json.dumps(content, default=str),
+            })
+        elif role == "assistant":
+            calls = [call for call in (message.get("tool_calls") or []) if isinstance(call, dict)]
+            # Reasoning first, as the model produced it: it precedes the calls
+            # it led to, and a call sent back without it is read as a call the
+            # model never reasoned towards.
+            for call in calls:
+                for item in call.get(RESPONSES_REASONING_KEY) or []:
+                    if isinstance(item, dict):
+                        items.append(item)
+            text = _message_text(content)
+            if text:
+                items.append({"role": "assistant", "content": [{"type": "output_text", "text": text}]})
+            for call in calls:
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                arguments = function.get("arguments")
+                items.append({
+                    "type": "function_call",
+                    "call_id": str(call.get("id") or ""),
+                    "name": str(function.get("name") or ""),
+                    "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments or {}),
+                })
+        elif role in {"system", "developer"}:
+            items.append({"role": role, "content": _message_text(content)})
+        else:
+            items.append({"role": "user", "content": _responses_user_content(content)})
+    return items
+
+
+def _responses_tools(tools: list[dict]) -> list[dict]:
+    converted: list[dict] = []
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if not (isinstance(tool, dict) and tool.get("type") == "function" and isinstance(function, dict)):
+            converted.append(tool)
+            continue
+        item = {
+            "type": "function",
+            "name": function.get("name"),
+            "parameters": function.get("parameters") or {"type": "object", "properties": {}},
+            # Responses treats a function as strict unless told otherwise, and
+            # strict refuses any schema with an optional property. Chat never
+            # did, and no schema here was written for it.
+            "strict": bool(function.get("strict", False)),
+        }
+        if function.get("description"):
+            item["description"] = function["description"]
+        converted.append(item)
+    return converted
+
+
+def _responses_tool_choice(choice: object) -> object:
+    if isinstance(choice, dict):
+        function = choice.get("function")
+        if isinstance(function, dict) and function.get("name"):
+            return {"type": "function", "name": function["name"]}
+    return choice
+
+
+def _responses_reasoning(body: dict) -> dict | None:
+    """The chat body's reasoning request as a Responses effort level.
+
+    Responses takes no token budget, only an effort, so a budget is read as the
+    smallest named level that covers it. ``include_reasoning`` alone asks for
+    nothing: the model deliberates at its own default.
+    """
+    reasoning = body.get("reasoning")
+    if not isinstance(reasoning, dict):
+        return None
+    if reasoning.get("enabled") is False:
+        return {"effort": "none"}
+    budget = reasoning.get("max_tokens")
+    if isinstance(budget, int) and budget > 0:
+        for name in ("low", "medium"):
+            if budget <= REASONING_EFFORT_TOKENS[name]:
+                return {"effort": name}
+        return {"effort": "high"}
+    return None
+
+
+def _responses_request(body: dict) -> dict:
+    """A chat/completions request body rewritten for ``/responses``."""
+    request: dict = {
+        "model": body.get("model"),
+        "input": _responses_input(body.get("messages") or []),
+        # Stateless: nothing is kept server-side between turns, so the
+        # reasoning a turn needs is carried back in the request itself.
+        "store": False,
+        "include": ["reasoning.encrypted_content"],
+    }
+    if body.get("max_tokens"):
+        request["max_output_tokens"] = body["max_tokens"]
+    if "temperature" in body:
+        request["temperature"] = body["temperature"]
+    if body.get("tools"):
+        request["tools"] = _responses_tools(body["tools"])
+        request["tool_choice"] = _responses_tool_choice(body.get("tool_choice") or "auto")
+    effort = _responses_reasoning(body)
+    if effort:
+        request["reasoning"] = effort
+    return request
+
+
+def _rejects_encrypted_reasoning(detail: str) -> bool:
+    """True when a 400 refuses the request for asking for encrypted reasoning.
+
+    A model that does not reason has no reasoning to encrypt, and some
+    providers refuse the ask rather than ignore it. The request is then resent
+    without it: the only thing lost is a trace there was never going to be.
+    """
+    text = detail.lower()
+    return "encrypted" in text or ("include" in text and "reasoning" in text)
+
+
+def _chat_usage(usage: object) -> dict | None:
+    if not isinstance(usage, dict):
+        return None
+    renames = {
+        "input_tokens": "prompt_tokens",
+        "output_tokens": "completion_tokens",
+        "input_tokens_details": "prompt_tokens_details",
+        "output_tokens_details": "completion_tokens_details",
+    }
+    return {renames.get(key, key): value for key, value in usage.items()}
+
+
+def _chat_payload_from_responses(payload: object) -> object:
+    """A ``/responses`` reply in the shape a chat/completions reply has.
+
+    Everything downstream — in-band error detection, the debug record, replay,
+    usage accounting, the caller — reads that shape and nothing else. A failed
+    response becomes a top-level ``error``; a successful one, whose ``error``
+    is ``null``, must not, or the in-band check would read it as a failure.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    if payload.get("error"):
+        return {"error": payload["error"]}
+    if payload.get("status") == "failed":
+        return {"error": {"message": "The provider reported the response as failed."}}
+    text: list[str] = []
+    thoughts: list[str] = []
+    calls: list[dict] = []
+    reasoning_items: list[dict] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        if kind == "message":
+            for part in item.get("content") or []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in {"output_text", "text"}:
+                    text.append(str(part.get("text") or ""))
+                elif part.get("type") == "refusal":
+                    text.append(str(part.get("refusal") or ""))
+        elif kind == "reasoning":
+            reasoning_items.append(item)
+            for part in [*(item.get("summary") or []), *(item.get("content") or [])]:
+                if isinstance(part, dict) and part.get("text"):
+                    thoughts.append(str(part["text"]))
+        elif kind == "function_call":
+            calls.append({
+                "id": str(item.get("call_id") or item.get("id") or ""),
+                "type": "function",
+                "function": {
+                    "name": str(item.get("name") or ""),
+                    "arguments": item.get("arguments") or "{}",
+                },
+            })
+    if calls and reasoning_items:
+        calls[0][RESPONSES_REASONING_KEY] = reasoning_items
+    answer = "".join(text)
+    message: dict = {"role": "assistant", "content": answer if answer or not calls else None}
+    if calls:
+        message["tool_calls"] = calls
+    if thoughts:
+        message["reasoning"] = "\n".join(thoughts)
+    incomplete = None
+    if payload.get("status") == "incomplete":
+        details = payload.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, dict) else None
+        incomplete = str(reason or "incomplete")
+    if incomplete == "max_output_tokens":
+        finish_reason = "length"
+    elif incomplete:
+        finish_reason = incomplete
+    elif calls:
+        finish_reason = "tool_calls"
+    else:
+        finish_reason = "stop"
+    converted: dict = {
+        "id": payload.get("id"),
+        "model": payload.get("model"),
+        "choices": [{"index": 0, "finish_reason": finish_reason, "message": message}],
+    }
+    usage = _chat_usage(payload.get("usage"))
+    if usage:
+        converted["usage"] = usage
+    return converted
+
+
 def image_part(content: bytes, mime: str) -> dict:
     """Build an OpenAI-compatible inline image content part."""
     if not str(mime or "").startswith("image/"):
@@ -724,9 +1042,10 @@ def chat(
 
     if temperature is None:
         temperature = configured_temperature()
+    use_responses = bool(tools) and _tools_api() == "responses"
     body: dict = {
         "model": settings.model,
-        "messages": messages,
+        "messages": messages if use_responses else _without_reasoning_items(messages),
         "max_tokens": _max_output_tokens(),
         **_reasoning_parameters(reasoning),
     }
@@ -776,23 +1095,42 @@ def chat(
             )
         raise error
 
-    request_bytes = json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(
-        f"{settings.base_url}/chat/completions",
-        data=request_bytes,
-        headers={
-            "Authorization": f"Bearer {settings.api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-            **settings.extra_headers,
-        },
-        method="POST",
-    )
+    endpoint = f"{settings.base_url}/{'responses' if use_responses else 'chat/completions'}"
+    wire_body = _responses_request(body) if use_responses else body
+
+    def build_request(payload: dict) -> tuple[bytes, urllib.request.Request]:
+        data = json.dumps(payload).encode("utf-8")
+        return data, urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
+                **settings.extra_headers,
+            },
+            method="POST",
+        )
+
+    def record_wire(**fields: object) -> None:
+        if not call_id:
+            return
+
+        def update(record: dict) -> None:
+            record["endpoint"] = endpoint
+            wire = record.setdefault("wire", {"api": "responses"})
+            wire.update({key: debug_store.sanitize(value) for key, value in fields.items()})
+
+        debug_store.update_call(trace_workspace_id, call_id, update)
+
+    request_bytes, request = build_request(wire_body)
     if call_id:
         def actual_request_metrics(record: dict) -> None:
             record["request_size_bytes"] = len(request_bytes)
             record["request_sha256"] = hashlib.sha256(request_bytes).hexdigest()
         debug_store.update_call(trace_workspace_id, call_id, actual_request_metrics)
+    if use_responses:
+        record_wire(request=wire_body)
 
     for attempt in range(MAX_REQUEST_ATTEMPTS):
         cooldown_wait = _wait_for_rate_limit_cooldown()
@@ -830,7 +1168,7 @@ def chat(
                     attempt_record["parse_ms"] = round((parsed_at - body_at) * 1000, 3)
         except urllib.error.HTTPError as error:
             raw_error, error_payload, detail = _read_http_error(error)
-            hint = _http_error_hint(settings, error)
+            hint = _http_error_hint(settings, error, detail, endpoint=endpoint)
             if hint:
                 detail = f"{detail} {hint}"
             attempt_record.update({
@@ -841,6 +1179,21 @@ def chat(
                 "response_size_bytes": len(raw_error),
                 "response_sha256": hashlib.sha256(raw_error).hexdigest(),
             })
+            if (
+                use_responses
+                and error.code == 400
+                and "include" in wire_body
+                and _rejects_encrypted_reasoning(detail)
+                and attempt + 1 < MAX_REQUEST_ATTEMPTS
+            ):
+                wire_body = {key: value for key, value in wire_body.items() if key != "include"}
+                request_bytes, request = build_request(wire_body)
+                attempt_record["resent_without"] = "include: reasoning.encrypted_content"
+                _finish_attempt(attempt_record, attempt_started)
+                if call_id:
+                    debug_store.add_attempt(trace_workspace_id, call_id, attempt_record)
+                record_wire(request=wire_body)
+                continue
             if error.code == 429:
                 delay = _pause_all_llm_requests(
                     error.headers.get("Retry-After") if error.headers else None
@@ -921,6 +1274,9 @@ def chat(
                                         started_monotonic=call_started)
             raise terminal from error
 
+        if use_responses:
+            record_wire(response=payload)
+            payload = _chat_payload_from_responses(payload)
         provider_error = _response_error(payload)
         if provider_error is not None:
             error_code, detail = provider_error
@@ -1278,8 +1634,44 @@ def _error_detail(error: urllib.error.HTTPError) -> str:
     return error.reason or "unknown error"
 
 
-def _http_error_hint(settings: LLMSettings, error: urllib.error.HTTPError) -> str:
-    if settings.backend == "lmstudio" and error.code in {400, 404, 503}:
+#: Phrases an OpenAI-compatible server uses when the model it was asked for is
+#: the problem. The LM Studio hint below is offered only when one is present:
+#: offered on every 400, it once told an auditor a model "was not accepted"
+#: when the model had answered and refused one parameter, and on a 404 when the
+#: route, not the model, was missing.
+MODEL_REJECTION_MARKERS = (
+    "model not found",
+    "not loaded",
+    "no models",
+    "does not exist",
+    "unknown model",
+    "invalid model",
+)
+
+
+def _names_model_problem(detail: str) -> bool:
+    text = detail.lower()
+    return "model" in text and any(marker in text for marker in MODEL_REJECTION_MARKERS)
+
+
+def _http_error_hint(
+    settings: LLMSettings,
+    error: urllib.error.HTTPError,
+    detail: str = "",
+    *,
+    endpoint: str = "",
+) -> str:
+    if endpoint.endswith("/responses") and error.code in {404, 405}:
+        return (
+            f"The endpoint {settings.base_url} does not serve /responses, where "
+            "LLM_TOOLS_API=responses sends requests that use tools. Use an "
+            "endpoint that serves it, or set LLM_TOOLS_API=chat."
+        )
+    if (
+        settings.backend == "lmstudio"
+        and error.code in {400, 404, 503}
+        and _names_model_problem(detail)
+    ):
         return (
             f"LM Studio is running at {settings.base_url}, but model "
             f"'{settings.model or '<blank>'}' was not accepted. Choose the "

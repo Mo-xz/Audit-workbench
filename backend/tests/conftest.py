@@ -237,6 +237,11 @@ def isolated_workspaces(tmp_path, monkeypatch):
     # Likewise reasoning: a checkout running end-to-end trials with it switched
     # off must not turn the default the suite pins into whatever is in .env.
     monkeypatch.delenv("LLM_REASONING", raising=False)
+    # And the tool-call API: every transport test asserts a chat/completions
+    # body, which a .env routing tool calls to /responses would not send.
+    monkeypatch.delenv("LLM_TOOLS_API", raising=False)
+    # And the output ceiling, which the transport tests pin at the default.
+    monkeypatch.delenv("LLM_MAX_OUTPUT_TOKENS", raising=False)
     # And telemetry: `full` in a developer's .env snapshots state on every
     # artifact write, which slowed agent runs past `wait_run`'s deadline and
     # failed 28 tests that pass at the default level.

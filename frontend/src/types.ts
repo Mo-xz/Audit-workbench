@@ -1221,6 +1221,12 @@ export interface PlanningRecord {
    * they were derived. Absent on payloads written before the field existed.
    */
   apm_sha1?: string
+  /**
+   * Whether the Data analytics performed section is the analysis memo's own
+   * text and exhibits (`current`), taken from a memo rewritten since
+   * (`stale`), from one since deleted (`orphaned`), or written prose (`none`).
+   */
+  apm_analytics?: { state: 'none' | 'current' | 'stale' | 'orphaned'; memo_generated_at: string | null }
   /** The shape of the process: steps, their document roles and populations. */
   cycle: CycleShape | null
   created_by: 'agent' | 'user'

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from . import analysis_results, analytics, debug_store, document_context as document_context_module, document_search, documents, explore, llm, model_context, sandbox, tooling
+from . import analysis_results, analytics, apm_analytics, debug_store, document_context as document_context_module, document_search, documents, explore, llm, model_context, sandbox, tooling
 from .workspaces import Workspace, WorkspaceError
 
 MAX_STEPS = 8
@@ -824,7 +824,8 @@ class _Session:
                     "updated": self.workspace.planning.get("updated"),
                     "created_by": self.workspace.planning.get("created_by"),
                     "excerpt": self._text(
-                        self.workspace.planning.get("apm_markdown"), 8_000
+                        apm_analytics.for_model(str(self.workspace.planning.get("apm_markdown") or "")),
+                        8_000,
                     ),
                 },
             }, None

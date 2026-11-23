@@ -110,3 +110,38 @@ describe('UiMarkdownDocument', () => {
     expect(wrapper.find('#authorisation-against-stated-limits .doc-n').text()).toBe('3.1')
   })
 })
+
+/** The memorandum's analytics section, as `apm_analytics.transclusion` writes it. */
+const APM = [
+  '# Audit Planning Memorandum',
+  '## Data analytics performed',
+  '<!-- analytics-from-memo:0123456789ab -->',
+  'Three invoices were paid above their order.',
+  '### Where the value is',
+  'Facilities holds 45% of the value.',
+  '```embed\nanalysis: A-1\nas: chart\ncaption: Facilities holds 45%\n```',
+  '### What the analysis found',
+  '#### 1. Invoices above the order',
+  '```embed\nanalysis: A-2\nas: exception_table\n```',
+  '<!-- /analytics-from-memo -->',
+  '## Key risks and planned response',
+  'Test them.',
+].join('\n\n')
+
+describe('UiMarkdownDocument with analysis exhibits', () => {
+  it('draws each embed as a numbered exhibit and never shows the markers', () => {
+    const wrapper = mount(UiMarkdownDocument, {
+      props: { markdown: APM, exhibits: { workspaceId: 'ws_1', analyses: [] } },
+      global: { stubs: { ExhibitFigure: { props: ['embed', 'number'], template: '<figure class="stub">{{ number }}:{{ embed.analysis }}</figure>' } } },
+    })
+    expect(wrapper.findAll('figure.stub').map(item => item.text())).toEqual(['1:A-1', '2:A-2'])
+    expect(wrapper.text()).not.toContain('analytics-from-memo')
+    expect(wrapper.text()).not.toContain('analysis: A-1')
+  })
+
+  it('shows an embed as the citation it stands for where nothing can draw it', () => {
+    const wrapper = mount(UiMarkdownDocument, { props: { markdown: APM } })
+    expect(wrapper.text()).toContain('See analysis A-1 — Facilities holds 45%.')
+    expect(wrapper.find('pre').exists()).toBe(false)
+  })
+})

@@ -43,11 +43,13 @@ was missing; clearly label assumptions.
 
 An analysis summary may be supplied: the memorandum written from this
 engagement's own exploratory data analysis. Where it is present, it is evidence
-about this population rather than background, so let it carry the analytics
-section and inform the risk assessment — a risk the data has already evidenced
-or contradicted should be described as such, not restated as an open question.
-Do not repeat the summary wholesale; take from it what bears on planning. Where
-no summary is supplied, say plainly that no data analysis has been performed
+about this population rather than background, so let it inform the risk
+assessment — a risk the data has already evidenced or contradicted should be
+described as such, not restated as an open question. The Data analytics
+performed section is then not yours to write: the summary's own sections and
+exhibits are placed under that heading when the memorandum is saved, so write
+one sentence there and nothing more. Where no summary is supplied, write that
+section yourself and say plainly that no data analysis has been performed
 rather than implying coverage that does not exist.
 
 A population summary may be supplied: for each imported table, its row count,

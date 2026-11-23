@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from ...workspace_transactions import ParentConflict, mutate, parent_hashes
-from ... import cycle_vouching, markdown_sections, planning_delta, planning_revision
+from ... import apm_analytics, cycle_vouching, markdown_sections, planning_delta, planning_revision
 from ...workspaces import Workspace, WorkspaceError, slugify, validate_cycle
 from ..capabilities import _shared as audit_hashes
 from ..artifact_index import canonical_id
@@ -93,6 +93,17 @@ def _result(
     )
 
 
+def _with_analytics(workspace: Workspace, markdown: str) -> str:
+    """The memorandum with its data-analytics section taken from the memo.
+
+    Spliced at commit, from the memo as it stands then, so the section the
+    memorandum carries is the memo's own text and exhibits rather than a
+    model's paraphrase of it. With no memo the writer's own section stands.
+    """
+    memo = str((workspace.analysis_summary or {}).get("markdown") or "")
+    return apm_analytics.splice(markdown, memo)
+
+
 def execute_apm(request: ExecutorRequest, raw_target: object) -> ExecutorResult:
     """Commit one accepted APM under the declared parent-hash guard."""
     target, markdown = _validated_input(request, raw_target)
@@ -107,7 +118,7 @@ def execute_apm(request: ExecutorRequest, raw_target: object) -> ExecutorResult:
             raise ApmEditPreserved(AUDITOR_EDIT_PRESERVED)
         fresh.update_planning(
             {
-                "apm_markdown": markdown,
+                "apm_markdown": _with_analytics(fresh, markdown),
                 "created_by": "agent",
                 "agent_run_id": target.run_id,
                 "workflow_basis_sha1": audit_hashes.planning_basis_sha1(
@@ -158,7 +169,7 @@ def reconcile_apm(
         )
     existing = str(current.planning.get("apm_markdown") or "").strip()
     if (
-        existing == markdown
+        existing == _with_analytics(current, markdown).strip()
         and current.planning.get("created_by") == "agent"
         and current.planning.get("agent_run_id") == target.run_id
         and current.planning.get("workflow_basis_sha1")

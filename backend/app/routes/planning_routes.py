@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, File, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from .. import (
+    apm_analytics,
     doc_tests,
     findings,
     planning_cycle_graph,
@@ -53,7 +54,20 @@ def _planning(ws) -> dict:
     only if it is given both strings — the hash is computed here rather than in
     the browser because ``planning_apm_sha1`` decides what the identity covers.
     """
-    return {**ws.planning, "apm_sha1": workspaces.planning_apm_sha1(ws)}
+    memo = dict(ws.analysis_summary or {})
+    return {
+        **ws.planning,
+        "apm_sha1": workspaces.planning_apm_sha1(ws),
+        # Whether the data-analytics section is the analysis memo's, and still
+        # the current memo's: ``none`` (written prose), ``current``, ``stale``
+        # or ``orphaned`` (the memo it came from is gone).
+        "apm_analytics": {
+            "state": apm_analytics.state(
+                str(ws.planning.get("apm_markdown") or ""), str(memo.get("markdown") or "")
+            ),
+            "memo_generated_at": memo.get("generated_at"),
+        },
+    }
 
 
 @router.get("/planning")
@@ -115,6 +129,31 @@ def export_apm(workspace_id: str):
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/planning/apm/analytics")
+def refresh_apm_analytics(workspace_id: str):
+    """Take the memorandum's data-analytics section from the current memo.
+
+    Asked for, never done behind the auditor: the section may have been edited
+    by hand. Ownership is left alone — taking the memo's text is not authoring
+    the memorandum — and every other line stays as it was.
+    """
+    ws = _ws(workspace_id)
+    memo = str((ws.analysis_summary or {}).get("markdown") or "")
+    if not memo.strip():
+        raise workspaces.WorkspaceError("There is no analysis memo to take the section from.")
+    current = str(ws.planning.get("apm_markdown") or "")
+    if not current.strip():
+        raise workspaces.WorkspaceError("There is no memorandum yet.")
+    refreshed = apm_analytics.splice(current, memo)
+    if refreshed == current and apm_analytics.state(current, memo) != "current":
+        raise workspaces.WorkspaceError(
+            f"The memorandum has no '{apm_analytics.SECTION}' section to take the memo into."
+        )
+    if refreshed != current:
+        ws.update_planning({"apm_markdown": refreshed}, agent=True)
+    return _planning(ws)
 
 
 @router.post("/planning/apm/import")

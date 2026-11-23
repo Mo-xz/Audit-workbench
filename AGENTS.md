@@ -162,6 +162,10 @@ backend/app/
 |                                flattening, shared by the worker that writes
 |                                the memo and the context adapter that hands it
 |                                to planning (neither may import the other)
+|- apm_analytics.py            - the memorandum's Data analytics performed
+|                                section taken from the memo: splice, state
+|                                against the current memo, and the digest a
+|                                model reads in its place
 |- assistant.py                - read-only NL assistant tool loop
 |- assistant_chats.py          - durable workspace-scoped chats, artifacts,
 |                                ask/act routing, chat-run projections
@@ -1126,11 +1130,28 @@ WorkflowRunner             domain-neutral capability graph scheduler; composed
   are argued from it; the APM worker's existing validator enforces every
   template heading, so the section is answered for rather than optional.
   Embed directives are flattened to inline citations
-  (`analysis_memo.flatten_embeds`) before planning sees them — planning has no
-  renderer for a fence, and a raw directive copied into an APM prints as stray
-  text. With no memo the source supplies nothing and the section says so; the
-  edge is deliberately *not* a graph dependency, so an APM-only request stays
-  independent of data analysis.
+  (`analysis_memo.flatten_embeds`) before planning sees them. With no memo the
+  source supplies nothing and the section says so; the edge is deliberately
+  *not* a graph dependency, so an APM-only request stays independent of data
+  analysis.
+  **The section itself is the memo's, not a paraphrase.** Where a memo exists,
+  the APM executor splices it in at commit (`app/apm_analytics.py`): the memo's
+  lead, what was received, the profile sections, the findings, the reliance,
+  the implications and what the data cannot answer, one heading level down,
+  exhibits and all, between `<!-- analytics-from-memo:<sha> -->` markers — the
+  writer is told to leave one sentence there. Three readers, three forms: the
+  APM page draws the exhibits (`UiMarkdownDocument`'s `exhibits` prop, through
+  `analysis/ExhibitMarkdown.vue`), the Word export carries them (the
+  `exhibit` hook of `markdownWord`), and every model that reads the APM — the
+  planning presets, the assistant, the report — reads `apm_analytics.for_model`,
+  in which the block is a capped digest, because the memo pasted whole would
+  push the memorandum's own risks out of a planning budget (`current_apm` is
+  48k in `planning.delta` and `planning.apm` for the same reason). The page
+  reports the section as `current`, `stale` (the memo was rewritten since),
+  `orphaned` or `none` (written prose), and takes the memo's section only when
+  asked — `POST /planning/apm/analytics`, ownership left alone — because the
+  section may have been edited by hand. Both renderers hide HTML comments and
+  draw an embed they cannot resolve as the citation it stands for.
 - The agent loop is the one tool loop under `agent/`. It is bounded by
   `max_loop_turns`, `max_child_runs`, `max_tool_calls`, `max_auditor_questions`
   and the run deadline, calls the provider only through `ModelGateway`, and

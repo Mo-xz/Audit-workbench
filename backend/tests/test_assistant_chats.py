@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app import assistant_chats, llm
+from app import assistant_chats, llm, workspaces
 from app.agent import routing, store
 
 
@@ -969,3 +969,37 @@ def test_every_goal_template_accepts_an_instruction_as_run_context(workspace_wit
     })
 
     assert seen["run_context"] == {"instruction": "Focus on settlement."}
+
+
+def test_apm_regenerate_redrafts_a_current_memorandum_and_nothing_upstream(workspace_with_data, monkeypatch):
+    """The APM page's Regenerate sent a command that a command run creates as
+    reuse_existing, so it found the current memorandum, scheduled nothing and
+    reported success. As a forced requested outcome it redrafts that one stage."""
+    from app.agent.routing import resolve_route
+
+    ws = workspace_with_data
+    ws.update_planning({"context": {"objective": "Assess procurement"}})
+    ws.update_planning({"apm_markdown": "# Audit Planning Memorandum\n\n## Engagement\n\nAcme."})
+    configured(monkeypatch)
+    launched: dict = {}
+
+    def fake_start(workspace, mode, command, parent_run_id=None, context=None):
+        run = store.new_command_run(workspace, mode, command, parent_run_id=parent_run_id, context=context)
+        launched["run"] = run
+        return run
+
+    monkeypatch.setattr(assistant_chats.runner, "start_command_run", fake_start)
+    chat = assistant_chats.create_chat(ws)
+    result = assistant_chats.send_message(ws, chat["id"], {
+        "content": "Regenerate the audit planning memorandum.",
+        "intent": "act", "mode": "auto", "request_id": "request-apm-regenerate",
+        "source": "tab_button", "requested_outcomes": ["planning.apm_ready"],
+        "run_context": {"generation_mode": "force", "requested_only": True},
+    })
+    assert result["outcome"]["kind"] != "error"
+
+    run = launched["run"]
+    assert resolve_route(workspaces.load_workspace(ws.id), run) == "workflow"
+    stages = store.load_run(ws, run["id"])["workflow"]["stages"]
+    assert [stage["capability"] for stage in stages] == ["planning.apm_ready"]
+    assert stages[0]["scheduled_because"] == "forced"

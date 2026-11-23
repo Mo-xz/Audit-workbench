@@ -28,6 +28,7 @@ from ... import (
     model_context,
     templates_store,
 )
+from ... import apm_analytics
 from ...analysis_memo import flatten_embeds
 from ...text import relevance_tokens
 from ...workspaces import Workspace, WorkspaceError
@@ -284,6 +285,18 @@ def supplied_source_provenance(
                 },
             )
     return tuple(entries[key] for key in sorted(entries))
+
+
+def _apm_for_model(workspace: Workspace) -> str:
+    """The memorandum as every planning turn reads it.
+
+    Its data-analytics section reproduces the analysis memo, exhibits and all,
+    for the page. A model reads that block as a digest instead: the memo is a
+    source of its own where a turn needs it, and pasted whole it would push the
+    memorandum's own risks out of a planning budget.
+    """
+    titles = {str(item.get("id") or ""): str(item.get("title") or "") for item in workspace.analyses}
+    return apm_analytics.for_model(str(workspace.planning.get("apm_markdown") or ""), titles)
 
 
 def apm_analysis_summary_candidates(
@@ -608,7 +621,7 @@ def apm_document_methodology_scope(
         },
     }
     template = templates_store.get_template(workspace, "apm")["markdown"]
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     return ContextScope(
         candidates={
             APM_PLANNING_SOURCE_ID: (
@@ -757,7 +770,7 @@ def delta_review_scope(
             for key in ("created_by", "agent_run_id", "updated")
         },
     }
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     return ContextScope(
         candidates={
             DELTA_DOCUMENT_SOURCE_ID: delta_document_candidates(workspace, named),
@@ -987,7 +1000,7 @@ def rcm_scope(
     attributes_template = templates_store.get_template(
         workspace, "rcm_attributes"
     )["markdown"]
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     return ContextScope(
         candidates={
             RCM_PLANNING_SOURCE_ID: (
@@ -1116,7 +1129,7 @@ def rcm_revision_scope(
 ) -> ContextScope:
     """What a matrix revision decides over, and what it decides against."""
 
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     attributes_template = templates_store.get_template(
         workspace, "rcm_attributes"
     )["markdown"]
@@ -1160,7 +1173,7 @@ def apm_revision_scope(
 ) -> ContextScope:
     """What a memorandum revision reads: the memorandum, and what was asked."""
 
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     return ContextScope(
         candidates={
             RCM_CURRENT_APM_SOURCE_ID: (
@@ -1205,7 +1218,7 @@ def cycle_scope(
             for key in ("created_by", "agent_run_id", "updated")
         },
     }
-    current_apm = str(workspace.planning.get("apm_markdown") or "")
+    current_apm = _apm_for_model(workspace)
     return ContextScope(
         candidates={
             INSTRUCTION_SOURCE_ID: instruction_candidates(instruction),

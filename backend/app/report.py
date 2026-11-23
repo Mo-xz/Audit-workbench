@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from . import (
+    apm_analytics,
     column_coverage,
     data_tests,
     debug_store,
@@ -214,7 +215,7 @@ def _apm_context(markdown: str) -> dict:
 
 def _planning_context(workspace: Workspace) -> dict:
     structured = dict(workspace.planning.get("context") or {})
-    fallback = _apm_context(str(workspace.planning.get("apm_markdown") or ""))
+    fallback = _apm_context(apm_analytics.for_model(str(workspace.planning.get("apm_markdown") or "")))
     return {
         key: structured.get(key) or fallback.get(key)
         for key in _PLANNING_FIELDS
@@ -231,7 +232,7 @@ def _apm_section(workspace: Workspace, *needles: str) -> str:
     structured planning context either way.
     """
     bodies = templates_store.section_bodies(
-        str(workspace.planning.get("apm_markdown") or "")
+        apm_analytics.for_model(str(workspace.planning.get("apm_markdown") or ""))
     )
     for needle in needles:
         for key, body in bodies.items():

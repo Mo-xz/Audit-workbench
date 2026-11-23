@@ -17,7 +17,7 @@ export type Segment = { kind: 'prose'; text: string } | { kind: 'embed'; embed: 
 
 const EMBED_BLOCK = /^```embed[ \t]*\n([\s\S]*?)^```[ \t]*$/gm
 
-function parseEmbed(body: string): Embed | null {
+export function parseEmbed(body: string): Embed | null {
   const fields: Record<string, string> = {}
   for (const line of body.split('\n')) {
     const match = /^([a-z_]+)\s*:\s*(.*)$/.exec(line.trim())

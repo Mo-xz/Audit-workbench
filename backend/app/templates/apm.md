@@ -20,7 +20,7 @@
 
 ## Data analytics performed
 
-<!-- section: What the exploratory data analysis covered and what it found: the populations received, the exceptions and anomalies noted, and the data quality limits that bound how far the analytics can be relied on. Draw only on the supplied analysis summary; where none has been performed, say so plainly rather than implying coverage. -->
+<!-- section: Where an analysis summary exists, this section is the summary's own text and exhibits, placed here when the memorandum is saved: write one sentence. Where none has been performed, say so plainly rather than implying coverage. -->
 
 ## Fraud risk and management override
 

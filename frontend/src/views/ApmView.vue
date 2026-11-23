@@ -11,9 +11,13 @@ import { useAgentRun } from '../composables/useAgentRun'
 import { useAssistantChat } from '../composables/useAssistantChat'
 import { useWorkspaceNav } from '../composables/useWorkspaceNavigation'
 import type {
-  ArtifactProvenance, AuditDocument, MarkdownTemplate, PlanningPayload,
-  WorkspaceSummary,
+  AnalysisDetail, AnalysisExceptions, ArtifactProvenance, AuditDocument, FramePayload,
+  MarkdownTemplate, PlanningPayload, SavedAnalysis, WorkspaceSummary,
 } from '../types'
+import { classificationTone, foundSummary } from '../components/analysis/analysisStatus'
+import { svgImage } from '../components/analysis/exhibitImage'
+import type { ExhibitWord } from '../components/analysis/memoDocx'
+import { memoSegments, testedColumns } from '../components/analysis/memoExhibits'
 import MarkdownEditor from '../components/MarkdownEditor.vue'
 import UiDocumentPage from '../components/ui/UiDocumentPage.vue'
 import UiEmptyState from '../components/ui/UiEmptyState.vue'
@@ -48,6 +52,8 @@ const assistantChat = useAssistantChat(props.workspace.id)
 const data = ref<PlanningPayload | null>(null)
 const provenance = ref<ArtifactProvenance | null>(null)
 const documents = ref<AuditDocument[]>([])
+const analyses = ref<SavedAnalysis[]>([])
+const takingMemo = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
 const importing = ref(false)
@@ -150,7 +156,34 @@ async function reload() {
   void api.get<{ items: AuditDocument[] }>(`/api/workspaces/${props.workspace.id}/documents`)
     .then(value => { documents.value = value.items ?? [] })
     .catch(() => { documents.value = [] })
+  // What the analytics section's exhibits are drawn from. A failure leaves
+  // each exhibit saying it could not load; the memorandum still reads.
+  void api.get<{ analyses: SavedAnalysis[] }>(`/api/workspaces/${props.workspace.id}/analyses`)
+    .then(value => { analyses.value = value.analyses ?? [] })
+    .catch(() => { analyses.value = [] })
 }
+
+/**
+ * The Data analytics performed section and the memo it is taken from.
+ *
+ * Taken only when asked: the section may have been edited by hand, and a
+ * memo rewritten since is the auditor's to bring in. A memorandum still
+ * carrying written prose there can take the memo's section the same way,
+ * without redrafting the rest.
+ */
+const analytics = computed(() => planning.value?.apm_analytics ?? null)
+const memoWritten = computed(() => Boolean(analytics.value?.memo_generated_at))
+async function takeMemo() {
+  if (!data.value) return
+  takingMemo.value = true
+  try {
+    data.value.planning = await api.post(`/api/workspaces/${props.workspace.id}/planning/apm/analytics`)
+    emit('changed')
+    toast.add({ severity: 'success', summary: 'Analytics section taken from the memo', life: 1800 })
+  } catch (error) { fail('Could not take the section from the memo', error) }
+  finally { takingMemo.value = false }
+}
+const exhibitSource = computed(() => ({ workspaceId: props.workspace.id, analyses: analyses.value }))
 onMounted(() => void reload().catch(error => fail('Could not load the memorandum', error)))
 const unsubscribe = agent.onWorkspaceInvalidated(() => {
   void reload().catch(error => fail('Could not refresh the memorandum', error))
@@ -174,16 +207,38 @@ async function doneEditing() {
   await save()
 }
 
+/**
+ * With nothing written, the whole planning chain drafts from the engagement
+ * material (`plan`). With a memorandum on the page, Regenerate redrafts the
+ * memorandum alone: it names the outcome and forces it, as the report's
+ * Redraft does. The `generate_apm` command cannot — a command run is created
+ * reusing what exists, so it saw the current memorandum and stopped — and
+ * `requested_only` keeps the force from redoing the document analyses
+ * upstream of it.
+ */
 async function generate() {
+  const regenerate = hasContent.value
   try {
     await assistantChat.createChat()
-    await assistantChat.send(
-      'Update the planning context and APM, then create or reconcile the RCM and the Document and Data Tests that cover it. Do not create a separate audit program.',
-      'act', agent.launchMode.value,
-      { command: 'plan_engagement', source: 'tab_button' },
-    )
+    if (regenerate) {
+      await assistantChat.send(
+        'Regenerate the audit planning memorandum.',
+        'act', agent.launchMode.value,
+        {
+          source: 'tab_button',
+          requestedOutcomes: ['planning.apm_ready'],
+          runContext: { generation_mode: 'force', requested_only: true },
+        },
+      )
+    } else {
+      await assistantChat.send(
+        'Update the planning context and APM, then create or reconcile the RCM and the Document and Data Tests that cover it. Do not create a separate audit program.',
+        'act', agent.launchMode.value,
+        { command: 'plan', source: 'tab_button' },
+      )
+    }
     agent.openPanel()
-  } catch (error) { fail('Could not start planning', error) }
+  } catch (error) { fail(regenerate ? 'Could not regenerate the memorandum' : 'Could not start planning', error) }
 }
 
 async function exportApm() {
@@ -288,14 +343,61 @@ function print() { printSheetIn(page.value) }
  * same cover, the same forms, the cycle's steps. The builder and `docx` load
  * only now, on the first export, never with the page.
  */
+/**
+ * Each exhibit the analytics section carries, as the Word builder needs it: a
+ * chart as the page drew it, otherwise the rows its table shows. Prepared
+ * before the build, which reads them in order and cannot wait.
+ */
+async function exhibitWords(): Promise<ExhibitWord[]> {
+  const byId = Object.fromEntries(analyses.value.map(item => [item.id, item]))
+  const base = `/api/workspaces/${props.workspace.id}/analyses`
+  const embeds = memoSegments(markdown.value).flatMap(segment => segment.kind === 'embed' ? [segment.embed] : [])
+  const out: ExhibitWord[] = []
+  for (const [index, embed] of embeds.entries()) {
+    const analysis = byId[embed.analysis]
+    const drawn = page.value?.querySelector<SVGSVGElement>(`[data-exhibit-number="${index + 1}"] svg[data-exhibit-chart]`)
+    const image = embed.as === 'chart' && drawn ? await svgImage(drawn) : null
+    let frame: FramePayload | null = null
+    let failed = false
+    if (!image && embed.as !== 'stats') {
+      try {
+        frame = embed.as === 'exception_table'
+          ? (await api.get<AnalysisExceptions>(`${base}/${embed.analysis}/exceptions`)).frame ?? null
+          : (await api.get<AnalysisDetail>(`${base}/${embed.analysis}`)).frame ?? null
+      } catch { failed = true }
+    }
+    out.push({
+      title: analysis?.title || embed.analysis,
+      found: analysis ? foundSummary(analysis) : '',
+      tone: analysis ? classificationTone(analysis.classification) : 'neutral',
+      id: embed.analysis,
+      as: embed.as,
+      caption: embed.caption,
+      failed,
+      frame,
+      tested: frame && embed.as === 'exception_table' ? testedColumns(analysis, frame.columns) : [],
+      image,
+      stats: (analysis?.last_result?.stats ?? []).map(stat => ({ label: String(stat.label), value: String(stat.value) })),
+    })
+  }
+  return out
+}
+
 async function exportWord() {
   exporting.value = true
   try {
-    const { markdownWord, saveWord } = await import('../components/ui/documentDocx')
+    const [{ markdownWord, saveWord }, { exhibitWordBlocks }] = await Promise.all([
+      import('../components/ui/documentDocx'),
+      import('../components/analysis/memoDocx'),
+    ])
+    const exhibits = await exhibitWords()
+    let next = 0
     const blob = await markdownWord({
       markdown: markdown.value,
       sheet: { cover: cover.value, runningHead: runningHead.value, footer: footer.value, endMark: 'End of memorandum' },
       options: renderOptions.value,
+      // Numbered in reading order, as the page numbers them.
+      exhibit: () => { next += 1; return exhibits[next - 1] ? exhibitWordBlocks(next, exhibits[next - 1]) : [] },
     })
     saveWord(blob, `${props.workspace.name} - Audit planning memorandum.docx`)
   } catch (error) { fail('Could not export the memorandum to Word', error) }
@@ -370,7 +472,9 @@ const exportItems = computed(() => [
           :runningHead="runningHead"
           :footer="footer"
           :document="renderOptions"
+          :exhibits="exhibitSource"
           endMark="End of memorandum"
+          @open-analysis="nav.push('analysis', { analysis: $event })"
         />
 
         <template #rail>
@@ -433,6 +537,33 @@ const exportItems = computed(() => [
                 </div>
               </template>
             </dl>
+          </section>
+
+          <section v-if="analytics && (analytics.state !== 'none' || memoWritten)" class="card">
+            <h3 class="aw-label">Data analytics</h3>
+            <p v-if="analytics.state === 'current'" class="line">
+              The section is the analysis memo's own text and exhibits{{ analytics.memo_generated_at ? `, as written ${stamp(analytics.memo_generated_at)}` : '' }}.
+            </p>
+            <p v-else-if="analytics.state === 'stale'" class="line">
+              The analysis memo has been rewritten since this section was taken from it.
+            </p>
+            <p v-else-if="analytics.state === 'orphaned'" class="line">
+              The memo this section was taken from is gone; the section stands as it was.
+            </p>
+            <p v-else class="line">
+              The section is written prose. The analysis memo's own sections and exhibits can replace it.
+            </p>
+            <Button
+              v-if="analytics.state === 'stale' || (analytics.state === 'none' && memoWritten)"
+              :label="analytics.state === 'stale' ? 'Update from the memo' : 'Take from the memo'"
+              icon="aw-icon aw-icon-refresh-cw"
+              size="small"
+              outlined
+              severity="secondary"
+              :loading="takingMemo"
+              :disabled="editing"
+              @click="takeMemo"
+            />
           </section>
 
           <section class="card">

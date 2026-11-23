@@ -153,4 +153,30 @@ describe('the Word export', () => {
     expect(text.indexOf('INVOICE_AMOUNT')).toBeLessThan(text.indexOf('INVOICE_ID'))
     expect(text).toContain('3 more columns in the app')
   })
+
+  it('carries the memorandum\'s exhibits, hides its markers, and cites what it cannot draw', async () => {
+    const { exhibitWordBlocks } = await import('../analysis/memoDocx')
+    const markdown = [
+      '# Audit Planning Memorandum',
+      '## Data analytics performed',
+      '<!-- analytics-from-memo:0123456789ab -->',
+      'Three invoices were paid above their order.',
+      '```embed\nanalysis: A-2\nas: exception_table\ncaption: 3 invoices above their order\n```',
+      '<!-- /analytics-from-memo -->',
+    ].join('\n\n')
+    const exhibit: ExhibitWord = {
+      title: 'Invoices above their order', found: '3 of 52 failed', tone: 'bad', id: 'A-2',
+      as: 'exception_table', caption: '3 invoices above their order', failed: false,
+      frame: { columns: ['INVOICE_ID'], dtypes: ['String'], rows: [['INV-1']] }, tested: [], image: null, stats: [],
+    }
+    const sheet = { cover: { title: 'Audit Planning Memorandum' } }
+    const drawn = words((await open(await markdownWord({ markdown, sheet, exhibit: () => exhibitWordBlocks(1, exhibit) }))).body)
+    expect(drawn).toContain('Exhibit 1')
+    expect(drawn).toContain('INV-1')
+    expect(drawn).not.toContain('analytics-from-memo')
+    expect(drawn).not.toContain('analysis: A-2')
+
+    const cited = words((await open(await markdownWord({ markdown, sheet }))).body)
+    expect(cited).toContain('See analysis A-2 — 3 invoices above their order.')
+  })
 })

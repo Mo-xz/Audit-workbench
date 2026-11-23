@@ -720,6 +720,8 @@ PRESETS.register(
                 ),
                 ContextSource(
                     id="current_apm",
+                    # 48k: the memorandum carries a digest of the analysis memo
+                    # in its data-analytics section (``apm_analytics.for_model``).
                     source_type="artifacts",
                     required=False,
                     selector=ContextSelector(selector_id="artifacts.current"),
@@ -727,7 +729,7 @@ PRESETS.register(
                     # The whole memorandum, for the same reason the APM turn
                     # gets it whole: a reader who cannot see the end of a
                     # document will say the end is missing.
-                    budget=ContextBudget(max_items=1, max_characters=32_000),
+                    budget=ContextBudget(max_items=1, max_characters=48_000),
                 ),
                 ContextSource(
                     id="current_rcm",
@@ -754,7 +756,7 @@ PRESETS.register(
                     budget=ContextBudget(max_items=1, max_characters=2_000),
                 ),
             ),
-            budget=ContextBudget(max_items=210, max_characters=120_000),
+            budget=ContextBudget(max_items=210, max_characters=136_000),
             privacy=ContextPrivacy(
                 allow_planning_context=True,
                 allow_document_text=True,
@@ -786,6 +788,8 @@ PRESETS.register(
                 ),
                 ContextSource(
                     id="current_apm",
+                    # 48k: the memorandum carries a digest of the analysis memo
+                    # in its data-analytics section (``apm_analytics.for_model``).
                     source_type="artifacts",
                     required=False,
                     selector=ContextSelector(selector_id="artifacts.current"),
@@ -794,7 +798,7 @@ PRESETS.register(
                     # revising rewrites it. Text truncates rather than drops,
                     # so the loss is the memo's tail and nothing says so; a
                     # 28.6k-character memo lost 8.6k of itself at 20_000.
-                    budget=ContextBudget(max_items=1, max_characters=32_000),
+                    budget=ContextBudget(max_items=1, max_characters=48_000),
                 ),
                 ContextSource(
                     id="analysis_summary",
@@ -891,7 +895,7 @@ PRESETS.register(
             # 47 = the declared per-source ceilings summed; the population
             # summary is one added item and the auditor's instruction another,
             # and neither must cost the last methodology excerpt its slot.
-            budget=ContextBudget(max_items=47, max_characters=96_000),
+            budget=ContextBudget(max_items=47, max_characters=112_000),
             privacy=ContextPrivacy(
                 allow_auditor_instruction=True,
                 allow_planning_context=True,

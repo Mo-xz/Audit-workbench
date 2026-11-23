@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 
 import MarkdownView from '../MarkdownView.vue'
+import ExhibitMarkdown from '../analysis/ExhibitMarkdown.vue'
+import type { SavedAnalysis } from '../../types'
 import UiDocumentHeading from './UiDocumentHeading.vue'
 import UiDocumentSheet from './UiDocumentSheet.vue'
 import type { DocumentCover, SheetLine } from './documentSheet'
@@ -40,9 +42,15 @@ const props = withDefaults(defineProps<{
   endMark?: string
   /** Document-mode rendering options: the cycle's steps, the citations. */
   document?: DocumentOptions
-}>(), { eyebrow: '', cover: null, runningHead: null, footer: null, endMark: '', document: () => ({}) })
+  /**
+   * Where the document carries analysis exhibits (`embed` blocks — the
+   * memorandum's analytics section is the memo's own), what they are drawn
+   * from. Without it an exhibit is shown as the citation it stands for.
+   */
+  exhibits?: { workspaceId: string; analyses: SavedAnalysis[] } | null
+}>(), { eyebrow: '', cover: null, runningHead: null, footer: null, endMark: '', document: () => ({}), exhibits: null })
 
-const emit = defineEmits<{ 'open-finding': [findingId: string] }>()
+const emit = defineEmits<{ 'open-finding': [findingId: string]; 'open-analysis': [analysisId: string] }>()
 
 /**
  * The entries the outline beside this document should show. Derived here and
@@ -61,6 +69,20 @@ const titleBlock = computed(() => layout.value.title)
 const titleEntry = computed(() => titleBlock.value?.entry ?? null)
 const hasParts = computed(() => layout.value.hasParts)
 const units = computed(() => layout.value.units)
+
+const EMBED = /^```embed[ \t]*$/gm
+const embedCount = (body: string) => (body.match(EMBED) ?? []).length
+const hasEmbed = (body: string) => !!props.exhibits && embedCount(body) > 0
+
+/** The first exhibit number in each body, counted in reading order. */
+const firstExhibit = computed(() => {
+  let next = 1 + embedCount(titleBlock.value?.body ?? '')
+  return units.value.map(unit => {
+    const first = next
+    if (unit.kind !== 'finding') next += embedCount(unit.body)
+    return first
+  })
+})
 
 const sheetCover = computed<DocumentCover | null>(() => {
   const title = titleEntry.value?.text ?? props.cover?.title
@@ -86,16 +108,38 @@ function sentence(value: string): string {
       <slot v-if="titleEntry" name="after-heading" :entry="titleEntry" />
     </template>
 
-    <MarkdownView v-if="titleBlock?.body" :markdown="titleBlock.body" :document="document" />
+    <template v-if="titleBlock?.body">
+      <ExhibitMarkdown
+        v-if="hasEmbed(titleBlock.body)"
+        :markdown="titleBlock.body" :document="document" :firstNumber="1"
+        :workspaceId="exhibits!.workspaceId" :analyses="exhibits!.analyses"
+        @open="emit('open-analysis', $event)"
+      />
+      <MarkdownView v-else :markdown="titleBlock.body" :document="document" />
+    </template>
 
     <template v-for="(unit, index) in units" :key="unit.kind === 'lead' ? `lead-${index}` : unit.entry.id">
-      <MarkdownView v-if="unit.kind === 'lead'" :markdown="unit.body" :document="document" />
+      <template v-if="unit.kind === 'lead'">
+        <ExhibitMarkdown
+          v-if="hasEmbed(unit.body)"
+          :markdown="unit.body" :document="document" :firstNumber="firstExhibit[index]"
+          :workspaceId="exhibits!.workspaceId" :analyses="exhibits!.analyses"
+          @open="emit('open-analysis', $event)"
+        />
+        <MarkdownView v-else :markdown="unit.body" :document="document" />
+      </template>
 
       <template v-else-if="unit.kind === 'section'">
         <UiDocumentHeading :entry="unit.entry" :parts="hasParts" />
         <!-- What the page wants to say about this heading, said under it. -->
         <slot name="after-heading" :entry="unit.entry" />
-        <MarkdownView v-if="unit.body" :markdown="unit.body" :document="document" />
+        <ExhibitMarkdown
+          v-if="unit.body && hasEmbed(unit.body)"
+          :markdown="unit.body" :document="document" :firstNumber="firstExhibit[index]"
+          :workspaceId="exhibits!.workspaceId" :analyses="exhibits!.analyses"
+          @open="emit('open-analysis', $event)"
+        />
+        <MarkdownView v-else-if="unit.body" :markdown="unit.body" :document="document" />
         <slot name="after-body" :entry="unit.entry" :body="unit.body" />
       </template>
 

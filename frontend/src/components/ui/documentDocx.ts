@@ -9,7 +9,9 @@ import type { List, PhrasingContent, RootContent, Strong, Table as MdTable } fro
 import { documentLayout } from './documentUnits'
 import type { DocumentUnit } from './documentUnits'
 import type { DocumentCover, SheetLine } from './documentSheet'
-import { parseMarkdown } from './markdownHtml'
+import { isComment, parseMarkdown } from './markdownHtml'
+import { parseEmbed } from '../analysis/memoExhibits'
+import type { Embed } from '../analysis/memoExhibits'
 import {
   citationTokens, compileCitations, exhibitRanges, isNil, isNumber, isPreliminaryQuote, isSeverity,
   listForm, paragraphForm, plainText, tableShape, topBlocks,
@@ -125,6 +127,12 @@ export interface WordContext {
   width: number
   /** Restarts each ordered list's numbering. */
   ordered: { next: number }
+  /**
+   * Draws an analysis exhibit where the document carries an `embed` block —
+   * the memorandum's analytics section is the memo's own text, exhibits and
+   * all. Without one the block becomes the citation it stands for.
+   */
+  exhibit?: (embed: Embed) => Block[]
 }
 
 export function wordContext(options: DocumentOptions = {}): WordContext {
@@ -190,7 +198,7 @@ export function inline(nodes: PhrasingContent[], style: RunStyle, ctx: WordConte
         else out.push(...inline(node.children, style, ctx))
         break
       }
-      case 'html': if (!EMPTY_LINE.has(node.value.trim())) out.push(run(node.value, style)); break
+      case 'html': if (!EMPTY_LINE.has(node.value.trim()) && !isComment(node.value)) out.push(run(node.value, style)); break
       case 'image': out.push(run(node.alt ?? '', style)); break
       case 'footnoteReference': out.push(run(node.label ?? node.identifier, { ...style, superScript: true })); break
       default: out.push(run(plainText(node), style))
@@ -441,6 +449,12 @@ function nodeBlocks(node: RootContent, ctx: WordContext): Block[] {
         : nodeBlocks(child, ctx))
     }
     case 'code': {
+      if (node.lang === 'embed') {
+        const embed = parseEmbed(node.value)
+        if (!embed) return []
+        if (ctx.exhibit) return ctx.exhibit(embed)
+        return [para([run(`See analysis ${embed.analysis}${embed.caption ? ` — ${embed.caption}` : ''}.`, { ...ctx.base, italics: true, color: INK_SOFT })])]
+      }
       const lines = node.value.split('\n')
       return lines.map((text, index) => para([run(text || ' ', { font: MONO, size: 17, color: INK })], {
         shading: shade(RAISED), spacing: { after: index === lines.length - 1 ? 160 : 0, line: 240 },
@@ -451,7 +465,7 @@ function nodeBlocks(node: RootContent, ctx: WordContext): Block[] {
     case 'table':
       return docTable(node, ctx)
     case 'html':
-      return EMPTY_LINE.has(node.value.trim()) ? [] : [para([run(node.value, ctx.base)])]
+      return EMPTY_LINE.has(node.value.trim()) || isComment(node.value) ? [] : [para([run(node.value, ctx.base)])]
     case 'definition':
       return []
     default:
@@ -731,10 +745,11 @@ export async function markdownWord(input: {
   sheet: WordSheet
   options?: DocumentOptions
   inserts?: WordInserts
+  exhibit?: (embed: Embed) => Block[]
 }): Promise<Blob> {
   const entries = markdownOutline(input.markdown)
   const layout = documentLayout(input.markdown, entries)
-  const ctx = wordContext(input.options)
+  const ctx = { ...wordContext(input.options), exhibit: input.exhibit }
   const title = layout.title?.entry?.text ?? input.sheet.cover?.title
   const children: Block[] = [...coverBlocks(input.sheet.cover || title ? { ...input.sheet.cover, title } : null)]
   if (layout.title?.body) children.push(...markdownBlocksWord(layout.title.body, ctx))

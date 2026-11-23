@@ -113,6 +113,11 @@ function exhibitHead(number: string, title: string, exhibit: Pick<ExhibitWord, '
   })
 }
 
+/** One exhibit standing on its own — the planning memorandum's, outside the memo's sets. */
+export function exhibitWordBlocks(number: number, exhibit: ExhibitWord): Block[] {
+  return [exhibitHead(`Exhibit ${number}`, exhibit.title, exhibit, RAISED), ...exhibitBody(number, exhibit)]
+}
+
 function exhibitBody(number: number, exhibit: ExhibitWord): Block[] {
   const out: Block[] = []
   let hidden = 0

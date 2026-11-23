@@ -67,7 +67,26 @@ const EMPTY_LINE_HTML = new Set(['<br />', '<br>', '<br >', '<br/>'])
  * than showing it plainly.
  */
 function rawHtml(value: string): string {
-  return EMPTY_LINE_HTML.has(value.trim()) ? '' : escapeHtml(value)
+  return EMPTY_LINE_HTML.has(value.trim()) || isComment(value) ? '' : escapeHtml(value)
+}
+
+/** An analysis exhibit where nothing here can draw one: the citation it stands for. */
+export function embedCitation(body: string): string {
+  const field = (name: string) => new RegExp(`^\\s*${name}\\s*:\\s*(.+)$`, 'm').exec(body)?.[1]?.trim() ?? ''
+  const analysis = field('analysis')
+  if (!analysis) return ''
+  const caption = field('caption')
+  return `<p class="embed-citation"><em>See analysis ${escapeHtml(analysis)}${caption ? ` — ${escapeHtml(caption)}` : ''}.</em></p>`
+}
+
+/**
+ * An HTML comment is a note in the source, never content: a template's
+ * guidance, or the markers the memorandum's analytics section is fenced with.
+ * Hiding it deletes nothing a reader was meant to see, which is the line the
+ * rule above draws; shown, it reads as a stray line of markup mid-document.
+ */
+export function isComment(value: string): boolean {
+  return /^<!--[\s\S]*-->$/.test(value.trim())
 }
 
 /** A list is loose if it or any of its items is spread; tight items shed their paragraph wrapper. */
@@ -234,6 +253,7 @@ function render(node: RootContent, tight = false): string {
     case 'inlineCode':
       return `<code>${escapeHtml(node.value)}</code>`
     case 'code':
+      if (node.lang === 'embed') return embedCitation(node.value)
       return `<pre><code>${escapeHtml(node.value)}</code></pre>`
     case 'blockquote':
       return (documentOptions && documentBlockquote(node)) || `<blockquote>${children(node)}</blockquote>`

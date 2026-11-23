@@ -9,9 +9,13 @@ is real text, so a run that reads text can reach everything on the page.
 Every value matches the Excel population except one, deliberately: the GRN
 records 17 laptops received against 20 ordered, invoiced and paid (D-05).
 
-It also rebuilds pack 01's purchase order, field for field, without the
-"Mock audit evidence" footer its original carried: no document in the pack may
-tell a reader that it is not real evidence.
+It also rebuilds three of pack 01's documents, field for field and signature
+for signature. The purchase order loses the "Mock audit evidence" footer its
+original carried: no document in the pack may tell a reader that it is not real
+evidence. The goods receipt note and payment voucher were scans whose OCR text
+layer dropped the handwritten signatures and the RECEIVED stamp and garbled the
+rest, which led runs to report the vendor's representative as the receiver.
+Rebuilt, every word a reader sees is in the text.
 
 Each document is written as HTML and printed to PDF by headless Microsoft Edge,
 so nothing beyond the Python standard library and Edge is needed.
@@ -104,8 +108,8 @@ GRN = PAPER + """
 .head .t2 { font-size: 12pt; font-weight: bold; margin-top: 1mm; }
 .head .right { position: absolute; right: 13mm; top: 6mm; font-size: 8.5pt; color: #555; }
 table { margin: 8mm 11mm 0; width: calc(100% - 22mm); border-collapse: collapse; font-size: 10.5pt; }
-td { border: 1px solid #888; padding: 2.6mm 3mm; }
-td.k { width: 50mm; background: #dde6ee; font-weight: bold; color: #1c3a5a; }
+td { border: 1px solid #888; padding: 2.6mm 3mm 2.6mm 5mm; }
+td.k { width: 50mm; padding-left: 3mm; background: #dde6ee; font-weight: bold; color: #1c3a5a; }
 .auth { position: absolute; top: 205mm; left: 11mm; right: 11mm; }
 .auth .h { font-weight: bold; color: #1c4a72; font-size: 11pt; margin-bottom: 9mm; }
 .cols { display: flex; gap: 6mm; }
@@ -224,27 +228,49 @@ def pack01_purchase_order() -> str:
     )
 
 
-def goods_receipt() -> str:
+def _goods_receipt(
+    *, number: str, order: str, vendor: str, date: str, item: str, quantity: int,
+    comments: str, received_by: str, vendor_signatory: str,
+) -> str:
     body = f"""
 <div class="head"><div class="t1">GLOBAL BANK</div><div class="t2">GOODS RECEIPT NOTE</div>
 <div class="right">CONTROLLED FORM</div></div>
 <table>{rows([
-    ("GRN / receipt number", "GRN2024105"),
-    ("Purchase order", "PO2024105"),
-    ("Vendor", f"{VENDOR} ({VENDOR_ID})"),
-    ("Receipt date", "26-Oct-2024"),
-    ("Description", ITEM),
-    ("Quantity received", str(GRN_QUANTITY)),
+    ("GRN / receipt number", number),
+    ("Purchase order", order),
+    ("Vendor", vendor),
+    ("Receipt date", date),
+    ("Description", item),
+    ("Quantity received", str(quantity)),
     ("Receipt status", "Received"),
-    ("Inspection comments", "Laptops received and inspected."),
+    ("Inspection comments", comments),
 ])}</table>
 <div class="auth"><div class="h">AUTHORIZATION / ACKNOWLEDGEMENT</div>
 <div class="cols">
-<div class="col"><div class="line"><span class="sig">Hina Raza (1056)</span></div><div class="cap">Received and inspected by</div></div>
-<div class="col"><div class="line"><span class="sig">{VENDOR_CONTACT}</span></div><div class="cap">Vendor representative</div></div>
+<div class="col"><div class="line"><span class="sig">{received_by}</span></div><div class="cap">Received and inspected by</div></div>
+<div class="col"><div class="line"><span class="sig">{vendor_signatory}</span></div><div class="cap">Vendor representative</div></div>
 </div></div>
 <div class="stamp">RECEIVED</div>"""
-    return page("GRN2024105 Goods Receipt Note", GRN, body)
+    return page(f"{number} Goods Receipt Note", GRN, body)
+
+
+def goods_receipt() -> str:
+    return _goods_receipt(
+        number="GRN2024105", order="PO2024105", vendor=f"{VENDOR} ({VENDOR_ID})",
+        date="26-Oct-2024", item=ITEM, quantity=GRN_QUANTITY,
+        comments="Laptops received and inspected.",
+        received_by="Hina Raza (1056)", vendor_signatory=VENDOR_CONTACT,
+    )
+
+
+def pack01_goods_receipt() -> str:
+    """Pack 01's GRN2024004, as the scan shows it, with every word real text."""
+    return _goods_receipt(
+        number="GRN2024004", order="PO2024004", vendor="OfficeSupply Co. (V1022)",
+        date="29-Apr-2024", item="New Hire Onboarding Kits", quantity=25,
+        comments="All kits delivered.",
+        received_by="Ethan Smith (1041)", vendor_signatory="Ahmed Khan",
+    )
 
 
 def invoice() -> str:
@@ -268,27 +294,47 @@ def invoice() -> str:
     return page("VINV105-2024 Invoice", COMMERCIAL, body)
 
 
-def payment_voucher() -> str:
+def _payment_voucher(
+    *, reference: str, vendor: str, vendor_invoice: str, order: str, amount: int,
+    date: str, signatories: tuple[str, str],
+) -> str:
     body = f"""
 <div class="frame">
-<div class="band"><div class="t1">PAYMENT VOUCHER</div><div class="ref">Voucher reference: INV2024105</div></div>
+<div class="band"><div class="t1">PAYMENT VOUCHER</div><div class="ref">Voucher reference: {reference}</div></div>
 <table>{rows([
-    ("Vendor", f"{VENDOR} ({VENDOR_ID})"),
-    ("Vendor invoice", "VINV105-2024"),
-    ("Purchase reference", "PO2024105"),
-    ("Payment amount (PKR)", f"PKR {pkr(TOTAL)}"),
+    ("Vendor", vendor),
+    ("Vendor invoice", vendor_invoice),
+    ("Purchase reference", order),
+    ("Payment amount (PKR)", f"PKR {pkr(amount)}"),
     ("Payment status", "Paid"),
-    ("Payment date", "20 Nov 2024"),
+    ("Payment date", date),
 ])}</table>
 <div class="auth"><div class="h">Authorisations</div>
 <div class="cols">
-<div><div class="line"><span class="sig">Omar Farooq</span></div><div class="cap">Signed</div></div>
-<div><div class="line"><span class="sig">Daniel Reed</span></div><div class="cap">Signed</div></div>
+<div><div class="line"><span class="sig">{signatories[0]}</span></div><div class="cap">Signed</div></div>
+<div><div class="line"><span class="sig">{signatories[1]}</span></div><div class="cap">Signed</div></div>
 </div></div>
 <div class="stamp">PAID</div>
 <div class="foot">Amounts are in full PKR</div>
 </div>"""
-    return page("INV2024105 Payment Voucher", VOUCHER, body)
+    return page(f"{reference} Payment Voucher", VOUCHER, body)
+
+
+def payment_voucher() -> str:
+    return _payment_voucher(
+        reference="INV2024105", vendor=f"{VENDOR} ({VENDOR_ID})", vendor_invoice="VINV105-2024",
+        order="PO2024105", amount=TOTAL, date="20 Nov 2024",
+        signatories=("Omar Farooq", "Daniel Reed"),
+    )
+
+
+def pack01_payment_voucher() -> str:
+    """Pack 01's voucher for INV2024004, as the scan shows it, with every word real text."""
+    return _payment_voucher(
+        reference="INV2024004", vendor="OfficeSupply Co. (V1022)", vendor_invoice="VINV001-202404",
+        order="PO2024004", amount=2_000_000, date="01 May 2024",
+        signatories=("Olivia Smith", "Max Baker"),
+    )
 
 
 PACK01 = ROOT / "documents" / "samples" / "01_REQ2024009_PO2024004_INV2024004"
@@ -299,8 +345,12 @@ DOCUMENTS = {
     OUT / "GRN2024105_Signed_Receipt.pdf": goods_receipt,
     OUT / "VINV105-2024_Invoice.pdf": invoice,
     OUT / "INV2024105_Signed_Payment_Voucher.pdf": payment_voucher,
-    # Rebuilt only to drop a footer that told a reader the evidence was a mock.
+    # Pack 01, rebuilt. The PO drops a footer that told a reader the evidence
+    # was a mock. The GRN and voucher replace scans whose OCR text layer lost
+    # the handwritten signatures and the RECEIVED stamp and garbled the rest.
     PACK01 / "PO2024004_Purchase_Order.pdf": pack01_purchase_order,
+    PACK01 / "GRN2024004_Signed_Receipt.pdf": pack01_goods_receipt,
+    PACK01 / "INV2024004_Signed_Payment_Voucher.pdf": pack01_payment_voucher,
 }
 
 

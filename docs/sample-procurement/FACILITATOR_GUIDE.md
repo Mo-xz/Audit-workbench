@@ -27,11 +27,10 @@ procure-to-pay cycle.
 - Masters: 20 staff, 12 vendors, and a 4-row financial approval matrix.
 - Documents: the SOP extract, the approval matrix, the planning minutes, and two
   sample packs, each holding the requisition, PO, goods receipt note, vendor
-  invoice and payment voucher for one transaction as five PDFs:
-  - pack 01, REQ2024009 / PO2024004 / INV2024004, whose GRN and voucher are
-    scans with handwritten signatures;
-  - pack 02, REQ2024105 / PO2024105 / INV2024105, whose five documents are all
-    native PDFs, signatures included.
+  invoice and payment voucher for one transaction as five PDFs: pack 01,
+  REQ2024009 / PO2024004 / INV2024004, and pack 02, REQ2024105 / PO2024105 /
+  INV2024105. Every document is a text PDF, signatures and stamps included,
+  so everything a reader sees on the page is in its extracted text.
 - Currency: PKR throughout. The source documents say so, and no figure in this
   pack is in any other currency.
 
@@ -101,12 +100,12 @@ REQ2024105 → PO2024105 → GRN2024105 → INV2024105.
 | D-04 | POs record buyer "B001", which matches no staff record; the buyer cannot be identified | §3 | Low | PO2024004_Purchase_Order.pdf, PO2024105_Purchase_Order.pdf |
 | D-05 | Goods receipt records **17** laptops received against **20** ordered; the invoice billed and the voucher paid for all 20, so PKR 435,000 was paid for 3 laptops never received | §4, §5 | High | GRN2024105_Signed_Receipt.pdf, against the PO, invoice and voucher |
 
-- **The signatures are handwriting on scanned pages.** The GRN and the payment voucher are scans that Adobe Acrobat's Paper Capture turned into searchable PDFs. Their OCR text layer drops "Ethan Smith (1041)" entirely, renders "Ahmed Khan" as `A~ K./tVl.lll t`, and runs the two captions together on one line. Read as text, the GRN appears to be signed only by the vendor's representative and the voucher reads "Signed Signed". Both are wrong. A run that reads these pages as text cannot reach D-01 or D-02; it needs to look at the page image.
+- **The signatures are part of the text.** Each signature line carries the signer's name above its caption, and the RECEIVED and PAID stamps are text too, so D-01 and D-02 can be reached by reading. Earlier editions of pack 01's GRN and voucher were scans whose OCR text layer dropped "Ethan Smith (1041)" entirely, garbled "Ahmed Khan" and the PO number, and left the voucher reading "Signed Signed"; runs read from that layer reported the vendor's representative as the receiver. A run scored on those editions could not reach D-01 or D-02, and should be re-run before it is scored on them.
 - **D-01:** Ahmed Khan, the vendor's contact on the PO, signs only to acknowledge delivery, which is normal. The receipt itself was certified by the person who raised the requisition, a Requisition & PO Associate on the ordering side of Procurement. SOP §4 gives inspection and receipt to the requisitioning department and §3 gives ordering to Procurement, so ordering and receiving were not segregated. The requisition also names Finance as the requesting department (D-03), so who should have received the goods is itself unclear.
 - **D-02:** The invoice table records INV2024004 as verified by 1010 and approved by 1003, Daniel Reed, the Financial Controller. The voucher that released PKR 2,000,000 carries Olivia Smith (the verifier) and Max Baker, the Sourcing Manager who gave procurement approval on the requisition. Max Baker has no limit in the approval matrix, and the recorded approver's signature is absent. When either signature was given cannot be established.
 - **D-03** is the one requisition in the file whose department contradicts the requester's other records. The requisition table carries the same "Finance" value.
 - **D-04:** The tables have no buyer field at all, so this can only be seen on the documents. Both POs name the same code, so it is one matter.
-- **D-05** is the one exception in pack 02, and the one document exception a run reading text alone can reach. The PO table records the GRN's number, date and status ("Received") but no received quantity, so nothing in `data/` shows the shortfall. Only the GRN states 17. The PO and the requisition say 20; the invoice bills, and the voucher pays, PKR 2,900,000, which is 20 × 145,000. SOP §5 requires the invoice to be matched to the GRN before approval, and a match would have found 3 laptops (PKR 435,000) billed but not delivered. The inspection comment, "Laptops received and inspected.", does not mention the short delivery.
+- **D-05** is the one exception in pack 02. The PO table records the GRN's number, date and status ("Received") but no received quantity, so nothing in `data/` shows the shortfall. Only the GRN states 17. The PO and the requisition say 20; the invoice bills, and the voucher pays, PKR 2,900,000, which is 20 × 145,000. SOP §5 requires the invoice to be matched to the GRN before approval, and a match would have found 3 laptops (PKR 435,000) billed but not delivered. The inspection comment, "Laptops received and inspected.", does not mention the short delivery.
 
 ### Class 3 - judgement items
 

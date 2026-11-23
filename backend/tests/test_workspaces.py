@@ -315,3 +315,43 @@ def test_persistence_roundtrip(workspace_with_data):
     reloaded = workspaces.load_workspace(ws.id)
     assert reloaded.table_names() == ["transactions", "customers", "enriched"]
     assert reloaded.get_frame("enriched").height == 6
+
+
+def test_delete_closes_other_threads_telemetry_and_frees_the_name():
+    """A request thread's telemetry handle must not keep the folder alive.
+
+    On Windows an open ``telemetry.db`` made ``rmtree`` fail silently, leaving
+    the folder behind so the same name could never be created again.
+    """
+    import threading
+
+    from app import telemetry_db
+
+    ws = workspaces.create_workspace("Procurement Sol")
+    root = ws.root
+
+    def touch():
+        telemetry_db.connect(root).execute("SELECT 1").fetchone()
+
+    worker = threading.Thread(target=touch)
+    worker.start()
+    worker.join()
+    touch()
+
+    workspaces.delete_workspace(ws.uid)
+    assert not root.exists()
+
+    again = workspaces.create_workspace("Procurement Sol")
+    assert again.root == root
+    telemetry_db.connect(again.root).execute("SELECT 1").fetchone()
+
+
+def test_create_clears_leftover_folder_without_manifest():
+    ws = workspaces.create_workspace("Leftover")
+    root = ws.root
+    workspaces.delete_workspace(ws.uid)
+    root.mkdir(parents=True)
+    (root / "telemetry.db").write_bytes(b"")
+
+    again = workspaces.create_workspace("Leftover")
+    assert (again.root / "workspace.json").exists()

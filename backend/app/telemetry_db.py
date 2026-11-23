@@ -30,6 +30,13 @@ DB_FILENAME = "telemetry.db"
 
 _local = threading.local()
 _open_guard = threading.Lock()
+# Every live connection, by database path, across all threads.  The per-thread
+# cache below makes one connection per (thread, workspace); deleting a workspace
+# has to reach the ones other threads opened, because on Windows an open handle
+# on ``telemetry.db`` makes the folder undeletable.
+_registry_guard = threading.Lock()
+_open_connections: dict[str, set[sqlite3.Connection]] = {}
+_epochs: dict[str, int] = {}
 _migration_guard = threading.Lock()
 _import_guard = threading.Lock()
 
@@ -230,7 +237,9 @@ def connect(root: Path) -> sqlite3.Connection:
     if cache is None:
         cache = _local.connections = {}
     key = str(path)
-    connection = cache.get(key)
+    cached = cache.get(key)
+    # A cached connection from before ``close_workspace`` is closed; reopen.
+    connection = cached[0] if cached and cached[1] == _epochs.get(key, 0) else None
     if connection is None:
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(key, check_same_thread=False)
@@ -240,9 +249,29 @@ def connect(root: Path) -> sqlite3.Connection:
         with _open_guard:
             _configure(connection)
             migrate(connection)
-        cache[key] = connection
+        with _registry_guard:
+            _open_connections.setdefault(key, set()).add(connection)
+            cache[key] = (connection, _epochs.get(key, 0))
         import_legacy(root, connection)
     return connection
+
+
+def close_workspace(root: Path) -> None:
+    """Close every thread's connection to one workspace's telemetry database.
+
+    Called before the workspace folder is deleted.  Other threads' cached
+    entries are invalidated by the epoch bump and reopen on next use, so a
+    workspace later created at the same path does not inherit a dead handle.
+    """
+    key = str(database_path(root))
+    with _registry_guard:
+        _epochs[key] = _epochs.get(key, 0) + 1
+        connections = _open_connections.pop(key, set())
+    for connection in connections:
+        try:
+            connection.close()
+        except sqlite3.Error:
+            pass
 
 
 def close_all() -> None:
@@ -250,11 +279,14 @@ def close_all() -> None:
     cache = getattr(_local, "connections", None)
     if not cache:
         return
-    for connection in cache.values():
+    for connection, _epoch in cache.values():
         try:
             connection.close()
         except sqlite3.Error:
             pass
+        with _registry_guard:
+            for held in _open_connections.values():
+                held.discard(connection)
     cache.clear()
 
 

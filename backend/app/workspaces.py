@@ -2725,7 +2725,14 @@ def create_workspace(name: str, description: str = "", actor=None) -> Workspace:
     user_workspaces_dir(principal.user_id).mkdir(parents=True, exist_ok=True)
     root = workspace_root(principal.user_id, dir_name)
     if root.exists():
-        raise WorkspaceError(f"A workspace named '{dir_name}' already exists.")
+        if (root / "workspace.json").exists():
+            raise WorkspaceError(f"A workspace named '{dir_name}' already exists.")
+        # No manifest means no workspace: the remains of an earlier delete that
+        # could not finish.  Clear them rather than blocking the name forever.
+        from . import telemetry_db
+
+        telemetry_db.close_workspace(root)
+        _remove_tree(root)
     uid = new_workspace_uid()
     (root / "Data").mkdir(parents=True)
     (root / "workspace.json").write_text(
@@ -2754,10 +2761,39 @@ def create_workspace(name: str, description: str = "", actor=None) -> Workspace:
 def delete_workspace(workspace_id: str, actor=None) -> None:
     from .registry import unregister
 
+    from . import telemetry_db
+
     ws = open_workspace(_actor(actor), workspace_id)
     for entry in ws.tables:
         path = ws.data_dir / entry["file"]
         if path.exists():
             loader.clear_cache(path)
-    shutil.rmtree(ws.root, ignore_errors=True)
+    # Every thread keeps its own connection to telemetry.db; on Windows an open
+    # handle makes the file undeletable, which used to leave the folder behind.
+    telemetry_db.close_workspace(ws.root)
+    # The manifest goes first: a folder without one is not a workspace, so if
+    # the rest cannot be removed the workspace is still gone and the leftover
+    # is recognisable as one (see ``create_workspace``).
+    manifest = ws.root / "workspace.json"
+    try:
+        manifest.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise WorkspaceError(f"Could not delete workspace: {error}") from error
+    _remove_tree(ws.root)
     unregister(ws.uid)
+
+
+def _remove_tree(root: Path) -> None:
+    """Remove a folder, retrying briefly (antivirus and indexers hold files open
+    for a moment on Windows), and say so if it cannot be removed."""
+    for attempt in range(5):
+        shutil.rmtree(root, ignore_errors=True)
+        if not root.exists():
+            return
+        time.sleep(0.2 * (attempt + 1))
+    raise WorkspaceError(
+        f"The workspace was deleted but its folder '{root.name}' could not be "
+        "fully removed (a file is in use). Close anything using it and try again."
+    )
